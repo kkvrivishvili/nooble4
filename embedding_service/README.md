@@ -14,33 +14,65 @@ El Embedding Service es un componente fundamental de la arquitectura Nooble, res
 - **Gestión de Errores**: Manejo robusto de errores y validaciones
 - **Altamente Configurable**: Adaptación a diferentes necesidades mediante variables de entorno
 
+## Estructura de Archivos y Carpetas
+
+```plaintext
+embedding_service/
+├ __init__.py
+├ main.py
+├ requirements.txt
+├ README.md
+├ clients/
+│  ├ __init__.py
+│  └ openai_client.py
+├ config/
+│  └ settings.py
+├ handlers/
+│  ├ __init__.py
+│  └ embedding_handler.py
+├ models/
+│  ├ __init__.py
+│  └ actions.py
+└ workers/
+   ├ __init__.py
+   └ embedding_worker.py
+```
+
 ## Arquitectura y Componentes
 
-El servicio sigue una arquitectura orientada a eventos con procesamiento asíncrono:
+El servicio sigue una arquitectura orientada a eventos con procesamiento asíncrono y también expone una API REST para generación síncrona de embeddings:
 
 ```
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│             │    │             │    │             │    │             │
-│   Cliente   │───▶│  Endpoint   │───▶│   Cola de   │───▶│  Embedding  │
-│             │    │     API     │    │  Acciones   │    │   Worker    │
-│             │    │             │    │             │    │             │
-└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
-                                                              │
-                                                              ▼
-                                                       ┌─────────────┐
-                                                       │             │
-                                                       │   OpenAI    │
-                                                       │     API     │
-                                                       │             │
-                                                       └─────────────┘
-                                                              │
-                                                              ▼
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│             │    │             │    │   Cola de   │    │             │
-│   Cliente   │◀───│  Callback   │◀───│  Callbacks  │◀───│  Embedding  │
-│             │    │  Handler    │    │             │    │   Worker    │
-│             │    │             │    │             │    │             │
-└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                          Clientes                               │
+│ Agent Execution Service  │  Query Service  │  Ingestion Service │
+└─────────────────────────────────────────────────────────────────┘
+            │                      │                     │
+            ▼                      ▼                     ▼
+      ┌────────────────────────────────────────────────────────┐
+      │              Embedding Service                         │
+      └────────────────────────────────────────────────────────┘
+                          │
+                          ▼
+       ┌──────────────────────────────────────────────────────┐
+       │   Domain Action Queue (Redis)                        │
+       └──────────────────────────────────────────────────────┘
+                          │
+                          ▼
+       ┌──────────────────────────────────────────────────────┐
+       │   EmbeddingWorker                                    │
+       └──────────────────────────────────────────────────────┘ 
+                          │
+                          ▼
+       ┌──────────────────────────────────────────────────────┐
+       │   Callback Queue (Redis)                             │
+       └──────────────────────────────────────────────────────┘
+                          │
+                          ▼
+┌───────────────────────────────────────────────────────────────┐
+│                          Callbacks                          │
+│ Agent Execution Service  │  Query Service  │  Ingestion Service │
+└───────────────────────────────────────────────────────────────┘
 ```
 
 ### Componentes Principales
@@ -162,7 +194,7 @@ import requests
 
 def request_embeddings_http(texts, model=None):
     # En una implementación real, esta sería la URL de tu API REST
-    url = "http://localhost:8000/api/v1/embeddings"
+    url = "http://localhost:8003/api/v1/embeddings"
     
     payload = {
         "texts": texts,
@@ -189,7 +221,7 @@ request_embeddings_http(
 DEBUG=true
 VERSION=1.0.0
 HOST=0.0.0.0
-PORT=8000
+PORT=8003
 
 # Redis
 REDIS_HOST=localhost

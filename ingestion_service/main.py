@@ -144,7 +144,7 @@ if __name__ == "__main__":
     
     # Obtener configuración de puerto y host
     host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", "8000"))
+    port = int(os.getenv("PORT", "8002"))
     
     # Iniciar servidor
     uvicorn.run(

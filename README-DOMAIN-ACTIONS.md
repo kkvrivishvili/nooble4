@@ -71,32 +71,75 @@ class ExecutionHandler:
 
 La arquitectura se implementa siguiendo esta estructura de carpetas limpia y optimizada:
 
-```
+```plaintext
 common/
-  ├── models/
-  │    └── actions.py         # Modelo base DomainAction
-  ├── services/
-  │    └── action_processor.py # Procesador central de acciones
-  └── workers/
-       └── base_worker.py     # Worker base para procesar acciones
+├── models/
+│   └── actions.py         # Modelo base DomainAction
+├── services/
+│   └── action_processor.py # Procesador central de acciones
+└── workers/
+    └── base_worker.py     # Worker base para procesar acciones
 
 agent_execution_service/
-  ├── models/
-  │    ├── actions.py        # AgentExecutionAction y ExecutionCallbackAction
-  │    └── execution.py      # Modelos relacionados a la ejecución
-  ├── handlers/
-  │    └── handlers.py       # Handlers para Domain Actions
-  └── workers/
-      └── execution_worker.py # Worker basado en Domain Actions
+├── models/
+│   ├── actions.py        # AgentExecutionAction, ExecutionCallbackAction
+│   └── execution.py
+├── handlers/
+│   └── handlers.py
+└── workers/
+    └── execution_worker.py
 
 agent_orchestrator_service/
-  ├── models/
-  │    ├── actions.py         # Domain Actions de orquestación
-  │    └── websocket.py # Modelos para WebSockets
-  ├── handlers/
-  │    └── handlers.py        # Handlers para Domain Actions
-  └── workers/
-      └── orchestrator_worker.py # Worker basado en Domain Actions
+├── models/
+│   ├── actions.py        # Orchestration Domain Actions
+│   └── websocket.py
+├── handlers/
+│   └── handlers.py
+└── workers/
+    └── orchestrator_worker.py
+
+embedding_service/
+├── clients/
+│   └── openai_client.py
+├── config/
+│   └── settings.py
+├── handlers/
+│   └── embedding_handler.py
+├── models/
+│   └── actions.py
+└── workers/
+    └── embedding_worker.py
+
+query_service/
+├── clients/
+│   ├── groq_client.py
+│   ├── vector_store_client.py
+│   └── embedding_client.py
+├── config/
+│   └── settings.py
+├── handlers/
+│   ├── query_handler.py
+│   └── embedding_callback_handler.py
+├── models/
+│   └── actions.py
+└── workers/
+    └── query_worker.py
+
+ingestion_service/
+├── clients/
+│   └── some_client.py    # e.g. HTTP clients
+├── config/
+│   └── settings.py
+├── handlers/
+│   └── handlers.py
+├── models/
+│   └── actions.py        # Ingestion Domain Actions
+├── routes/
+│   └── api_routes.py
+├── services/
+│   └── ingestion_service.py
+└── workers/
+    └── ingestion_worker.py
 ```
 
 ## Flujo de Datos
