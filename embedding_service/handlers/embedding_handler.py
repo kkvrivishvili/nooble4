@@ -1,15 +1,17 @@
 """
 Handler para procesar Domain Actions de embeddings.
+MODIFICADO: Integración con sistema de colas por tier y nuevos servicios.
 """
 
 import logging
 import time
-from typing import Dict, Any, List, Optional
-from uuid import UUID
+from typing import Dict, Any, Optional
 
-from common.errors import ServiceError
+from common.models.execution_context import ExecutionContext
 from embedding_service.models.actions import EmbeddingGenerateAction, EmbeddingValidateAction
-from embedding_service.clients.openai_client import OpenAIClient
+from embedding_service.handlers.context_handler import EmbeddingContextHandler
+from embedding_service.services.embedding_processor import EmbeddingProcessor
+from embedding_service.services.validation_service import ValidationService
 from embedding_service.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -19,187 +21,183 @@ settings = get_settings()
 class EmbeddingHandler:
     """
     Handler para procesar acciones de embeddings.
-    
-    Procesa las siguientes acciones:
-    - embedding.generate: Genera embeddings para textos
-    - embedding.validate: Valida textos antes de procesar
+    MODIFICADO: Usar nuevos servicios y context handler.
     """
     
-    def __init__(self, openai_client: Optional[OpenAIClient] = None):
+    def __init__(self, context_handler: EmbeddingContextHandler, redis_client=None):
         """
-        Inicializa el handler.
+        Inicializa handler.
         
         Args:
-            openai_client: Cliente de OpenAI (inyectado para tests)
+            context_handler: Handler de contexto
+            redis_client: Cliente Redis (opcional)
         """
-        self.openai_client = openai_client or OpenAIClient()
+        self.context_handler = context_handler
+        self.redis = redis_client
+        
+        # Inicializar servicios
+        self.validation_service = ValidationService(redis_client)
+        self.embedding_processor = EmbeddingProcessor(self.validation_service, redis_client)
     
     async def handle_generate(self, action: EmbeddingGenerateAction) -> Dict[str, Any]:
         """
-        Maneja la acción de generación de embeddings.
+        Procesa una acción de generación de embeddings.
         
         Args:
-            action: EmbeddingGenerateAction con textos a procesar
+            action: Acción de embedding
             
         Returns:
             Dict con resultado del procesamiento
         """
         start_time = time.time()
+        task_id = action.task_id
         
         try:
-            # Validar request
-            await self._validate_texts(
-                texts=action.texts,
-                model=action.model
+            logger.info(f"Procesando generación de embeddings para tarea {task_id}")
+            
+            # 1. Resolver contexto de embedding
+            context = await self.context_handler.resolve_embedding_context(
+                action.execution_context
             )
             
-            # Generar embeddings
-            result = await self.openai_client.generate_embeddings(
+            # 2. Validar permisos de embedding
+            await self.context_handler.validate_embedding_permissions(
+                context=context,
                 texts=action.texts,
-                model=action.model,
-                tenant_id=action.tenant_id,
-                collection_id=str(action.collection_id) if action.collection_id else None,
-                chunk_ids=action.chunk_ids,
-                metadata=action.metadata
+                model=action.model or settings.default_embedding_model
             )
             
-            # Calcular tiempo de procesamiento
-            processing_time = time.time() - start_time
+            # 3. Procesar embedding
+            embedding_result = await self.embedding_processor.process_embedding_request(
+                action, context
+            )
             
-            # Preparar resultado
+            # 4. Tracking de métricas
+            await self._track_embedding_metrics(
+                context, action, embedding_result, time.time() - start_time
+            )
+            
+            logger.info(f"Embedding completado: task_id={task_id}, tiempo={time.time() - start_time:.2f}s")
+            
             return {
                 "success": True,
-                "embeddings": result["embeddings"],
-                "model": result["model"],
-                "dimensions": result["dimensions"],
-                "total_tokens": result["usage"].get("total_tokens", 0),
-                "processing_time": processing_time,
+                "result": embedding_result,
+                "execution_time": time.time() - start_time
             }
             
         except Exception as e:
-            logger.error(f"Error en handle_generate: {str(e)}")
-            processing_time = time.time() - start_time
-            
-            # Estructurar error para devolución controlada
-            error_msg = str(e)
-            error_type = "ValidationError" if isinstance(e, ServiceError) else "ProcessingError"
-            
+            logger.error(f"Error en embedding {task_id}: {str(e)}")
             return {
                 "success": False,
+                "execution_time": time.time() - start_time,
                 "error": {
-                    "message": error_msg,
-                    "type": error_type
-                },
-                "processing_time": processing_time
+                    "type": type(e).__name__,
+                    "message": str(e)
+                }
             }
     
     async def handle_validate(self, action: EmbeddingValidateAction) -> Dict[str, Any]:
         """
-        Maneja la acción de validación de textos.
+        Procesa una acción de validación de textos.
         
         Args:
-            action: EmbeddingValidateAction con textos a validar
+            action: Acción de validación
             
         Returns:
-            Dict con resultado de la validación
+            Dict con resultado del procesamiento
         """
+        start_time = time.time()
+        task_id = action.task_id
+        
         try:
-            # Realizar validaciones
-            model = action.model or settings.default_embedding_model
-            validation_results = await self._validate_texts(
+            logger.info(f"Procesando validación para tarea {task_id}")
+            
+            # 1. Resolver contexto de validación
+            context = await self.context_handler.resolve_embedding_context(
+                action.execution_context
+            )
+            
+            # 2. Realizar validaciones
+            validation_result = await self.validation_service.validate_texts(
                 texts=action.texts,
-                model=model,
+                model=action.model or settings.default_embedding_model,
+                context=context,
                 raise_error=False
             )
             
+            processing_time = time.time() - start_time
+            logger.info(f"Validación completada en {processing_time:.2f}s")
+            
             return {
                 "success": True,
-                "validation_results": validation_results,
-                "model": model,
+                "result": validation_result,
+                "execution_time": processing_time
             }
             
         except Exception as e:
-            logger.error(f"Error en handle_validate: {str(e)}")
-            
+            logger.error(f"Error en validación {task_id}: {str(e)}")
             return {
                 "success": False,
+                "execution_time": time.time() - start_time,
                 "error": {
-                    "message": str(e),
-                    "type": "ValidationError"
+                    "type": type(e).__name__,
+                    "message": str(e)
                 }
             }
     
-    async def _validate_texts(
-        self, 
-        texts: List[str],
-        model: Optional[str] = None,
-        raise_error: bool = True
-    ) -> Dict[str, Any]:
-        """
-        Valida los textos para generación de embeddings.
+    async def _track_embedding_metrics(
+        self,
+        context: ExecutionContext,
+        action: EmbeddingGenerateAction,
+        result: Dict[str, Any],
+        processing_time: float
+    ):
+        """Registra métricas de embedding."""
+        if not self.redis or not settings.enable_embedding_tracking:
+            return
         
-        Args:
-            texts: Lista de textos
-            model: Modelo de embedding
-            raise_error: Si es True, lanza excepciones; si es False, retorna problemas
+        try:
+            from datetime import datetime
+            today = datetime.now().date().isoformat()
             
-        Returns:
-            Dict con resultados de la validación
-        Raises:
-            ServiceError: Si hay problemas de validación
-        """
-        model = model or settings.default_embedding_model
-        validation_issues = []
-        
-        # Validar lista de textos no vacía
-        if not texts:
-            if raise_error:
-                raise ServiceError("No se proporcionaron textos")
-            else:
-                validation_issues.append({
-                    "type": "empty_list",
-                    "message": "No se proporcionaron textos"
-                })
-                return {"valid": False, "issues": validation_issues}
-        
-        # Validar tamaño de batch
-        if len(texts) > settings.max_batch_size:
-            if raise_error:
-                raise ServiceError(
-                    f"Batch excede el límite de {settings.max_batch_size} textos"
-                )
-            else:
-                validation_issues.append({
-                    "type": "batch_too_large",
-                    "message": f"Batch excede el límite de {settings.max_batch_size} textos",
-                    "limit": settings.max_batch_size,
-                    "actual": len(texts)
-                })
-        
-        # Validar longitud de cada texto
-        for i, text in enumerate(texts):
-            if not text:  # Text is None or empty
-                continue
-                
-            if len(text) > settings.max_text_length:
-                if raise_error:
-                    raise ServiceError(
-                        f"Texto {i} excede el límite de {settings.max_text_length} caracteres"
-                    )
-                else:
-                    validation_issues.append({
-                        "type": "text_too_long",
-                        "message": f"Texto {i} excede el límite de {settings.max_text_length} caracteres",
-                        "index": i,
-                        "limit": settings.max_text_length,
-                        "actual": len(text)
-                    })
-        
-        # Retornar resultado
-        if validation_issues and raise_error:
-            raise ServiceError(f"Validación fallida: {validation_issues[0]['message']}")
+            # Métricas por tenant
+            tenant_key = f"embedding_metrics:{context.tenant_id}:{today}"
+            await self.redis.hincrby(tenant_key, "total_generations", 1)
+            await self.redis.hincrby(tenant_key, "total_texts", len(action.texts))
             
-        return {
-            "valid": len(validation_issues) == 0,
-            "issues": validation_issues
-        }
+            # Tokens utilizados
+            if result.get("total_tokens"):
+                await self.redis.hincrby(tenant_key, "total_tokens", result["total_tokens"])
+            
+            # Tiempo de procesamiento por tier
+            await self.redis.lpush(f"embedding_times:{context.tenant_tier}", processing_time)
+            await self.redis.ltrim(f"embedding_times:{context.tenant_tier}", 0, 999)
+            
+            # TTL
+            await self.redis.expire(tenant_key, 86400 * 7)  # 7 días
+            
+        except Exception as e:
+            logger.error(f"Error tracking embedding metrics: {str(e)}")
+    
+    async def get_embedding_stats(self, tenant_id: str) -> Dict[str, Any]:
+        """Obtiene estadísticas de embeddings para un tenant."""
+        if not self.redis:
+            return {"metrics": "disabled"}
+        
+        try:
+            from datetime import datetime
+            today = datetime.now().date().isoformat()
+            metrics_key = f"embedding_metrics:{tenant_id}:{today}"
+            
+            metrics = await self.redis.hgetall(metrics_key)
+            
+            return {
+                "date": today,
+                "total_generations": int(metrics.get("total_generations", 0)),
+                "total_texts": int(metrics.get("total_texts", 0)),
+                "total_tokens": int(metrics.get("total_tokens", 0))
+            }
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo embedding stats: {str(e)}")
+            return {"error": str(e)}
