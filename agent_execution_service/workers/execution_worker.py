@@ -15,6 +15,7 @@ from common.models.actions import DomainAction
 from agent_execution_service.models.actions_model import AgentExecutionAction, ExecutionCallbackAction
 from agent_execution_service.handlers.embedding_callback_handler import EmbeddingCallbackHandler
 from agent_execution_service.handlers.handlers_domain_action import ExecutionHandler
+from agent_execution_service.handlers.query_callback_handler import QueryCallbackHandler
 from agent_execution_service.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ class ExecutionWorker(BaseWorker):
         # Inicializar handlers
         self.execution_handler = ExecutionHandler(None)  # Agregar servicio de agentes apropiado
         self.embedding_callback_handler = EmbeddingCallbackHandler()
+        self.query_callback_handler = QueryCallbackHandler()
         
         # Registrar handlers en el action_processor
         self.action_processor.register_handler(
@@ -59,6 +61,12 @@ class ExecutionWorker(BaseWorker):
         self.action_processor.register_handler(
             "embedding.callback",
             self.embedding_callback_handler.handle_embedding_callback
+        )
+        
+        # Registrar handler para callbacks de query
+        self.action_processor.register_handler(
+            "query.callback",
+            self.query_callback_handler.handle_query_callback
         )
     
     def get_queue_names(self) -> List[str]:

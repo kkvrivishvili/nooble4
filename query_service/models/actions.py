@@ -4,9 +4,11 @@ Modelos de Domain Actions para Query Service.
 
 from typing import List, Dict, Any, Optional
 from uuid import UUID
-from pydantic import BaseModel, Field, validator
+from pydantic import Field, validator
 
-class QueryGenerateAction(BaseModel):
+from common.models.actions import DomainAction
+
+class QueryGenerateAction(DomainAction):
     """
     Domain Action para procesar consultas RAG con embeddings pre-calculados.
     """
@@ -46,7 +48,7 @@ class QueryGenerateAction(BaseModel):
             raise ValueError("La consulta no puede estar vacía")
         return v
 
-class SearchDocsAction(BaseModel):
+class SearchDocsAction(DomainAction):
     """
     Domain Action para búsqueda de documentos sin generación de respuesta.
     """
@@ -70,7 +72,7 @@ class SearchDocsAction(BaseModel):
     # Metadatos opcionales
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Metadatos adicionales")
 
-class QueryCallbackAction(BaseModel):
+class QueryCallbackAction(DomainAction):
     """
     Domain Action para callbacks de consultas.
     """
