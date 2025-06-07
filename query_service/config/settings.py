@@ -27,6 +27,8 @@ class QueryServiceSettings(CommonSettings):
     llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", "0.3"))
     llm_max_tokens: int = int(os.getenv("LLM_MAX_TOKENS", "1024"))
     llm_timeout_seconds: int = int(os.getenv("LLM_TIMEOUT_SECONDS", "30"))
+    llm_top_p: float = float(os.getenv("LLM_TOP_P", "1.0"))
+    llm_n: int = int(os.getenv("LLM_N", "1"))
     
     # Vector Store
     vector_db_url: str = os.getenv("VECTOR_DB_URL", "http://localhost:8006")
@@ -36,6 +38,12 @@ class QueryServiceSettings(CommonSettings):
     # Tiemouts y reintentos
     http_timeout_seconds: int = int(os.getenv("HTTP_TIMEOUT_SECONDS", "15"))
     max_retries: int = int(os.getenv("MAX_RETRIES", "3"))
+    
+    # Configuración específica de retry para LLM
+    llm_retry_attempts: int = int(os.getenv("LLM_RETRY_ATTEMPTS", "3"))
+    llm_retry_min_seconds: int = int(os.getenv("LLM_RETRY_MIN_SECONDS", "1"))
+    llm_retry_max_seconds: int = int(os.getenv("LLM_RETRY_MAX_SECONDS", "10"))
+    llm_retry_multiplier: float = float(os.getenv("LLM_RETRY_MULTIPLIER", "1.0"))
     
     # Modo de logging
     log_level: str = os.getenv("LOG_LEVEL", "INFO")

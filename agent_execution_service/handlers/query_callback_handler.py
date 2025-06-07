@@ -1,5 +1,11 @@
 """
 Handler para procesar callbacks del Query Service.
+
+# TODO: Oportunidades de mejora futura:
+# 1. Refactorizar para extraer un BaseCallbackHandler que maneje la lógica común de callbacks
+# 2. Mejorar manejo de errores en validación de modelos específicos
+# 3. Implementar mecanismos de limpieza automática para callbacks no reclamados (evitar memory leaks)
+# 4. Unificar con EmbeddingCallbackHandler usando un patrón de diseño común
 """
 
 import logging

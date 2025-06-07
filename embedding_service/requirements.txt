@@ -1,0 +1,15 @@
+# Embedding Service - Requirements
+# Dependencias básicas
+aiohttp==3.9.3
+pydantic==2.5.3
+redis==5.0.1
+uvicorn==0.25.0
+fastapi==0.104.1
+
+# APIs externas
+openai==1.6.1
+
+# Utilidades
+python-dotenv==1.0.0
+tenacity==8.2.3
+structlog==23.2.0

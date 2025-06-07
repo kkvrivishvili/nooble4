@@ -1,6 +1,11 @@
 """
-Worker para procesar Domain Actions de embedding.
+Worker para procesar acciones de embedding.
 
+# TODO: Oportunidades de mejora futura:
+# 1. Estandarizar la forma de convertir entre DomainAction y modelos específicos
+# 2. Implementar manejo consistente de errores con clases específicas
+# 3. Unificar lógica de envío de callbacks usando un método más genérico
+# 4. Considerar base_worker.py para extraer funcionalidad común
 Este worker extiende el BaseWorker para procesar acciones
 específicas de generación de embeddings usando el sistema de Domain Actions.
 """

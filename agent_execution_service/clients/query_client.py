@@ -1,5 +1,11 @@
 """
 Cliente para interactuar con Query Service usando Domain Actions.
+
+# TODO: Oportunidades de mejora futura:
+# 1. Implementar un BaseClient compartido con QueryClient del Query Service
+# 2. Estandarizar más la conversión entre modelos específicos y DomainAction genérico
+# 3. Añadir manejo avanzado de errors con retries
+# 4. Centralizar la configuración de nombres de colas para evitar inconsistencias
 """
 
 import logging

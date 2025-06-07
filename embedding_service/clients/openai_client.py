@@ -1,5 +1,11 @@
 """
 Cliente simple para OpenAI embeddings API.
+
+# TODO: Oportunidades de mejora futura:
+# 1. Implementar mecanismos de retry con backoff exponencial para llamadas a la API
+# 2. Añadir caché de resultados para evitar duplicar peticiones frecuentes
+# 3. Mejorar manejo de errores con excepciones específicas por tipo de error
+# 4. Considerar extracción de un BaseAPIClient para compartir lógica con otros clientes
 """
 
 import logging
@@ -66,11 +72,21 @@ class OpenAIClient:
             "Content-Type": "application/json"
         }
         
+        # Preparar payload con parámetros completos según documentación oficial
         payload = {
             "input": non_empty_texts,
             "model": model,
-            "encoding_format": "float"
+            "encoding_format": settings.encoding_format
         }
+        
+        # Añadir dimensiones específicas si se configuraron (solo para modelos que lo soportan)
+        if settings.preferred_dimensions > 0:
+            # text-embedding-3-small y text-embedding-3-large soportan dimensiones reducidas
+            if model.startswith("text-embedding-3"):
+                payload["dimensions"] = settings.preferred_dimensions
+                logger.info(f"Solicitando dimensiones reducidas: {settings.preferred_dimensions}")
+            else:
+                logger.warning(f"El modelo {model} no soporta dimensiones personalizadas. Se usarán las dimensiones default.")
         
         # Hacer request a OpenAI
         timeout = aiohttp.ClientTimeout(total=self.timeout)

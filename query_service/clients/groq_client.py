@@ -1,5 +1,11 @@
 """
 Cliente para interactuar con la API de Groq.
+
+# TODO: Oportunidades de mejora futura:
+# 1. Extraer configuración de retry para ser más configurable
+# 2. Añadir instrumentación para monitoreo de latencia y errores
+# 3. Implementar manejo de errores más específico por tipo de error de API
+# 4. Considerar un BaseModelClient para compartir lógica con otros clientes de LLM
 """
 
 import logging
@@ -26,8 +32,12 @@ class GroqClient:
         self.default_model = settings.default_llm_model
     
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10)
+        stop=stop_after_attempt(settings.llm_retry_attempts),
+        wait=wait_exponential(
+            multiplier=settings.llm_retry_multiplier,
+            min=settings.llm_retry_min_seconds,
+            max=settings.llm_retry_max_seconds
+        )
     )
     async def generate(
         self,
@@ -65,12 +75,15 @@ class GroqClient:
         # Agregar prompt principal
         messages.append({"role": "user", "content": prompt})
         
-        # Preparar payload
+        # Preparar payload con todos los parámetros relevantes
         payload = {
             "model": model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": max_tokens
+            "max_tokens": max_tokens,
+            "top_p": settings.llm_top_p,
+            "n": settings.llm_n,
+            "stream": False  # Streaming no implementado en esta versión
         }
         
         # Enviar request
@@ -94,16 +107,25 @@ class GroqClient:
                     
                     # Extraer respuesta
                     if "choices" in result and len(result["choices"]) > 0:
-                        content = result["choices"][0].get("message", {}).get("content", "")
+                        # Extraer respuesta primaria
+                        response_message = result["choices"][0].get("message", {})
+                        content = response_message.get("content", "")
+                        finish_reason = result["choices"][0].get("finish_reason")
                         
-                        # Registrar uso
+                        # Verificar si hubo truncamiento
+                        if finish_reason == "length":
+                            logger.warning(f"Respuesta truncada por longitud máxima de tokens ({max_tokens})")
+                        
+                        # Registrar uso de tokens
                         if "usage" in result:
                             usage = result["usage"]
-                            logger.info(f"Tokens: prompt={usage.get('prompt_tokens', 0)}, "
-                                       f"completion={usage.get('completion_tokens', 0)}, "
-                                       f"total={usage.get('total_tokens', 0)}")
+                            prompt_tokens = usage.get('prompt_tokens', 0)
+                            completion_tokens = usage.get('completion_tokens', 0)
+                            total_tokens = usage.get('total_tokens', 0)
                             
-                            # Aquí se podría trackear tokens usando un servicio común
+                            logger.info(f"Tokens: prompt={prompt_tokens}, completion={completion_tokens}, total={total_tokens}")
+                            
+                            # Aquí se podría implementar trackeo de uso de tokens
                         
                         execution_time = time.time() - start_time
                         logger.info(f"Generación con {model} completada en {execution_time:.2f}s")

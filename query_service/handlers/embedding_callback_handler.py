@@ -1,5 +1,11 @@
 """
 Handler para procesar callbacks de embeddings.
+
+# TODO: Oportunidades de mejora futura:
+# 1. Implementar limpieza automática de callbacks pendientes no reclamados
+# 2. Estandarizar el manejo de errores de validación con errores específicos
+# 3. Considerar usar caché con TTL en lugar de dict simple para evitar memory leaks
+# 4. Extraer un BaseCallbackHandler para compartir lógica con otros handlers de callback
 """
 
 import logging

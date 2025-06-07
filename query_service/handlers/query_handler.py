@@ -1,5 +1,11 @@
 """
 Handler para procesar Domain Actions de Query Service.
+
+# TODO: Oportunidades de mejora futura:
+# 1. Implementar manejo de errores estandarizado usando clases de error específicas
+# 2. Añadir mecanismos de retry con backoff exponencial para llamadas API externas
+# 3. Mejorar validación de parámetros de entrada antes de procesar
+# 4. Considerar extraer un BaseHandler para funcionalidad común entre handlers
 """
 
 import logging

@@ -3,6 +3,12 @@ Handler para procesar callbacks de embeddings.
 
 Maneja los callbacks recibidos desde el servicio de embeddings
 e integra los resultados en el flujo de ejecución de agentes.
+
+# TODO: Oportunidades de mejora futura:
+# 1. Implementar cleanup periódico para evitar memory leaks en _pending_callbacks
+# 2. Usar validación de modelo específico (EmbeddingCallbackAction) de forma consistente
+# 3. Compartir lógica común con QueryCallbackHandler usando un BaseCallbackHandler
+# 4. Mejorar el manejo de timeouts y reintentos para sincronización de eventos
 """
 
 import logging

@@ -1,5 +1,11 @@
 """
 Cliente para acceso a vector store.
+
+# TODO: Oportunidades de mejora futura:
+# 1. Implementar mecanismos de retry para llamadas a la API
+# 2. Mejorar la validación de parámetros y respuestas
+# 3. Considerar abstracción para soportar diferentes backends de vector store
+# 4. Añadir telemetría y observabilidad para rendimiento de consultas
 """
 
 import logging

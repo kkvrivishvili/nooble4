@@ -1,5 +1,11 @@
 """
 Worker para procesar acciones de consulta.
+
+# TODO: Oportunidades de mejora futura:
+# 1. Refactorizar método process_action para usar validate_and_process desde una clase BaseHandler
+# 2. Unificar métodos _send_callback y _send_error_callback en un solo método más flexible
+# 3. Implementar mecanismo de retry para acciones fallidas con backoff exponencial
+# 4. Separar responsabilidades de procesamiento y envío de callbacks usando patrones asinc
 """
 
 import logging

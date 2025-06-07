@@ -37,6 +37,14 @@ class EmbeddingServiceSettings(BaseSettings):
         "text-embedding-3-small",
         description="Modelo de embedding predeterminado"
     )
+    preferred_dimensions: int = Field(
+        0,  # 0 indica usar dimensiones default del modelo
+        description="Dimensiones preferidas para embeddings (0 = usar default del modelo)"
+    )
+    encoding_format: str = Field(
+        "float",
+        description="Formato de codificación de embeddings (float o base64)"
+    )
     
     # Límites operacionales
     max_batch_size: int = Field(100, description="Número máximo de textos por batch")
@@ -59,6 +67,8 @@ def get_settings() -> EmbeddingServiceSettings:
     settings_dict.update({
         "openai_api_key": "sk-", # En producción se obtiene de variables de entorno
         "default_embedding_model": "text-embedding-3-small",
+        "preferred_dimensions": 0,  # 0 = usar dimensiones default del modelo
+        "encoding_format": "float",
         "max_batch_size": 100,
         "max_text_length": 8000,
         "openai_timeout_seconds": 30
