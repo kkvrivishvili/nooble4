@@ -7,6 +7,9 @@ python-dotenv==1.0.1
 httpx==0.28.1
 python-multipart==0.0.20
 
+# NUEVO: Dependencias para el sistema de colas
+asyncio==3.4.3
+
 # Testing
 pytest==8.3.5
 pytest-asyncio==0.21.1

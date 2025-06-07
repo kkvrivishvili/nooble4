@@ -1,68 +1,89 @@
 """
 Punto de entrada principal para Agent Orchestrator Service.
+
+MODIFICADO: Integración completa con sistema de colas por tier.
 """
 
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from typing import List
 
-import uvicorn
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
 
-from routes import chat_router, websocket_router, health_router
-from workers.orchestrator_worker import OrchestratorWorker
-from config.settings import get_settings
+from common.errors import setup_error_handling
+from common.utils.logging import init_logging
+from common.helpers.health import register_health_routes
+from common.redis_pool import get_redis_client
+from common.services.domain_queue_manager import DomainQueueManager
+from agent_orchestrator_service.workers.orchestrator_worker import OrchestratorWorker
+from agent_orchestrator_service.routes import chat_router, websocket_router, health_router
+from agent_orchestrator_service.config.settings import get_settings
 
-# Configuración de logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger("orchestrator")
-
-# Configuración
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 # Worker global
-orchestrator_worker = OrchestratorWorker()
+orchestrator_worker = None
+queue_manager = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Gestiona el ciclo de vida de la aplicación.
+    """Gestiona el ciclo de vida de la aplicación."""
+    global orchestrator_worker, queue_manager
     
-    Args:
-        app: Instancia de FastAPI
-    """
-    # Iniciar worker en background
-    worker_task = asyncio.create_task(orchestrator_worker.start())
-    logger.info("OrchestratorWorker iniciado en background")
+    logger.info("Iniciando Agent Orchestrator Service")
     
-    yield
-    
-    # Detener worker
-    await orchestrator_worker.stop()
-    logger.info("OrchestratorWorker detenido")
-    
-    # Esperar a que termine
     try:
-        await asyncio.wait_for(worker_task, timeout=5.0)
-    except asyncio.TimeoutError:
-        logger.warning("Timeout esperando a que termine el worker")
+        # Inicializar Redis y Queue Manager
+        redis_client = await get_redis_client()
+        queue_manager = DomainQueueManager(redis_client)
+        
+        # Verificar conexión Redis
+        await redis_client.ping()
+        logger.info("Conexión a Redis establecida")
+        
+        # Inicializar worker
+        orchestrator_worker = OrchestratorWorker(redis_client)
+        
+        # Iniciar worker en background
+        worker_task = asyncio.create_task(orchestrator_worker.start())
+        logger.info("OrchestratorWorker iniciado")
+        
+        # Hacer queue_manager disponible para la app
+        app.state.queue_manager = queue_manager
+        app.state.redis_client = redis_client
+        
+        yield
+        
+    finally:
+        logger.info("Deteniendo Agent Orchestrator Service")
+        
+        # Detener worker
+        if orchestrator_worker:
+            await orchestrator_worker.stop()
+        
+        # Cancelar task
+        if 'worker_task' in locals():
+            worker_task.cancel()
+            try:
+                await worker_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Cerrar conexiones Redis
+        if queue_manager and hasattr(queue_manager, 'redis'):
+            await queue_manager.redis.close()
 
-# Crear aplicación FastAPI
+# Crear aplicación
 app = FastAPI(
     title="Agent Orchestrator Service",
-    description="Servicio de orquestación de agentes con WebSockets",
-    version="0.1.0",
+    description="Servicio de orquestación de agentes con WebSockets y colas por tier",
+    version=settings.service_version,
     lifespan=lifespan
 )
 
-# Middleware CORS
+# Configurar CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # En producción, especificar orígenes permitidos
@@ -71,73 +92,40 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Manejadores de errores
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """
-    Manejador de errores de validación.
-    
-    Args:
-        request: Solicitud HTTP
-        exc: Excepción de validación
-        
-    Returns:
-        JSONResponse: Respuesta con detalles del error
-    """
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={
-            "detail": exc.errors(),
-            "body": exc.body
-        }
-    )
-
-@app.exception_handler(Exception)
-async def general_exception_handler(request: Request, exc: Exception):
-    """
-    Manejador general de excepciones.
-    
-    Args:
-        request: Solicitud HTTP
-        exc: Excepción
-        
-    Returns:
-        JSONResponse: Respuesta con detalles del error
-    """
-    logger.error(f"Error no manejado: {str(exc)}", exc_info=True)
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "detail": "Error interno del servidor",
-            "message": str(exc)
-        }
-    )
+# Configurar manejo de errores
+setup_error_handling(app)
 
 # Registrar routers
 app.include_router(health_router)
 app.include_router(chat_router)
 app.include_router(websocket_router)
 
-# Ruta raíz
-@app.get("/")
-async def root():
-    """
-    Endpoint raíz.
-    
-    Returns:
-        Dict: Información básica del servicio
-    """
-    return {
-        "service": "Agent Orchestrator Service",
-        "version": "0.1.0",
-        "status": "running"
-    }
+# Health checks específicos del orchestrator
+@app.get("/metrics/overview")
+async def get_metrics_overview():
+    """Métricas generales del orchestrator."""
+    if orchestrator_worker:
+        return await orchestrator_worker.get_orchestrator_stats()
+    else:
+        return {"error": "Worker no inicializado"}
 
-# Punto de entrada para ejecución directa
+@app.get("/metrics/queues")
+async def get_queue_metrics():
+    """Métricas específicas de colas."""
+    if queue_manager:
+        return await queue_manager.get_queue_stats(settings.domain_name)
+    else:
+        return {"error": "Queue manager no inicializado"}
+
+# Configurar logging
+init_logging(settings.log_level, service_name="agent-orchestrator-service")
+
 if __name__ == "__main__":
+    import uvicorn
     uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8001,
-        reload=True
+        "main:app", 
+        host="0.0.0.0", 
+        port=8008,  # CORREGIDO: Puerto no conflictivo
+        reload=True,
+        log_level="info"
     )

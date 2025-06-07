@@ -3,6 +3,8 @@ BaseWorker: Clase base para workers que procesan Domain Actions.
 
 Proporciona una implementación estándar para procesar acciones
 de colas Redis con implementación común de ciclo de procesamiento.
+
+MODIFICADO: Integración con sistema de colas por tier.
 """
 
 import asyncio
@@ -11,7 +13,9 @@ import logging
 from typing import Dict, Any, List, Optional
 
 from common.models.actions import DomainAction
+from common.models.execution_context import ExecutionContext
 from common.services.action_processor import ActionProcessor
+from common.services.domain_queue_manager import DomainQueueManager
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +25,8 @@ class BaseWorker:
     
     Esta clase abstracta define el comportamiento común para workers
     que procesan domain actions desde colas Redis.
+    
+    MODIFICADO: Usa DomainQueueManager para procesar por prioridad de tier.
     """
     
     def __init__(self, redis_client, action_processor: ActionProcessor):
@@ -36,12 +42,18 @@ class BaseWorker:
         self.running = False
         self.sleep_seconds = 1.0
         
+        # NUEVO: Integración con DomainQueueManager
+        self.queue_manager = DomainQueueManager(redis_client)
+        
+        # NUEVO: Domain específico (debe ser definido por subclases)
+        self.domain = getattr(self, 'domain', 'unknown')
+        
     async def start(self):
         """
         Inicia el worker y comienza a procesar colas.
         """
         self.running = True
-        logger.info(f"Iniciando {self.__class__.__name__}")
+        logger.info(f"Iniciando {self.__class__.__name__} para dominio {self.domain}")
         
         try:
             await self._process_queue_loop()
@@ -57,29 +69,27 @@ class BaseWorker:
         self.running = False
         logger.info(f"Deteniendo {self.__class__.__name__}")
     
+    # MODIFICADO: Usa DomainQueueManager para procesar por prioridad
     async def _process_queue_loop(self):
         """
         Procesa colas de forma continua mientras el worker esté activo.
+        MODIFICADO: Usa queue manager para respetar prioridades por tier.
         """
         while self.running:
             try:
-                # Obtener lista de colas a procesar
-                queues = self.get_queue_names()
+                # NUEVO: Desencolar respetando prioridad de tiers
+                action_data = await self.queue_manager.dequeue_with_priority(
+                    domain=self.domain,
+                    timeout=1
+                )
                 
-                for queue in queues:
-                    # Intentar obtener una acción de la cola con timeout corto
-                    raw_data = await self.redis_client.brpop(queue, timeout=1)
-                    if not raw_data:
-                        continue
-                    
+                if action_data:
                     # Procesar la acción
-                    _, data = raw_data
-                    action_data = json.loads(data)
                     await self._process_action(action_data)
-                
-                # Pequeña pausa entre ciclos
-                await asyncio.sleep(self.sleep_seconds)
-                
+                else:
+                    # Pequeña pausa entre ciclos cuando no hay trabajo
+                    await asyncio.sleep(self.sleep_seconds)
+                    
             except Exception as e:
                 logger.error(f"Error procesando colas: {str(e)}")
                 await asyncio.sleep(1)  # Esperar en caso de error para no saturar
@@ -123,17 +133,18 @@ class BaseWorker:
         """
         raise NotImplementedError("Debe implementarse en subclase")
     
+    # DEPRECATED: Reemplazado por domain-based queues
     def get_queue_names(self) -> List[str]:
         """
         Retorna nombres de colas a procesar.
         
-        Esta función debe ser implementada por las subclases para
-        especificar qué colas debe monitorear el worker.
+        DEPRECATED: Las subclases deben definir self.domain en su lugar.
         
         Returns:
             Lista de nombres de colas
         """
-        raise NotImplementedError("Debe implementarse en subclase")
+        logger.warning("get_queue_names() está deprecated. Definir self.domain en subclase.")
+        return []
     
     async def _send_callback(self, action: DomainAction, result: Dict[str, Any]):
         """
@@ -160,3 +171,12 @@ class BaseWorker:
             error_message: Mensaje de error
         """
         raise NotImplementedError("Debe implementarse en subclase")
+    
+    # NUEVO: Métodos auxiliares para subclases
+    async def get_queue_stats(self) -> Dict[str, Any]:
+        """Obtiene estadísticas del dominio actual."""
+        return await self.queue_manager.get_queue_stats(self.domain)
+    
+    async def enqueue_callback(self, callback_action: DomainAction, callback_queue: str) -> bool:
+        """Encola callback usando queue manager."""
+        return await self.queue_manager.enqueue_callback(callback_action, callback_queue)

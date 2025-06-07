@@ -3,6 +3,8 @@ ActionProcessor: Procesador centralizado de Domain Actions.
 
 Este componente se encarga de procesar acciones del dominio y 
 manejar su ejecución asíncrona a través de handlers registrados.
+
+MODIFICADO: Integración con DomainQueueManager para sistema de colas por tier.
 """
 
 import logging
@@ -12,11 +14,11 @@ import time
 from datetime import datetime
 
 from common.models.actions import DomainAction
+from common.models.execution_context import ExecutionContext
 from common.redis_pool import get_redis_client
-from common.config import get_settings
+from common.config import get_service_settings
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 class ActionProcessor:
     """
@@ -24,17 +26,27 @@ class ActionProcessor:
     
     Permite registrar handlers para cada tipo de acción y
     encolar/procesar acciones de forma consistente.
+    
+    MODIFICADO: Integra con DomainQueueManager para colas por tier.
     """
     
-    def __init__(self, redis_client=None):
+    def __init__(self, redis_client=None, queue_manager=None):
         """
         Inicializa el procesador.
         
         Args:
             redis_client: Cliente Redis para encolado (opcional)
+            queue_manager: Gestor de colas por tier (opcional)
         """
-        self.redis_client = redis_client or get_redis_client(settings.redis_url)
+        self.redis_client = redis_client or get_redis_client()
         self.handlers = {}
+        
+        # Integración con queue manager
+        if queue_manager:
+            self.queue_manager = queue_manager
+        else:
+            from .domain_queue_manager import DomainQueueManager
+            self.queue_manager = DomainQueueManager(self.redis_client)
         
     def register_handler(self, action_type: str, handler_func: Callable):
         """
@@ -92,19 +104,24 @@ class ActionProcessor:
                 "execution_time": execution_time
             }
     
+    # MODIFICADO: Usar DomainQueueManager
     async def enqueue_action(self, action: DomainAction, queue: Optional[str] = None) -> bool:
         """
         Encola una acción para procesamiento asíncrono.
         
+        DEPRECATED: Usar queue_manager.enqueue_execution() en su lugar.
+        
         Args:
             action: Acción a encolar
-            queue: Cola específica (opcional, por defecto se usa el dominio)
+            queue: Cola específica (opcional)
             
         Returns:
             True si se encoló correctamente
         """
+        logger.warning("enqueue_action() está deprecated. Usar DomainQueueManager.enqueue_execution()")
+        
         try:
-            queue_name = queue or self._get_queue_name(action)
+            queue_name = queue or f"{action.get_domain()}.{action.tenant_id}.actions"
             
             # Convertir acción a formato JSON
             action_data = action.dict()
@@ -118,15 +135,51 @@ class ActionProcessor:
             logger.error(f"Error encolando acción: {str(e)}")
             return False
     
-    def _get_queue_name(self, action: DomainAction) -> str:
+    # NUEVO: Métodos para integración con DomainQueueManager
+    async def enqueue_execution(
+        self,
+        action: DomainAction,
+        target_domain: str,
+        context: ExecutionContext
+    ) -> str:
         """
-        Genera nombre de cola estándar basado en dominio.
+        Encola acción usando DomainQueueManager.
         
         Args:
-            action: Acción
+            action: Acción a encolar
+            target_domain: Dominio destino
+            context: Contexto de ejecución
             
         Returns:
-            Nombre de cola estándar
+            Nombre de cola donde se encoló
         """
-        domain = action.get_domain()
-        return f"{domain}.{action.tenant_id}.actions"
+        return await self.queue_manager.enqueue_execution(action, target_domain, context)
+    
+    async def enqueue_callback(
+        self,
+        callback_action: DomainAction,
+        callback_queue: str
+    ) -> bool:
+        """
+        Encola callback usando DomainQueueManager.
+        
+        Args:
+            callback_action: Acción de callback
+            callback_queue: Cola destino
+            
+        Returns:
+            True si se encoló correctamente
+        """
+        return await self.queue_manager.enqueue_callback(callback_action, callback_queue)
+    
+    async def get_queue_stats(self, domain: str) -> Dict[str, Any]:
+        """
+        Obtiene estadísticas de colas para un dominio.
+        
+        Args:
+            domain: Dominio a consultar
+            
+        Returns:
+            Estadísticas por tier
+        """
+        return await self.queue_manager.get_queue_stats(domain)
