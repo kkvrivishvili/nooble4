@@ -1,18 +1,19 @@
 # Embedding Service
 
-## Descripción General
+## Características y Estado
 
-El Embedding Service es un componente fundamental de la arquitectura Nooble, responsable de la generación de embeddings (representaciones vectoriales) para textos mediante modelos avanzados de OpenAI. Funciona como un servicio independiente y escalable que se comunica con otros componentes a través de colas Redis y proporciona una API para la generación asíncrona de embeddings.
-
-### Características Principales
-
-- **Generación de Embeddings**: Conversión eficiente de textos a vectores de alta dimensionalidad
-- **Procesamiento por Lotes**: Soporte para procesamiento de múltiples textos en una sola solicitud
-- **Modelo Asincrónico**: Procesamiento no bloqueante mediante sistema de colas Redis
-- **Soporte para Múltiples Modelos**: Compatibilidad con diferentes modelos de OpenAI
-- **Comunicación por Domain Actions**: Integración con otros servicios mediante patrón Domain Action
-- **Gestión de Errores**: Manejo robusto de errores y validaciones
-- **Altamente Configurable**: Adaptación a diferentes necesidades mediante variables de entorno
+| Característica | Descripción | Estado |
+|-----------------|-------------|--------|
+| **Generación de Embeddings** | Conversión de textos a vectores | ✅ Completo |
+| **Procesamiento por Lotes** | Soporte para procesamiento de múltiples textos | ✅ Completo |
+| **Múltiples Modelos** | Soporte para diferentes modelos de OpenAI | ✅ Completo |
+| **Domain Actions** | Integración mediante patrón Domain Action | ✅ Completo |
+| **Validación por Tier** | Límites y capacidades por nivel de suscripción | ✅ Completo |
+| **Sistema Async** | Procesamiento asíncrono mediante colas Redis | ✅ Completo |
+| **API Sincrónica** | Endpoints REST para uso sincrónico | ✅ Completo |
+| **Caché** | Reducción de llamadas duplicadas a OpenAI | ✅ Completo |
+| **Sistema de Métricas** | Seguimiento de uso, tiempos y costos | ⚠️ Parcial |
+| **Persistencia** | Almacenamiento de embeddings en PostgreSQL | ❌ Pendiente |
 
 ## Estructura de Archivos y Carpetas
 
@@ -21,74 +22,116 @@ embedding_service/
 ├ __init__.py
 ├ main.py
 ├ requirements.txt
-├ README.md
 ├ clients/
 │  ├ __init__.py
 │  └ openai_client.py
 ├ config/
+│  ├ __init__.py
 │  └ settings.py
 ├ handlers/
 │  ├ __init__.py
-│  └ embedding_handler.py
+│  ├ embedding_handler.py
+│  ├ embedding_context_handler.py
+│  └ embedding_callback_handler.py
 ├ models/
 │  ├ __init__.py
 │  └ actions.py
+├ services/
+│  ├ __init__.py
+│  ├ embedding_processor.py
+│  ├ validation_service.py
+│  └ cache_service.py
 └ workers/
    ├ __init__.py
    └ embedding_worker.py
 ```
 
-## Arquitectura y Componentes
+## Arquitectura
 
-El servicio sigue una arquitectura orientada a eventos con procesamiento asíncrono y también expone una API REST para generación síncrona de embeddings:
+El Embedding Service es responsable de convertir texto en representaciones vectoriales (embeddings) utilizando modelos de OpenAI. Este componente es crítico para diversas funcionalidades semánticas en la plataforma, incluyendo búsqueda por similitud, clasificación y recomendaciones.
 
+### Diagrama de Integración
+
+```plaintext
+┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
+│                   │ │                   │ │                   │
+│ Query Service     │ │ Ingestion Service │ │ Agent Execution   │
+│                   │ │                   │ │                   │
+└───────────────────┘ └───────────────────┘ └───────────────────┘
+          │                    │                     │
+          └─────────────┬──────┴─────────────────────┘
+                        │
+                        ▼
+             ┌─────────────────────┐
+             │                     │
+             │    Redis Queues     │
+             │                     │
+             └─────────────────────┘
+                        │
+                        ▼
+             ┌─────────────────────┐
+             │                     │          ┌────────────────┐
+             │ Embedding Service   │◄─────────┤    OpenAI      │
+             │                     │          │    API         │
+             └─────────────────────┘          └────────────────┘
+                        │
+                        │
+                        ▼
+             ┌─────────────────────┐
+             │                     │
+             │   Callback Queues   │
+             │                     │
+             └─────────────────────┘
+                        │
+                        ▼
+┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
+│                   │ │                   │ │                   │
+│ Query Service     │ │ Ingestion Service │ │ Agent Execution   │
+│                   │ │                   │ │ Service           │
+└───────────────────┘ └───────────────────┘ └───────────────────┘
+                                       
+          │                    │                     │
+          ▼                    ▼                     ▼
+┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
+│                   │ │                   │ │                   │
+│Vector Store/Search│ │Document Processing│ │ Agent Tools/Tasks │
+│                   │ │                   │ │                   │
+└───────────────────┘ └───────────────────┘ └───────────────────┘
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                          Clientes                               │
-│ Agent Execution Service  │  Query Service  │  Ingestion Service │
-└─────────────────────────────────────────────────────────────────┘
-            │                      │                     │
-            ▼                      ▼                     ▼
-      ┌────────────────────────────────────────────────────────┐
-      │              Embedding Service                         │
-      └────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-       ┌──────────────────────────────────────────────────────┐
-       │   Domain Action Queue (Redis)                        │
-       └──────────────────────────────────────────────────────┘
-                          │
-                          ▼
-       ┌──────────────────────────────────────────────────────┐
-       │   EmbeddingWorker                                    │
-       └──────────────────────────────────────────────────────┘ 
-                          │
-                          ▼
-       ┌──────────────────────────────────────────────────────┐
-       │   Callback Queue (Redis)                             │
-       └──────────────────────────────────────────────────────┘
-                          │
-                          ▼
-┌───────────────────────────────────────────────────────────────┐
-│                          Callbacks                          │
-│ Agent Execution Service  │  Query Service  │  Ingestion Service │
-└───────────────────────────────────────────────────────────────┘
+
+### Flujo de Trabajo del Procesamiento de Embeddings
+
+```plaintext
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│             │     │             │     │             │
+│  Cliente    │────▶│ Embedding   │────▶│  OpenAI     │
+│  Servicio   │     │ Service     │     │  API        │
+└─────────────┘     └─────────────┘     └─────────────┘
+      │                   │                    │
+      │                   │                    │
+      │        1. EmbeddingGenerateAction      │
+      │───────────────────▶│                   │
+      │                     │                   │
+      │                     │  2. Verificar Caché
+      │                     │──────────┐        │
+      │                     │          │        │
+      │                     │◀─────────┘        │
+      │                     │                   │
+      │                     │  3. Procesar Texto│
+      │                     │───────────────────▶
+      │                     │                   │
+      │                     │  4. Retornar     │
+      │                     │     Embedding     │
+      │                     │◀──────────────────│
+      │                     │                   │
+      │        5. EmbeddingCallbackAction      │
+      │◀──────────────────  │                   │
+      │                     │                   │
+      │                     │  6. Guardar Caché │
+      │                     │──────────┐        │
+      │                     │          │        │
+      │                     │◀─────────┘        │
 ```
-
-### Componentes Principales
-
-1. **EmbeddingWorker**: Escucha las colas de acciones y procesa las solicitudes de embeddings
-2. **EmbeddingHandler**: Implementa la lógica de negocio para validar y generar embeddings
-3. **OpenAIClient**: Interactúa con la API de OpenAI para generar embeddings
-4. **Modelos de Acciones**: Define la estructura de las acciones de dominio para la comunicación
-
-### Flujo de Trabajo
-
-1. **Recepción de Solicitud**: El cliente envía una solicitud para generar embeddings
-2. **Encolado de Acción**: La solicitud se convierte en una `EmbeddingGenerateAction` y se coloca en una cola Redis
-3. **Procesamiento**: El `EmbeddingWorker` consume la acción y utiliza el `EmbeddingHandler` para procesarla
-4. **Generación de Embeddings**: El `OpenAIClient` envía los textos a la API de OpenAI y obtiene los vectores
-5. **Callback**: Los resultados se envían de vuelta mediante una acción de callback a la cola especificada
 
 ## Modelos de Embedding Soportados
 
@@ -98,273 +141,165 @@ El servicio sigue una arquitectura orientada a eventos con procesamiento asíncr
 | text-embedding-3-large | 3072 | 8191 | Modelo de alta precisión para tareas complejas |
 | text-embedding-ada-002 | 1536 | 8191 | Compatibilidad con sistemas legacy |
 
+## Componentes Principales
+
+| Componente | Descripción | Estado |
+|------------|-------------|--------|
+| **EmbeddingWorker** | Procesamiento asíncrono de acciones | ✅ Completo |
+| **EmbeddingHandler** | Lógica principal de generación | ✅ Completo |
+| **OpenAIClient** | Cliente para API de OpenAI | ✅ Completo |
+| **ValidationService** | Validación de textos y parámetros | ✅ Completo |
+| **EmbeddingProcessor** | Procesamiento y transformación | ✅ Completo |
+| **CacheService** | Sistema de caché para embeddings | ✅ Completo |
+| **EmbeddingContextHandler** | Manejo de contexto para operaciones | ✅ Completo |
+| **EmbeddingCallbackHandler** | Manejo de callbacks asíncronos | ✅ Completo |
+
 ## Domain Actions
 
 El servicio procesa las siguientes acciones de dominio:
 
-### EmbeddingGenerateAction
+### 1. Acciones de Entrada
 
 ```json
+// EmbeddingGenerateAction - Genera embeddings para textos
 {
+  "action_id": "uuid-action-1",
   "action_type": "embedding.generate",
-  "tenant_id": "client123",
-  "session_id": "sess_abc123",
-  "texts": ["Este es un texto de ejemplo para generar embedding"],
-  "model": "text-embedding-3-small",
-  "callback_queue": "agent.execution.callbacks"
+  "task_id": "task123",
+  "tenant_id": "tenant1",
+  "tenant_tier": "professional",
+  "data": {
+    "texts": ["Este es un texto de ejemplo para generar embedding"],
+    "model": "text-embedding-3-small",
+    "use_cache": true
+  },
+  "callback_queue": "query.callbacks"
 }
-```
 
-### EmbeddingValidateAction
-
-```json
+// EmbeddingValidateAction - Valida textos para embedding
 {
+  "action_id": "uuid-action-2",
   "action_type": "embedding.validate",
-  "tenant_id": "client123",
-  "session_id": "sess_abc123",
-  "texts": ["Texto 1", "Texto 2", "Texto 3"],
-  "model": "text-embedding-3-small",
-  "callback_queue": "agent.execution.callbacks"
+  "task_id": "task456",
+  "tenant_id": "tenant1",
+  "tenant_tier": "advance",
+  "data": {
+    "texts": ["Texto 1", "Texto 2", "Texto 3"],
+    "model": "text-embedding-3-small"
+  },
+  "callback_queue": "ingestion.callbacks"
 }
 ```
 
-### EmbeddingCallbackAction
+### 2. Acciones de Salida/Callback
+
+```json
+// EmbeddingCallbackAction - Retorna embeddings generados
+{
+  "action_id": "uuid-callback-1",
+  "action_type": "embedding.callback",
+  "task_id": "task123",
+  "tenant_id": "tenant1",
+  "tenant_tier": "professional",
+  "data": {
+    "status": "completed",
+    "embeddings": [[0.1, 0.2, ...], [0.3, 0.4, ...]],
+    "model": "text-embedding-3-small",
+    "dimensions": 1536,
+    "total_tokens": 42,
+    "processing_time": 0.352
+  }
+}
+
+// EmbeddingErrorAction - Error durante generación de embedding
+{
+  "action_id": "uuid-error-1",
+  "action_type": "embedding.error",
+  "task_id": "task123",
+  "tenant_id": "tenant1",
+  "tenant_tier": "professional",
+  "data": {
+    "error": "Error generando embeddings: token limit exceeded",
+    "error_code": "EMBEDDING_TOKEN_LIMIT",
+    "model": "text-embedding-3-small",
+    "texts_count": 5
+  }
+}
+```
+
+## API HTTP
+
+El servicio también expone endpoints REST para generación sincrónica de embeddings:
+
+### Generar Embeddings
+
+**POST** `/api/v1/embeddings`
 
 ```json
 {
-  "action_type": "embedding.callback",
-  "tenant_id": "client123",
-  "session_id": "sess_abc123",
-  "embeddings": [[0.1, 0.2, 0.3, 0.4]],
+  "texts": ["texto 1", "texto 2"],
+  "model": "text-embedding-3-small"
+}
+```
+
+**Respuesta:**
+```json
+{
+  "embeddings": [[0.1, 0.2, ...], [0.3, 0.4, ...]],
   "model": "text-embedding-3-small",
   "dimensions": 1536,
-  "total_tokens": 5,
-  "processing_time": 0.45,
-  "task_id": "task_xyz789",
-  "status": "completed"
+  "total_tokens": 42,
+  "processing_time": 0.352
 }
-```
-
-## Ejemplos de Uso
-
-### Cliente Python
-
-```python
-import json
-import asyncio
-import aioredis
-
-async def request_embeddings(texts, model=None):
-    # Configuración
-    redis_url = "redis://localhost:6379"
-    request_queue = "embedding.default.actions"
-    callback_queue = "my_app.callbacks"
-    
-    # Conectar a Redis
-    redis = await aioredis.create_redis_pool(redis_url)
-    
-    # Crear acción
-    action = {
-        "action_type": "embedding.generate",
-        "tenant_id": "my_tenant",
-        "session_id": "my_session",
-        "texts": texts,
-        "model": model,
-        "callback_queue": callback_queue,
-        "task_id": f"task_{int(time.time())}"
-    }
-    
-    # Enviar a cola
-    await redis.lpush(request_queue, json.dumps(action))
-    print(f"Solicitud enviada para {len(texts)} textos")
-    
-    # En un caso real, implementarías un listener para la cola de callbacks
-    # ...
-
-# Uso
-asyncio.run(request_embeddings(
-    ["Este es un ejemplo de texto", "Este es otro ejemplo"]
-))
-```
-
-### HTTP (Suponiendo una API REST)
-
-```python
-import requests
-
-def request_embeddings_http(texts, model=None):
-    # En una implementación real, esta sería la URL de tu API REST
-    url = "http://localhost:8003/api/v1/embeddings"
-    
-    payload = {
-        "texts": texts,
-        "model": model,
-        "tenant_id": "my_tenant"
-    }
-    
-    response = requests.post(url, json=payload)
-    print(f"Solicitud enviada: {response.status_code}")
-    print(response.json())
-
-# Uso
-request_embeddings_http(
-    ["Este es un ejemplo de texto", "Este es otro ejemplo"]
-)
 ```
 
 ## Configuración
 
 ### Variables de Entorno
 
-```env
-# Configuración general
-DEBUG=true
-VERSION=1.0.0
-HOST=0.0.0.0
-PORT=8003
+Todas las variables de entorno tienen el prefijo `EMBEDDING_`:
 
-# Redis
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_DB=0
-REDIS_PASSWORD=
+| Variable | Descripción | Default |
+|----------|-------------|---------|
+| `EMBEDDING_OPENAI_API_KEY` | API Key para OpenAI | - |
+| `EMBEDDING_DEFAULT_EMBEDDING_MODEL` | Modelo por defecto | text-embedding-3-small |
+| `EMBEDDING_MAX_BATCH_SIZE` | Número máximo de textos por batch | 100 |
+| `EMBEDDING_MAX_TEXT_LENGTH` | Longitud máxima por texto en caracteres | 8000 |
+| `EMBEDDING_OPENAI_TIMEOUT_SECONDS` | Timeout para llamadas a OpenAI | 30 |
+| `EMBEDDING_CACHE_TTL_SECONDS` | Tiempo de vida del caché | 86400 |
+| `EMBEDDING_CACHE_MAX_ITEMS` | Número máximo de items en caché | 10000 |
+| `EMBEDDING_RETRY_ATTEMPTS` | Número de reintentos | 3 |
+| `EMBEDDING_RETRY_BACKOFF_SECONDS` | Tiempo entre reintentos | 1.0 |
 
-# OpenAI
-EMBEDDING_OPENAI_API_KEY=sk-your-api-key
-EMBEDDING_DEFAULT_EMBEDDING_MODEL=text-embedding-3-small
-EMBEDDING_PREFERRED_DIMENSIONS=0  # 0 = usar dimensiones default
-EMBEDDING_ENCODING_FORMAT=float  # float o base64
+## Health Checks
 
-# Límites operacionales
-EMBEDDING_MAX_BATCH_SIZE=100
-EMBEDDING_MAX_TEXT_LENGTH=8000
-EMBEDDING_OPENAI_TIMEOUT_SECONDS=30
-```
+- `GET /health` ➔ 200 OK si el servicio está funcionando correctamente
+- `GET /ready` ➔ 200 OK si todas las dependencias (Redis, OpenAI API) están disponibles
+- `GET /metrics/overview` ➔ Métricas básicas de uso del servicio
+- `GET /metrics/usage` ➔ Métricas de uso de tokens y costos estimados
 
-### Configuración de Modelos
+## Inconsistencias y Próximos Pasos
 
-El servicio permite configurar distintos aspectos:
+### Inconsistencias Actuales
 
-- **Modelo de Embedding**: Selección del modelo a utilizar
-- **Dimensiones**: Posibilidad de reducir dimensiones para modelos que lo soporten
-- **Formato**: Formato de salida de vectores (float o base64)
-- **Límites**: Control del tamaño de batch y longitud máxima de textos
+- **Persistencia Temporal**: Al igual que otros servicios, utiliza Redis para almacenar métricas y resultados. Se planea migrar a PostgreSQL para persistencia permanente.
 
-## Integración con Otros Servicios
+- **Sistema de Métricas Parcial**: Aunque captura tiempo de procesamiento y tokens utilizados, no hay un dashboard ni análisis detallado.
 
-### Con Ingestion Service
+- **Límites de Tier**: Aunque existe validación por tier, algunas capacidades avanzadas del tier Enterprise no están completamente implementadas.
 
-El Embedding Service está diseñado para integrarse con el servicio de ingestión:
+- **Falta Integración con Vector Store**: Actualmente sólo genera embeddings pero no los almacena en una base de datos vectorial.
 
-1. El servicio de ingestión procesa documentos y genera fragmentos (chunks)
-2. Para cada fragmento, crea una acción `EmbeddingGenerateAction`
-3. Envía las acciones a la cola `embedding.default.actions`
-4. El Embedding Service procesa las acciones y genera embeddings
-5. Envía callbacks con los resultados a la cola configurada
-6. El servicio de ingestión recibe los callbacks y actualiza el estado de la tarea
+### Próximos Pasos
 
-```python
-# Ejemplo de integración desde IngestionWorker
-async def process_chunk(self, chunk_text, chunk_id):
-    # Crear acción para solicitar embeddings
-    action = EmbeddingGenerateAction(
-        tenant_id=self.tenant_id,
-        session_id=self.session_id, 
-        texts=[chunk_text],
-        chunk_ids=[chunk_id],
-        collection_id=self.collection_id,
-        callback_queue="ingestion.embedding.callbacks",
-        task_id=self.task_id
-    )
-    
-    # Enviar a cola de embeddings
-    await self.action_processor.enqueue_action(
-        action, 
-        "embedding.default.actions"
-    )
-```
+1. **Implementar Persistencia**: Añadir almacenamiento en PostgreSQL para embeddings y métricas para mantener histórico y análisis.
 
-## Despliegue y Operación
+2. **Integrar con Vector Store**: Conectar con un servicio de almacenamiento vectorial (Qdrant, Pinecone) para búsqueda eficiente.
 
-### Requisitos
+3. **Expandir Métricas**: Añadir métricas detalladas de uso, tiempos y costos por tenant con dashboard visual.
 
-- Python 3.8+
-- Redis
-- Acceso a Internet (para API de OpenAI)
-- API Key de OpenAI
+4. **Optimización de Caché**: Mejorar el sistema de caché para reducir llamadas a OpenAI y reducir costos operativos.
 
-### Ejecución
+5. **Soporte para Múltiples Proveedores**: Añadir integración con otros proveedores de embeddings (Cohere, Azure OpenAI).
 
-```bash
-# Instalar dependencias
-pip install -r requirements.txt
-
-# Configurar variables de entorno
-export EMBEDDING_OPENAI_API_KEY=sk-your-api-key
-
-# Iniciar servicio
-python -m embedding_service.main
-```
-
-### Contenedorización
-
-```dockerfile
-FROM python:3.9-slim
-
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-CMD ["python", "-m", "embedding_service.main"]
-```
-
-### Monitoreo
-
-Para un entorno de producción, se recomienda monitorear:
-
-1. **Colas Redis**: Longitud y latencia de procesamiento
-2. **Consumo de API OpenAI**: Tokens procesados y costos
-3. **Errores**: Tasa de errores de validación y comunicación
-4. **Rendimiento**: Tiempo de procesamiento por vector y batch
-
-## Mejoras Futuras
-
-- **Caché**: Implementar caché de embeddings para textos frecuentes
-- **Retry con Backoff**: Mejorar manejo de errores temporales de la API
-- **Métricas Detalladas**: Añadir exportación de métricas para Prometheus
-- **Clientes Alternativos**: Soporte para otras APIs de embeddings (e.g., Azure)
-- **API REST**: Exponer endpoints REST para uso directo sin colas
-- **Bulk Processing**: Optimizaciones para procesar grandes volúmenes de textos
-- **Tests Completos**: Ampliar cobertura de pruebas unitarias e integración
-
----
-
-## Guía Rápida para Desarrolladores
-
-1. **Configurar entorno**:
-   ```bash
-   cp .env.example .env
-   # Editar .env con tus credenciales
-   ```
-
-2. **Ejecutar localmente**:
-   ```bash
-   python -m embedding_service.main
-   ```
-
-3. **Enviar acción de test**:
-   ```bash
-   python -m tools.send_test_action
-   ```
-
-4. **Verificar logs**:
-   ```bash
-   tail -f logs/embedding_service.log
-   ```
-
-## Licencia
-
-Este proyecto es propiedad de [Tu Empresa] y está protegido por derechos de autor.
+6. **Comprimir Embeddings**: Implementar técnicas de compresión para reducir costos de almacenamiento y transmisión.

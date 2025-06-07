@@ -1,32 +1,252 @@
 # Agent Execution Service
 
-Servicio para la ejecución de agentes utilizando LangChain. Este servicio se encarga de procesar solicitudes de ejecución de agentes, interactuar con los servicios externos necesarios, y devolver los resultados.
+## Características y Estado
+
+| Característica | Descripción | Estado |
+|---------------|-------------|--------|
+| **Ejecución LangChain** | Ejecución de agentes con framework LangChain | ✅ Operativo |
+| **Integración con servicios** | Comunicación con otros servicios backend | ✅ Operativo |
+| **Domain Actions** | Comunicación asíncrona vía Redis | ✅ Operativo |
+| **Validación por tier** | Límites y capacidades según tier | ✅ Operativo |
+| **Gestión de herramientas** | Configuración y ejecución de tools de agente | ✅ Operativo |
+| **Control de contexto** | Gestión del historial de conversación | ✅ Operativo |
+| **Callbacks asíncronos** | Notificación de resultados | ✅ Operativo |
+| **Métricas básicas** | Endpoints para métricas de performance | ⚠️ Parcial |
+| **Caché de configuraciones** | Optimización mediante caché | ⚠️ Parcial |
+| **Persistencia avanzada** | Almacenamiento de datos en PostgreSQL | ❌ Pendiente |
+
+## Estructura de Archivos y Carpetas
+
+```plaintext
+agent_execution_service/
+├ __init__.py
+├ main.py
+├ requirements.txt
+├ clients/
+│  ├ __init__.py
+│  ├ agent_management_client.py
+│  ├ conversation_client.py
+│  ├ embedding_client.py
+│  └ query_client.py
+├ config/
+│  ├ __init__.py
+│  └ settings.py
+├ handlers/
+│  ├ __init__.py
+│  ├ agent_execution_handler.py
+│  ├ execution_context_handler.py
+│  ├ execution_callback_handler.py
+│  └ langchain_integrator.py
+├ models/
+│  ├ __init__.py
+│  ├ actions.py
+│  └ execution.py
+├ services/
+│  ├ __init__.py
+│  └ agent_executor.py
+└ workers/
+   ├ __init__.py
+   └ execution_worker.py
+```
 
 ## Arquitectura
 
-El servicio está construido con las siguientes tecnologías:
-- **FastAPI**: Framework web para APIs
-- **Redis**: Para gestión de colas y comunicación asíncrona
-- **LangChain**: Para ejecución de agentes de IA
-- **Pydantic**: Para validación de datos y modelos
-- **Httpx**: Cliente HTTP asíncrono
+El Agent Execution Service es el componente responsable de procesar la ejecución de agentes conversacionales utilizando LangChain. Este servicio gestiona el ciclo de vida de ejecución de los agentes, interactuando con múltiples servicios externos para resolver tareas y generar respuestas basadas en configuraciones predefinidas.
 
-## Flujo de Ejecución
+### Diagrama de Integración
 
-1. El servicio recibe solicitudes de ejecución a través de una cola Redis
-2. El worker procesa las solicitudes y las convierte en acciones de dominio
-3. El handler de ejecución:
-   - Obtiene la configuración del agente desde Agent Management Service
-   - Obtiene el historial de conversación desde Conversation Service
-   - Ejecuta el agente utilizando LangChain
-   - Guarda los mensajes en Conversation Service
-   - Envía el resultado a través de una cola de callback
+```plaintext
+┌───────────────────────────┐  ┌────────────────────┐  ┌────────────────────┐
+│                           │  │                    │  │                    │
+│   Agent Orchestrator      │  │  Frontend Client   │  │  Other Services    │
+│                           │  │                    │  │                    │
+└───────────────────────────┘  └────────────────────┘  └────────────────────┘
+            │                            │                      │
+            └────────────────┬───────────┴──────────────────────┘
+                             │
+                             ▼
+                  ┌─────────────────────┐
+                  │                     │
+                  │    Redis Queues     │
+                  │                     │
+                  └─────────────────────┘
+                             │
+                             ▼
+                  ┌─────────────────────┐
+                  │                     │
+                  │ Agent Execution     │
+                  │ Service             │
+                  │                     │
+                  └─────────────────────┘
+                             │
+          ┌─────────────────┼─────────────────┐
+          │                 │                 │
+          ▼                 ▼                 ▼
+┌──────────────────┐ ┌─────────────┐ ┌────────────────────┐
+│                  │ │             │ │                    │
+│ Agent Management │ │ Embedding   │ │ Conversation       │
+│ Service          │ │ Service     │ │ Service            │
+│                  │ │             │ │                    │
+└──────────────────┘ └─────────────┘ └────────────────────┘
+                             │
+                             ▼
+                  ┌─────────────────────┐
+                  │                     │
+                  │    Query Service    │
+                  │                     │
+                  └─────────────────────┘
+```
+
+### Flujo de Ejecución de Agentes
+
+```plaintext
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│              │     │              │     │              │
+│ Orchestrator │────▶│  Execution   │────▶│    Agent     │
+│  Service     │     │   Service    │     │ Management   │
+└──────────────┘     └──────────────┘     └──────────────┘
+                           │                     │
+                           │     1. Obtener      │
+                           │     configuración   │
+                           │     de agente       │
+                           │◀────────────────────┘
+                           │
+                           ▼
+                     ┌──────────────┐
+                     │              │
+                     │Conversation  │◀───┐
+                     │Service       │    │
+                     └──────────────┘    │ 2. Obtener/Guardar
+                           │            │ historial de
+                           │            │ conversación
+                           │            │
+                           ▼            │
+                     ┌──────────────┐   │
+                     │              │   │
+                     │ LangChain    │───┘
+                     │ Framework    │
+                     └──────────────┘
+                           │
+                           │ 3. Ejecutar agente
+                           │ con herramientas
+                           │
+                           ▼
+          ┌────────────────────────────────┐
+          │                                │
+          │  Tools (Embedding/Query/etc)   │
+          │                                │
+          └────────────────────────────────┘
+                           │
+                           │ 4. Generar
+                           │ respuesta
+                           ▼
+                     ┌──────────────┐
+                     │              │
+                     │   Callback   │
+                     │   Queue      │
+                     └──────────────┘
+                           │
+                           │
+                           ▼
+                     ┌──────────────┐
+                     │              │
+                     │ Orchestrator │
+                     │ (Response)   │
+                     └──────────────┘
+```
+
+## Componentes Principales
+
+| Componente | Descripción | Estado |
+|------------|-------------|--------|
+| **ExecutionWorker** | Procesamiento asíncrono de acciones | ✅ Completo |
+| **AgentExecutionHandler** | Lógica principal de ejecución de agentes | ✅ Completo |
+| **LangChainIntegrator** | Integración con framework LangChain | ✅ Completo |
+| **AgentExecutor** | Ejecutor de agentes con herramientas configurables | ✅ Completo |
+| **ExecutionContextHandler** | Manejo de contexto para ejecuciones | ✅ Completo |
+| **ExecutionCallbackHandler** | Manejo de callbacks asíncronos | ✅ Completo |
+
+## Domain Actions
+
+El servicio implementa y procesa los siguientes Domain Actions:
+
+### 1. Acciones de Entrada
+
+```json
+// AgentExecuteAction - Ejecutar un agente con input
+{
+  "action_id": "uuid-action-1",
+  "action_type": "execution.execute",
+  "task_id": "conversation-123",
+  "tenant_id": "tenant1",
+  "tenant_tier": "professional",
+  "data": {
+    "agent_id": "agent-abc",
+    "input": "Necesito información sobre productos",
+    "conversation_id": "conv-123",
+    "session_id": "session-xyz",
+    "tools_config": {
+      "web_search": true,
+      "calculator": true
+    },
+    "execution_params": {
+      "max_iterations": 5,
+      "max_execution_time": 120
+    }
+  },
+  "callback_queue": "orchestrator.callback"
+}
+```
+
+### 2. Acciones de Salida/Callback
+
+```json
+// ExecutionCallbackAction - Respuesta de ejecución
+{
+  "action_id": "uuid-callback-1",
+  "action_type": "execution.callback",
+  "task_id": "conversation-123",
+  "tenant_id": "tenant1",
+  "tenant_tier": "professional",
+  "data": {
+    "agent_id": "agent-abc",
+    "conversation_id": "conv-123",
+    "response": "De acuerdo a la información disponible, los productos más vendidos son...",
+    "execution_info": {
+      "execution_time_ms": 3240,
+      "tools_used": ["web_search", "rag_query"],
+      "iterations": 3,
+      "tokens_used": 560
+    },
+    "status": "success"
+  }
+}
+
+// ExecutionErrorAction - Error durante ejecución
+{
+  "action_id": "uuid-error-1",
+  "action_type": "execution.error",
+  "task_id": "conversation-123",
+  "tenant_id": "tenant1",
+  "tenant_tier": "professional",
+  "data": {
+    "agent_id": "agent-abc",
+    "conversation_id": "conv-123",
+    "error": "Timeout error: Agent execution exceeded maximum time.",
+    "error_code": "EXECUTION_TIMEOUT",
+    "error_details": {
+      "max_execution_time": 120,
+      "actual_execution_time": 132
+    }
+  }
+}
+```
 
 ## Configuración
 
 El servicio utiliza variables de entorno con el prefijo `EXECUTION_`:
 
-```
+```env
 # Configuración básica
 EXECUTION_SERVICE_NAME=agent-execution-service
 EXECUTION_SERVICE_VERSION=0.1.0
@@ -50,25 +270,34 @@ EXECUTION_MAX_EXECUTION_TIME=120
 EXECUTION_WORKER_SLEEP_SECONDS=1.0
 ```
 
-## Endpoints
+## Health Checks
 
-El servicio no expone endpoints REST para ejecución de agentes, ya que toda la comunicación se realiza a través de colas Redis. Sin embargo, proporciona endpoints de salud:
+- `GET /health` ➔ 200 OK si el servicio está funcionando correctamente
+- `GET /ready` ➔ 200 OK si todas las dependencias (Redis, servicios externos) están disponibles
+- `GET /metrics/overview` ➔ Métricas básicas de uso del servicio (parcial)
 
-- `GET /health`: Verifica el estado del servicio
-- `GET /ready`: Verifica si el servicio está listo para recibir solicitudes
+## Inconsistencias y Próximos Pasos
 
-## Testing
+### Inconsistencias Actuales
 
-Para ejecutar las pruebas:
+- **Persistencia Temporal**: Al igual que otros servicios, utiliza Redis para almacenar métricas y datos de estado. Se planea migrar a PostgreSQL para persistencia permanente.
 
-```bash
-pytest
-```
+- **Sistema de Caché**: El caché de configuraciones de agentes está implementado parcialmente y requiere optimización.
 
-## Desarrollo
+- **Métricas Limitadas**: Los endpoints de métricas proporcionan información básica pero no hay un dashboard ni análisis detallado.
 
-Para ejecutar el servicio en modo desarrollo:
+- **Configuración de Tier Enterprise**: Las capacidades del tier Enterprise para ejecutar agentes avanzados no están completamente implementadas.
 
-```bash
-uvicorn main:app --reload --port 8005
-```
+### Próximos Pasos
+
+1. **Implementar Persistencia**: Migrar métricas y datos de ejecución a PostgreSQL para almacenamiento permanente.
+
+2. **Optimizar Caché**: Mejorar el sistema de caché para configuraciones de agentes y resultados frecuentes.
+
+3. **Expandir Métricas**: Añadir métricas detalladas de uso, tiempos de ejecución y éxito de tareas con dashboard.
+
+4. **Herramientas Avanzadas**: Implementar más herramientas nativas para agentes del tier Enterprise.
+
+5. **Integración con Frontend**: Mejorar la experiencia con el frontend para visualizar el progreso de ejecución.
+
+6. **Documentación Avanzada**: Expandir la documentación de uso con ejemplos concretos.

@@ -1,67 +1,121 @@
 # Ingestion Service
 
-## Descripción General
+## Características y Estado
 
-El Ingestion Service es un servicio moderno y escalable diseñado para procesar documentos y convertirlos en chunks vectorizables para consultas de conocimiento. Este servicio forma parte del ecosistema Nooble, actuando como un componente independiente pero integrado que se comunica con otros servicios del sistema, principalmente con el servicio de embeddings.
+| Característica | Descripción | Estado |
+|-----------------|-------------|--------|
+| **Procesamiento de Documentos** | Extracción de texto de múltiples formatos | ✅ Completo |
+| **Fragmentación Inteligente** | División de documentos en chunks semánticos usando LlamaIndex | ✅ Completo |
+| **Múltiples Fuentes** | Soporte para archivos, URLs y texto plano | ✅ Completo |
+| **WebSockets en Tiempo Real** | Actualizaciones de progreso a clientes conectados | ✅ Completo |
+| **Domain Actions** | Integración mediante patrón Domain Action | ✅ Completo |
+| **Validación por Tier** | Límites y capacidades por nivel de suscripción | ✅ Completo |
+| **Sistema Async** | Procesamiento asíncrono mediante colas Redis | ✅ Completo |
+| **Worker Pool** | Escalabilidad horizontal mediante pool de workers | ✅ Completo |
+| **Sistema de Métricas** | Seguimiento de uso, tiempos y costos | ⚠️ Parcial |
+| **Persistencia** | Almacenamiento de documentos y chunks en PostgreSQL | ❌ Pendiente |
 
-El servicio está construido siguiendo principios de arquitectura modular, con un enfoque en patrones de Domain Action, workers asíncronos y comunicación en tiempo real, permitiendo una alta escalabilidad horizontal y una experiencia fluida para los usuarios finales.
+## Estructura de Archivos y Carpetas
 
-![Arquitectura](https://via.placeholder.com/800x400?text=Ingestion+Service+Architecture)
+```plaintext
+ingestion_service/
+├ __init__.py
+├ main.py
+├ README.md
+├ clients/
+│  ├ __init__.py
+│  └ embedding_client.py
+├ config/
+│  ├ __init__.py
+│  └ settings.py
+├ handlers/
+│  └ __init__.py
+├ models/
+│  ├ __init__.py
+│  ├ actions.py
+│  ├ events.py
+│  └ tasks.py
+├ routes/
+│  ├ __init__.py
+│  ├ documents.py
+│  ├ tasks.py
+│  └ websockets.py
+├ services/
+│  ├ __init__.py
+│  ├ chunking.py
+│  └ queue.py
+├ websockets/
+│  ├ __init__.py
+│  ├ connection_manager.py
+│  └ event_dispatcher.py
+└ workers/
+   ├ __init__.py
+   ├ ingestion_worker.py
+   └ worker_pool.py
+```
 
-## Características Principales
+## Arquitectura
 
-- **Procesamiento Asíncrono**: Todas las operaciones pesadas se realizan de forma asíncrona mediante workers y colas Redis.
-- **WebSockets en Tiempo Real**: Proporciona actualizaciones de progreso en tiempo real a los clientes conectados.
-- **Fragmentación Inteligente**: Utiliza LlamaIndex para dividir documentos en chunks semánticos de alta calidad.
-- **Múltiples Fuentes de Documentos**: Soporta ingestión desde archivos, URLs o texto plano.
-- **Integración con Servicio de Embeddings**: Solicita y recibe embeddings de forma asíncrona.
-- **Escalabilidad Horizontal**: Arquitectura diseñada para escalar añadiendo más workers.
-- **Domain Actions**: Comunicación basada en acciones de dominio bien definidas.
-- **Supervisión y Cancelación**: Permite monitorear y cancelar tareas en curso.
+### Flujo de Procesamiento de Documentos
 
-## Arquitectura y Flujos de Trabajo
+```
+┌────────────────────┐      ┌─────────────────────────┐      ┌───────────────────┐
+│   Cliente          │      │   Ingestion Service     │      │  Embedding Service │
+└────────────────────┘      └─────────────────────────┘      └───────────────────┘
+        │                              │                              │
+        │  1. Enviar documento         │                              │
+        │─────────────────────────────>│                              │
+        │                              │                              │
+        │  2. Retornar ID de tarea     │                              │
+        │<─────────────────────────────│                              │
+        │                              │                              │
+        │  3. Conectar WebSocket       │                              │
+        │─────────────────────────────>│                              │
+        │                              │                              │
+        │                              │  4. Procesar documento       │
+        │                              │─────────┐                    │
+        │                              │         │                    │
+        │                              │<────────┘                    │
+        │                              │                              │
+        │  5. Eventos de progreso      │                              │
+        │<─────────────────────────────│                              │
+        │                              │                              │
+        │                              │  6. Solicitar embeddings     │
+        │                              │─────────────────────────────>│
+        │                              │                              │
+        │                              │  7. Retornar embeddings      │
+        │                              │<─────────────────────────────│
+        │                              │                              │
+        │  8. Notificar finalización   │                              │
+        │<─────────────────────────────│                              │
+        │                              │                              │
+```
+
+### Integración con Backend Existente
+- **Domain Actions**: Implementa el sistema de Domain Actions para comunicación asíncrona
+- **DomainQueueManager**: Integrado con colas por tier para priorización de tareas
+- **Common Utilities**: Utiliza helpers, configuración y workers base del sistema
+- **Redis**: Utiliza Redis para colas de mensajes, estado de tareas y eventos
+- **LlamaIndex**: Utiliza LlamaIndex para fragmentación inteligente de documentos
+
+### Servicios Integrados
+- **Embedding Service**: Para generar embeddings de los chunks de documentos
+- **Query Service**: Indirectamente para consultas sobre documentos procesados
+- **Agent Execution Service**: Indirectamente para uso con agentes
 
 ### Componentes Principales
 
-El servicio está organizado en los siguientes componentes principales:
+| Componente | Descripción | Estado |
+|------------|-------------|--------|
+| **IngestionWorker** | Procesamiento asíncrono de documentos | ✅ Completo |
+| **WorkerPool** | Pool de workers para procesamiento paralelo | ✅ Completo |
+| **ChunkingService** | Fragmentación semántica de documentos | ✅ Completo |
+| **QueueService** | Gestión de colas Redis y tareas | ✅ Completo |
+| **ConnectionManager** | Administración de conexiones WebSocket | ✅ Completo |
+| **EventDispatcher** | Envío de eventos en tiempo real | ✅ Completo |
+| **EmbeddingClient** | Cliente para comunicación con Embedding Service | ✅ Completo |
 
-- **API REST**: Endpoints para recibir documentos y gestionar tareas.
-- **WebSocket Server**: Para comunicación en tiempo real con clientes.
-- **Workers**: Procesadores asíncronos que consumen tareas de colas Redis.
-- **Queue Service**: Gestión de colas y tareas con Redis.
-- **Chunking Service**: Procesamiento y fragmentación de documentos con LlamaIndex.
-- **Embedding Client**: Cliente para comunicación con el servicio de embeddings.
-
-### Estructura de Carpetas
-
-```
-ingestion_service/
-│
-├── clients/             # Clientes para servicios externos (embedding_client.py)
-├── config/              # Configuración centralizada (settings.py)
-├── handlers/            # Manejadores de Domain Actions
-├── models/              # Modelos de datos y Domain Actions
-│   ├── actions.py       # Domain Actions
-│   ├── events.py        # Modelos para eventos WebSocket
-│   └── tasks.py         # Modelos para tareas y su estado
-├── routes/              # Endpoints API REST y WebSocket
-│   ├── documents.py     # Rutas para procesamiento de documentos
-│   ├── tasks.py         # Rutas para gestión de tareas
-│   └── websockets.py    # Endpoints WebSocket
-├── services/            # Servicios core
-│   ├── chunking.py      # Servicio de fragmentación con LlamaIndex
-│   └── queue.py         # Servicio de colas con Redis
-├── websockets/          # Gestión de conexiones WebSocket
-│   ├── connection_manager.py  # Administrador de conexiones
-│   └── event_dispatcher.py    # Despachador de eventos
-├── workers/             # Workers asíncronos
-│   ├── ingestion_worker.py  # Worker para procesamiento
-│   └── worker_pool.py   # Pool de workers
-├── main.py              # Punto de entrada de la aplicación
-└── README.md            # Este documento
-```
-
-### Flujo de Procesamiento de Documentos
+## Flujo de Trabajo Detallado
 
 1. **Recepción de Documentos**:
    - Cliente envía documento vía API REST (archivo, URL o texto)
@@ -87,11 +141,43 @@ ingestion_service/
    - Actualiza estado y notifica al cliente vía WebSocket
    - Marca tarea como completada en Redis
 
-## Referencia de API
+## Domain Actions
 
-### Endpoints REST
+El servicio procesa las siguientes acciones de dominio:
 
-#### Procesamiento de Documentos
+### IngestionTaskAction
+
+```json
+{
+  "action_type": "ingestion.task",
+  "tenant_id": "client123",
+  "session_id": "sess_abc123",
+  "document_type": "file",
+  "document_data": "base64_encoded_content",
+  "document_metadata": {
+    "filename": "document.pdf",
+    "mime_type": "application/pdf"
+  },
+  "callback_queue": "client.callbacks"
+}
+```
+
+### IngestionProcessAction
+
+```json
+{
+  "action_type": "ingestion.process",
+  "tenant_id": "client123",
+  "session_id": "sess_abc123",
+  "task_id": "task_xyz789",
+  "document_chunks": ["Chunk 1", "Chunk 2", "..."],
+  "callback_queue": "client.callbacks"
+}
+```
+
+## API HTTP
+
+### Procesamiento de Documentos
 
 **POST** `/api/v1/documents/`
 
@@ -99,435 +185,100 @@ Procesa un documento subido como archivo.
 
 - **Form Params**:
   - `tenant_id`: ID del tenant
-  - `collection_id`: ID de la colección de documentos
-  - `document_id`: ID del documento
-  - `file`: Archivo a procesar (opcional)
-  - `url`: URL a procesar (opcional)
-  - `text`: Texto a procesar (opcional)
-  - `title`: Título del documento (opcional)
-  - `description`: Descripción del documento (opcional)
-  - `tags`: Tags separados por comas (opcional)
-  - `chunk_size`: Tamaño de chunks (opcional)
-  - `chunk_overlap`: Overlap entre chunks (opcional)
-  - `embedding_model`: Modelo de embeddings (opcional)
+  - `document`: Archivo a procesar
+  - `metadata`: Metadatos del documento (JSON)
 
-- **Response**: `TaskResponse` con ID de tarea
-
-**POST** `/api/v1/documents/text`
-
-Procesa un documento de texto enviado en JSON.
-
-- **Body**:
+**Respuesta:**
 ```json
 {
-  "tenant_id": "string",
-  "collection_id": "string",
-  "document_id": "string",
-  "text": "string",
-  "title": "string",
-  "description": "string",
-  "tags": ["string"],
-  "chunk_size": 1000,
-  "chunk_overlap": 200
+  "task_id": "task_xyz789",
+  "status": "processing",
+  "websocket_url": "ws://ingestion-service/ws/tasks/task_xyz789"
 }
 ```
 
-- **Response**: `TaskResponse` con ID de tarea
-
-**POST** `/api/v1/documents/url`
-
-Procesa un documento desde una URL enviada en JSON.
-
-- **Body**:
-```json
-{
-  "tenant_id": "string",
-  "collection_id": "string",
-  "document_id": "string",
-  "url": "string",
-  "title": "string"
-}
-```
-
-- **Response**: `TaskResponse` con ID de tarea
-
-#### Gestión de Tareas
+### Consulta de Tareas
 
 **GET** `/api/v1/tasks/{task_id}`
 
-Consulta el estado de una tarea.
+Obtiene el estado de una tarea.
 
-- **Path Params**:
-  - `task_id`: ID de la tarea
-  
-- **Query Params**:
-  - `tenant_id`: ID del tenant
-
-- **Response**: `TaskResponse` con detalles de la tarea
-
-**DELETE** `/api/v1/tasks/{task_id}`
-
-Cancela una tarea en proceso.
-
-- **Path Params**:
-  - `task_id`: ID de la tarea
-  
-- **Query Params**:
-  - `tenant_id`: ID del tenant
-
-- **Response**: `TaskResponse` con estado de cancelación
+**Respuesta:**
+```json
+{
+  "task_id": "task_xyz789",
+  "status": "completed",
+  "progress": 100,
+  "created_at": "2025-06-07T15:32:45Z",
+  "completed_at": "2025-06-07T15:33:12Z",
+  "result": {
+    "document_id": "doc_abc123",
+    "chunk_count": 15,
+    "total_tokens": 4230
+  }
+}
+```
 
 ### WebSocket
 
-**WS** `/ws/tasks/{task_id}`
+**WebSocket** `/ws/tasks/{task_id}`
 
-Endpoint WebSocket para recibir actualizaciones de progreso en tiempo real.
+Establece una conexión WebSocket para recibir actualizaciones en tiempo real.
 
-- **Path Params**:
-  - `task_id`: ID de la tarea
-  
-- **Query Params**:
-  - `tenant_id`: ID del tenant
-  - `token`: Token de autenticación
-
-- **Eventos Recibidos**:
-  - `TaskProgressEvent`: Actualizaciones de porcentaje de progreso
-  - `TaskStatusEvent`: Cambios de estado de la tarea
-  - `ErrorEvent`: Errores durante el procesamiento
-  - `ProcessingMilestoneEvent`: Hitos importantes en el procesamiento
-
-## Guía de Integración con Frontend
-
-### Configuración Inicial
-
-```javascript
-// Configuración global
-const API_URL = 'http://localhost:8000/api/v1';
-const WS_URL = 'ws://localhost:8000/ws';
-
-// Función auxiliar para peticiones HTTP
-async function apiCall(endpoint, method = 'GET', data = null) {
-  const options = {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${getAuthToken()}`
-    }
-  };
-
-  if (data) {
-    if (method === 'GET') {
-      const params = new URLSearchParams(data);
-      endpoint = `${endpoint}?${params}`;
-    } else {
-      options.body = JSON.stringify(data);
-    }
-  }
-
-  const response = await fetch(`${API_URL}${endpoint}`, options);
-  return response.json();
+Eventos recibidos:
+```json
+{
+  "event_type": "task.progress",
+  "task_id": "task_xyz789",
+  "progress": 50,
+  "message": "Procesando chunks 7/15"
 }
 ```
 
-### Enviar Documento para Procesamiento
-
-#### Enviar Texto
-
-```javascript
-async function processTextDocument(text, documentData) {
-  const payload = {
-    tenant_id: getCurrentTenant(),
-    collection_id: documentData.collectionId,
-    document_id: documentData.documentId || generateUUID(),
-    text: text,
-    title: documentData.title,
-    description: documentData.description,
-    tags: documentData.tags || [],
-    chunk_size: documentData.chunkSize || 1000,
-    chunk_overlap: documentData.chunkOverlap || 200
-  };
-
-  return await apiCall('/documents/text', 'POST', payload);
-}
-```
-
-#### Subir Archivo
-
-```javascript
-async function uploadDocumentFile(file, documentData) {
-  const formData = new FormData();
-  formData.append('file', file);
-  formData.append('tenant_id', getCurrentTenant());
-  formData.append('collection_id', documentData.collectionId);
-  formData.append('document_id', documentData.documentId || generateUUID());
-  formData.append('title', documentData.title || file.name);
-  
-  if (documentData.description) {
-    formData.append('description', documentData.description);
-  }
-  
-  if (documentData.tags) {
-    formData.append('tags', documentData.tags.join(','));
-  }
-
-  const response = await fetch(`${API_URL}/documents`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${getAuthToken()}`
-    },
-    body: formData
-  });
-  
-  return await response.json();
-}
-```
-
-### Conexión WebSocket para Actualizaciones en Tiempo Real
-
-```javascript
-class TaskProgressMonitor {
-  constructor(taskId, callbacks) {
-    this.taskId = taskId;
-    this.tenant_id = getCurrentTenant();
-    this.socket = null;
-    this.callbacks = callbacks || {
-      onProgress: (progress) => {},
-      onStatus: (status) => {},
-      onError: (error) => {},
-      onMilestone: (milestone) => {},
-      onComplete: (result) => {}
-    };
-  }
-
-  connect() {
-    const token = getAuthToken();
-    this.socket = new WebSocket(
-      `${WS_URL}/tasks/${this.taskId}?tenant_id=${this.tenant_id}&token=${token}`
-    );
-
-    this.socket.onopen = (event) => {
-      console.log(`Conexión establecida para tarea ${this.taskId}`);
-    };
-
-    this.socket.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      
-      switch (data.event_type) {
-        case 'task_progress':
-          this.callbacks.onProgress({
-            percentage: data.percentage,
-            status: data.status,
-            message: data.message
-          });
-          break;
-          
-        case 'task_status':
-          this.callbacks.onStatus({
-            current: data.current_status,
-            previous: data.previous_status,
-            message: data.message
-          });
-          
-          if (data.current_status === 'completed') {
-            this.callbacks.onComplete(data);
-            this.disconnect();
-          }
-          break;
-          
-        case 'error':
-          this.callbacks.onError({
-            code: data.error_code,
-            message: data.error_message,
-            details: data.details
-          });
-          break;
-          
-        case 'processing_milestone':
-          this.callbacks.onMilestone({
-            milestone: data.milestone,
-            message: data.message,
-            details: data.details
-          });
-          break;
-      }
-    };
-
-    this.socket.onerror = (error) => {
-      console.error(`Error en WebSocket: ${error}`);
-      this.callbacks.onError({
-        code: 'websocket_error',
-        message: 'Error en la conexión WebSocket',
-        details: { error: error.toString() }
-      });
-    };
-
-    this.socket.onclose = (event) => {
-      console.log(`Conexión cerrada: ${event.code}`);
-    };
-  }
-
-  disconnect() {
-    if (this.socket) {
-      this.socket.close();
-      this.socket = null;
-    }
-  }
-}
-```
-
-### Ejemplo de Uso Completo
-
-```javascript
-// Componente React para subida de documentos con barra de progreso
-function DocumentUpload({ collectionId }) {
-  const [uploading, setUploading] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState('');
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState(null);
-  
-  async function handleFileUpload(file) {
-    setUploading(true);
-    setProgress(0);
-    setStatus('preparing');
-    setMessage('Preparando documento...');
-    
-    try {
-      // 1. Enviar archivo
-      const response = await uploadDocumentFile(file, {
-        collectionId: collectionId,
-        title: file.name
-      });
-      
-      if (!response.success) {
-        throw new Error(response.message || 'Error al subir documento');
-      }
-      
-      const taskId = response.task.task_id;
-      
-      // 2. Conectar al WebSocket para actualizaciones
-      const monitor = new TaskProgressMonitor(taskId, {
-        onProgress: (data) => {
-          setProgress(data.percentage);
-          setMessage(data.message);
-        },
-        onStatus: (data) => {
-          setStatus(data.current);
-        },
-        onMilestone: (data) => {
-          console.log(`Hito alcanzado: ${data.milestone}`);
-        },
-        onError: (error) => {
-          setError(error.message);
-          setUploading(false);
-        },
-        onComplete: (result) => {
-          setProgress(100);
-          setStatus('completed');
-          setMessage('Documento procesado correctamente');
-          setUploading(false);
-          // Notificar que el documento está listo
-          onDocumentProcessed(response.task.document_id);
-        }
-      });
-      
-      monitor.connect();
-      
-    } catch (err) {
-      setError(err.message);
-      setUploading(false);
-    }
-  }
-  
-  return (
-    <div className="document-upload">
-      {!uploading ? (
-        <FileDropzone onFileSelected={handleFileUpload} />
-      ) : (
-        <div className="progress-container">
-          <ProgressBar value={progress} />
-          <div className="status">{status}</div>
-          <div className="message">{message}</div>
-          {error && <div className="error">{error}</div>}
-        </div>
-      )}
-    </div>
-  );
-}
-```
-
-## Configuración del Servicio
+## Configuración
 
 ### Variables de Entorno
 
-Crea un archivo `.env` en la raíz del proyecto con las siguientes variables:
+Todas las variables de entorno no tienen un prefijo específico:
 
-```env
-# Configuración general
-DEBUG=true
-VERSION=1.0.0
-HOST=0.0.0.0
-PORT=8000
+| Variable | Descripción | Default |
+|----------|-------------|---------|
+| `REDIS_HOST` | Host para conexión Redis | localhost |
+| `REDIS_PORT` | Puerto para conexión Redis | 6379 |
+| `WORKER_COUNT` | Número de workers concurrentes | 2 |
+| `MAX_FILE_SIZE` | Tamaño máximo de archivo (bytes) | 10MB |
+| `DEFAULT_CHUNK_SIZE` | Tamaño predeterminado de chunks | 512 |
+| `EMBEDDING_SERVICE_URL` | URL del servicio de embeddings | http://embedding-service:8000 |
 
-# Configuración de Redis
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_DB=0
-REDIS_PASSWORD=
+## Health Checks
 
-# Colas Redis
-DOCUMENT_QUEUE=document_process_queue
-EMBEDDING_CALLBACK_QUEUE=embedding_callback_queue
-TASK_STATUS_QUEUE=task_status_queue
+- `GET /health` ➔ 200 OK
+- `GET /ready`  ➔ 200 OK
+- `GET /metrics/overview` ➔ Métricas básicas de uso del servicio (parcial)
 
-# Workers
-WORKER_COUNT=2
-WORKER_SLEEP_TIME=0.1
-AUTO_START_WORKERS=true
+## Inconsistencias y Próximos Pasos
 
-# Límites
-MAX_FILE_SIZE=50000000  # 50 MB
-MAX_TEXT_LENGTH=1000000  # 1 millón de caracteres
+### Inconsistencias Actuales
 
-# Configuración de Chunking
-CHUNK_SIZE=1000
-CHUNK_OVERLAP=200
-CHUNK_MODEL=text-embedding-3-large
+- **Persistencia Temporal**: Al igual que otros servicios, utiliza Redis para almacenar el estado de las tareas. Se planea migrar a PostgreSQL para persistencia permanente.
+- **Sistema de Métricas Parcial**: Aunque captura progreso de tareas, no hay un dashboard ni análisis detallado.
+- **Límites de Tier**: Aunque existe validación por tier, algunas capacidades avanzadas del tier Enterprise no están completamente implementadas.
+- **Directorio Handlers Vacío**: El directorio de handlers está presente pero no tiene clases implementadas, la lógica está en workers y services.
+- **Variables de Entorno Sin Prefijo**: A diferencia de otros servicios que usan prefijos específicos, las variables de entorno no tienen un prefijo consistente.
 
-# Servicio de Embeddings
-EMBEDDING_SERVICE_URL=http://localhost:8001/api/v1/embeddings
-EMBEDDING_MODEL=text-embedding-3-large
+### Próximos Pasos
 
-# CORS
-CORS_ORIGINS=["http://localhost:3000", "https://app.example.com"]
-```
+- **Implementar Persistencia**: Añadir almacenamiento en PostgreSQL para documentos procesados y estado de tareas.
+- **Expandir Métricas**: Añadir métricas detalladas de uso, tiempos y costos por tenant.
+- **Reorganizar Handlers**: Implementar handlers faltantes para seguir la arquitectura estándar con otros servicios.
+- **Estandarizar Variables**: Adoptar un prefijo de variable de entorno consistente (`INGESTION_`).
+- **Mejorar Estrategias de Chunking**: Añadir más algoritmos de fragmentación inteligente.
+- **Añadir Retry Logic**: Implementar reintentos para tareas fallidas y recuperación de errores.
 
-### Ejecución del Servicio
+## Desarrollo
+
+Para ejecutar el servicio en modo desarrollo:
 
 ```bash
-# Instalar dependencias
-pip install -r requirements.txt
-
-# Iniciar Redis (si no está corriendo)
-docker run -d -p 6379:6379 --name redis redis:alpine
-
-# Ejecutar servicio
-uvicorn ingestion_service.main:app --reload
+uvicorn main:app --reload --port 8003
 ```
-
-## Escalabilidad y Rendimiento
-
-El servicio está diseñado para escalar horizontalmente:
-
-1. **Escalado de Workers**: Aumenta `WORKER_COUNT` para procesar más documentos en paralelo.
-
-2. **Redis Distribuido**: Configura un cluster Redis para alta disponibilidad.
-
-3. **Deployment Distribuido**: Despliega múltiples instancias del servicio con balanceo de carga.
-
-4. **Mecanismo WebSocket Cluster**: El `connection_manager` permite distribución de conexiones WebSocket.
-
-5. **Configuración Recomendada**:
-   - Para volumen bajo: 1-2 workers
-   - Para volumen medio: 3-5 workers
-   - Para volumen alto: 10+ workers con autoscaling

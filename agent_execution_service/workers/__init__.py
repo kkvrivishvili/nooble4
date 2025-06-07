@@ -4,6 +4,6 @@ Workers para Agent Execution Service.
 Implementa workers basados en Domain Actions para procesamiento asíncrono.
 """
 
-from .domain_execution_worker import DomainExecutionWorker as ExecutionWorker
+from .execution_worker import ExecutionWorker
 
 __all__ = ['ExecutionWorker']
