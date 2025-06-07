@@ -1,0 +1,3 @@
+"""
+Workers para Query Service.
+"""

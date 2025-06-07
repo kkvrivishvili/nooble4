@@ -1,0 +1,3 @@
+"""
+Configuración para Query Service.
+"""

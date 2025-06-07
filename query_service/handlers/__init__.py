@@ -1,0 +1,3 @@
+"""
+Handlers para Query Service.
+"""
