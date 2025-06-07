@@ -55,13 +55,13 @@ class QueryCallbackHandler:
             
             # Si hay un future pendiente para este callback, resolverlo
             if task_id in self._pending_callbacks:
-                if action.status == "completed":
+                if typed_action.status == "completed":
                     # Guardar resultado
-                    self._pending_callbacks[task_id] = action.result
+                    self._pending_callbacks[task_id] = typed_action.result
                 else:
                     # Guardar error
                     self._pending_callbacks[task_id] = {
-                        "error": action.error or {
+                        "error": typed_action.error or {
                             "type": "UnknownError",
                             "message": "Error desconocido en Query Service"
                         }
