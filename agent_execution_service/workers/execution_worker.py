@@ -1,20 +1,24 @@
 """
-Worker para procesamiento de Domain Actions en Agent Execution Service.
+Worker para Domain Actions en Agent Execution Service.
 
-Este worker extiende el BaseWorker para procesar acciones
-específicas de ejecución de agentes usando el nuevo sistema de Domain Actions.
+MODIFICADO: Integración completa con sistema de colas por tier.
 """
 
 import logging
-import json
 from typing import Dict, Any, List
-from datetime import datetime
 
 from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
-from agent_execution_service.models.actions_model import AgentExecutionAction, ExecutionCallbackAction
+from common.redis_pool import get_redis_client
+from common.services.action_processor import ActionProcessor
+from common.services.domain_queue_manager import DomainQueueManager
+from agent_execution_service.models.actions_model import (
+    AgentExecutionAction, ExecutionCallbackAction
+)
+from agent_execution_service.handlers.agent_execution_handler import AgentExecutionHandler
+from agent_execution_service.handlers.context_handler import get_context_handler
+from agent_execution_service.handlers.execution_callback_handler import ExecutionCallbackHandler
 from agent_execution_service.handlers.embedding_callback_handler import EmbeddingCallbackHandler
-from agent_execution_service.handlers.handlers_domain_action import ExecutionHandler
 from agent_execution_service.handlers.query_callback_handler import QueryCallbackHandler
 from agent_execution_service.config.settings import get_settings
 
@@ -25,58 +29,95 @@ class ExecutionWorker(BaseWorker):
     """
     Worker para procesar Domain Actions de ejecución de agentes.
     
-    Procesa acciones del tipo execution.agent_run y envía resultados
-    como callbacks estructurados.
+    MODIFICADO: 
+    - Define domain específico
+    - Procesa ejecuciones por tier
+    - Integra con callback handlers
     """
     
     def __init__(self, redis_client=None, action_processor=None):
         """
-        Inicializa el worker con servicios necesarios.
-        
-        Args:
-            redis_client: Cliente Redis para acceso a colas (opcional)
-            action_processor: Procesador centralizado de acciones (opcional)
+        Inicializa worker con servicios necesarios.
         """
-        from common.redis_pool import get_redis_client
-        from common.services.action_processor import ActionProcessor
-        
         # Usar valores por defecto si no se proporcionan
-        redis_client = redis_client or get_redis_client(settings.redis_url)
+        redis_client = redis_client or get_redis_client()
         action_processor = action_processor or ActionProcessor(redis_client)
         
         super().__init__(redis_client, action_processor)
         
+        # NUEVO: Definir domain específico
+        self.domain = settings.domain_name  # "execution"
+        
+        # Inicializar queue manager
+        self.queue_manager = DomainQueueManager(redis_client)
+        
         # Inicializar handlers
-        self.execution_handler = ExecutionHandler(None)  # Agregar servicio de agentes apropiado
+        self._initialize_handlers()
+    
+    async def _initialize_handlers(self):
+        """Inicializa todos los handlers necesarios."""
+        # Context handler
+        self.context_handler = await get_context_handler(self.redis_client)
+        
+        # Execution callback handler
+        self.execution_callback_handler = ExecutionCallbackHandler(
+            self.queue_manager, self.redis_client
+        )
+        
+        # Agent execution handler
+        self.agent_execution_handler = AgentExecutionHandler(
+            self.context_handler, self.redis_client
+        )
+        
+        # Callback handlers para servicios externos
         self.embedding_callback_handler = EmbeddingCallbackHandler()
         self.query_callback_handler = QueryCallbackHandler()
         
         # Registrar handlers en el action_processor
         self.action_processor.register_handler(
-            "execution.agent_run", 
-            self.execution_handler.handle_agent_run
+            "execution.agent_run",
+            self._handle_agent_execution
         )
         
-        # Registrar handler para callbacks de embeddings
+        # Registrar handlers para callbacks de servicios externos
         self.action_processor.register_handler(
             "embedding.callback",
             self.embedding_callback_handler.handle_embedding_callback
         )
         
-        # Registrar handler para callbacks de query
         self.action_processor.register_handler(
             "query.callback",
             self.query_callback_handler.handle_query_callback
         )
     
-    def get_queue_names(self) -> List[str]:
+    async def _handle_agent_execution(self, action: DomainAction) -> Dict[str, Any]:
         """
-        Retorna nombres de colas a monitorear.
+        Handler específico para ejecución de agentes.
         
+        Args:
+            action: Acción de ejecución
+            
         Returns:
-            Lista de patrones de colas
+            Resultado del procesamiento
         """
-        return ["execution.*.actions"]
+        try:
+            # Convertir a tipo específico
+            execution_action = AgentExecutionAction.parse_obj(action.dict())
+            
+            # Procesar ejecución
+            result = await self.agent_execution_handler.handle_agent_execution(execution_action)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error en handle_agent_execution: {str(e)}")
+            return {
+                "success": False,
+                "error": {
+                    "type": type(e).__name__,
+                    "message": str(e)
+                }
+            }
     
     def create_action_from_data(self, action_data: Dict[str, Any]) -> DomainAction:
         """
@@ -91,12 +132,14 @@ class ExecutionWorker(BaseWorker):
         action_type = action_data.get("action_type")
         
         if action_type == "execution.agent_run":
-            return AgentExecutionAction(**action_data)
+            return AgentExecutionAction.parse_obj(action_data)
+        elif action_type == "execution.callback":
+            return ExecutionCallbackAction.parse_obj(action_data)
         else:
             # Fallback a DomainAction genérica
-            return DomainAction(**action_data)
+            return DomainAction.parse_obj(action_data)
     
-    async def _send_callback(self, action: AgentExecutionAction, result: Dict[str, Any]):
+    async def _send_callback(self, action: DomainAction, result: Dict[str, Any]):
         """
         Envía resultado como callback.
         
@@ -107,30 +150,31 @@ class ExecutionWorker(BaseWorker):
         try:
             # Validar que haya cola de callback
             if not action.callback_queue:
-                logger.warning(f"No se especificó cola de callback para {action.action_id}")
+                logger.warning(f"No se especificó cola de callback para {action.task_id}")
                 return
             
-            # Crear acción de callback
-            callback = ExecutionCallbackAction(
-                tenant_id=action.tenant_id,
-                session_id=action.session_id,
-                task_id=action.task_id or action.action_id,
-                result=result.get("result", {}),
-                status="completed" if result.get("success") else "failed",
-                execution_time=result.get("execution_time")
-            )
-            
-            # Si hubo error, incluirlo en el resultado
-            if not result.get("success") and result.get("error"):
-                callback.status = "failed"
-                callback.result = {
-                    "status": "failed",
-                    "error": result.get("error")
-                }
-            
-            # Enviar a cola de callback
-            await self.action_processor.enqueue_action(callback, action.callback_queue)
-            logger.info(f"Callback enviado: {action.callback_queue}")
+            # Determinar tipo de callback según resultado
+            if result.get("success", False) and "execution_result" in result:
+                # Callback de ejecución exitosa
+                await self.execution_callback_handler.send_success_callback(
+                    task_id=action.task_id,
+                    tenant_id=action.tenant_id,
+                    tenant_tier=action.tenant_tier,
+                    session_id=action.session_id,
+                    callback_queue=action.callback_queue,
+                    execution_result=result["execution_result"]
+                )
+            else:
+                # Callback de error
+                await self.execution_callback_handler.send_error_callback(
+                    task_id=action.task_id,
+                    tenant_id=action.tenant_id,
+                    tenant_tier=action.tenant_tier,
+                    session_id=action.session_id,
+                    callback_queue=action.callback_queue,
+                    error_info=result.get("error", {}),
+                    execution_time=result.get("execution_time")
+                )
             
         except Exception as e:
             logger.error(f"Error enviando callback: {str(e)}")
@@ -145,32 +189,51 @@ class ExecutionWorker(BaseWorker):
         """
         try:
             # Extraer información necesaria
-            tenant_id = action_data.get("tenant_id", "default")
-            callback_queue = action_data.get("callback_queue")
             task_id = action_data.get("task_id") or action_data.get("action_id")
-            session_id = action_data.get("session_id")
+            tenant_id = action_data.get("tenant_id", "unknown")
+            tenant_tier = action_data.get("tenant_tier", "free")
+            session_id = action_data.get("session_id", "unknown")
+            callback_queue = action_data.get("callback_queue")
             
             if not callback_queue or not task_id:
                 logger.warning("Información insuficiente para enviar error callback")
                 return
             
-            # Crear acción de callback de error
-            callback = ExecutionCallbackAction(
-                tenant_id=tenant_id,
-                session_id=session_id,
+            # Enviar error callback
+            await self.execution_callback_handler.send_error_callback(
                 task_id=task_id,
-                status="failed",
-                result={
-                    "status": "failed",
-                    "error": {
-                        "type": "ExecutionError",
-                        "message": error_message
-                    }
+                tenant_id=tenant_id,
+                tenant_tier=tenant_tier,
+                session_id=session_id,
+                callback_queue=callback_queue,
+                error_info={
+                    "type": "ProcessingError",
+                    "message": error_message
                 }
             )
             
-            # Enviar a cola de callback
-            await self.action_processor.enqueue_action(callback, callback_queue)
-            
         except Exception as e:
             logger.error(f"Error enviando error callback: {str(e)}")
+    
+    # NUEVO: Métodos auxiliares específicos del execution service
+    async def get_execution_stats(self) -> Dict[str, Any]:
+        """Obtiene estadísticas específicas del execution service."""
+        
+        # Stats de colas
+        queue_stats = await self.get_queue_stats()
+        
+        # Stats de ejecución
+        execution_stats = await self.agent_execution_handler.get_execution_stats("all")
+        
+        # Stats de callbacks
+        callback_stats = await self.execution_callback_handler.get_callback_stats("all")
+        
+        return {
+            "queue_stats": queue_stats,
+            "execution_stats": execution_stats,
+            "callback_stats": callback_stats,
+            "worker_info": {
+                "domain": self.domain,
+                "running": self.running
+            }
+        }

@@ -1,27 +1,21 @@
 """
-Worker para procesar acciones de consulta.
+Worker para Domain Actions en Query Service.
 
-# TODO: Oportunidades de mejora futura:
-# 1. Refactorizar método process_action para usar validate_and_process desde una clase BaseHandler
-# 2. Unificar métodos _send_callback y _send_error_callback en un solo método más flexible
-# 3. Implementar mecanismo de retry para acciones fallidas con backoff exponencial
-# 4. Separar responsabilidades de procesamiento y envío de callbacks usando patrones asinc
+MODIFICADO: Integración completa con sistema de colas por tier.
 """
 
 import logging
-import asyncio
-from typing import List, Dict, Any, Union, cast
-
-import redis.asyncio as aioredis
+from typing import Dict, Any, List
 
 from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
-from common.services.action_processor import ActionProcessor
 from common.redis_pool import get_redis_client
-
+from common.services.action_processor import ActionProcessor
+from common.services.domain_queue_manager import DomainQueueManager
 from query_service.models.actions import QueryGenerateAction, SearchDocsAction, QueryCallbackAction
-
 from query_service.handlers.query_handler import QueryHandler
+from query_service.handlers.context_handler import get_query_context_handler
+from query_service.handlers.query_callback_handler import QueryCallbackHandler
 from query_service.handlers.embedding_callback_handler import EmbeddingCallbackHandler
 from query_service.config.settings import get_settings
 
@@ -30,39 +24,60 @@ settings = get_settings()
 
 class QueryWorker(BaseWorker):
     """
-    Worker que procesa acciones de consulta de forma asíncrona.
+    Worker para procesar Domain Actions de consulta y búsqueda.
+    
+    MODIFICADO: 
+    - Define domain específico
+    - Procesa consultas por tier
+    - Integra con callback handlers
     """
     
-    def __init__(
-        self,
-        redis_client: aioredis.Redis = None,
-        action_processor: ActionProcessor = None
-    ):
+    def __init__(self, redis_client=None, action_processor=None):
         """
-        Inicializa el worker.
-        
-        Args:
-            redis_client: Cliente Redis (opcional)
-            action_processor: Procesador de acciones (opcional)
+        Inicializa worker con servicios necesarios.
         """
-        # Inicializar Redis y action processor
-        redis_client = redis_client or get_redis_client(settings.redis_url)
+        # Usar valores por defecto si no se proporcionan
+        redis_client = redis_client or get_redis_client()
         action_processor = action_processor or ActionProcessor(redis_client)
         
         super().__init__(redis_client, action_processor)
         
+        # NUEVO: Definir domain específico
+        self.domain = settings.domain_name  # "query"
+        
+        # Inicializar queue manager
+        self.queue_manager = DomainQueueManager(redis_client)
+        
         # Inicializar handlers
-        self.query_handler = QueryHandler()
+        self._initialize_handlers()
+    
+    async def _initialize_handlers(self):
+        """Inicializa todos los handlers necesarios."""
+        # Context handler
+        self.context_handler = await get_query_context_handler(self.redis_client)
+        
+        # Query callback handler
+        self.query_callback_handler = QueryCallbackHandler(
+            self.queue_manager, self.redis_client
+        )
+        
+        # Query handler principal
+        self.query_handler = QueryHandler(
+            self.context_handler, self.redis_client
+        )
+        
+        # Embedding callback handler
         self.embedding_callback_handler = EmbeddingCallbackHandler()
         
         # Registrar handlers en el action_processor
         self.action_processor.register_handler(
-            "query.generate", 
-            self.query_handler.handle_query_generate
+            "query.generate",
+            self._handle_query_generate
         )
+        
         self.action_processor.register_handler(
-            "query.search", 
-            self.query_handler.handle_search_docs
+            "query.search",
+            self._handle_search_docs
         )
         
         # Registrar handler para callbacks de embeddings
@@ -71,147 +86,194 @@ class QueryWorker(BaseWorker):
             self.embedding_callback_handler.handle_embedding_callback
         )
     
-    def get_queue_names(self) -> List[str]:
+    async def _handle_query_generate(self, action: DomainAction) -> Dict[str, Any]:
         """
-        Obtiene los nombres de las colas a monitorear.
-        
-        Returns:
-            Lista de colas
-        """
-        # Monitorear colas por tenant
-        tenant_queue_pattern = f"{settings.query_actions_queue_prefix}.*.actions"
-        
-        # También podemos agregar una cola global si es necesario
-        return [tenant_queue_pattern]
-    
-    async def process_action(self, action: DomainAction) -> None:
-        """
-        Procesa una acción y envía el resultado como callback.
+        Handler específico para generación de consultas RAG.
         
         Args:
-            action: Acción a procesar
+            action: Acción de consulta
+            
+        Returns:
+            Resultado del procesamiento
         """
-        start_time = asyncio.get_event_loop().time()
-        action_type = action.action_type
-        task_id = action.task_id
-        
         try:
-            logger.info(f"Procesando acción {action_type} para tarea {task_id}")
+            # Convertir a tipo específico
+            query_action = QueryGenerateAction.parse_obj(action.dict())
             
-            # Procesar según tipo
-            if action_type == "query.generate":
-                # Convertir a tipo específico para mejor validación
-                typed_action = QueryGenerateAction.parse_obj(action.dict())
-                result = await self.query_handler.handle_query_generate(typed_action)
-            elif action_type == "query.search":
-                typed_action = SearchDocsAction.parse_obj(action.dict())
-                result = await self.query_handler.handle_search_docs(typed_action)
-            else:
-                logger.warning(f"Tipo de acción desconocido: {action_type}")
-                return
+            # Procesar consulta
+            result = await self.query_handler.handle_query_generate(query_action)
             
-            # Enviar callback con resultado
-            await self._send_callback(
-                task_id=task_id,
-                tenant_id=action.tenant_id,
-                success=result.get("success", False),
-                result=result.get("result", {}),
-                error=result.get("error"),
-                callback_queue=action.callback_queue
-            )
-            
-            process_time = asyncio.get_event_loop().time() - start_time
-            logger.info(f"Acción {action_type} completada en {process_time:.2f}s")
+            return result
             
         except Exception as e:
-            logger.error(f"Error procesando acción {action_type}: {str(e)}")
-            
-            # Enviar error como callback
-            await self._send_error_callback(
-                task_id=task_id,
-                tenant_id=getattr(action, "tenant_id", "unknown"),
-                error_type=type(e).__name__,
-                error_message=str(e),
-                callback_queue=getattr(action, "callback_queue", None)
-            )
+            logger.error(f"Error en handle_query_generate: {str(e)}")
+            return {
+                "success": False,
+                "error": {
+                    "type": type(e).__name__,
+                    "message": str(e)
+                }
+            }
     
-    async def _send_callback(
-        self,
-        task_id: str,
-        tenant_id: str,
-        success: bool,
-        result: Dict[str, Any],
-        error: Dict[str, Any] = None,
-        callback_queue: str = None
-    ) -> None:
+    async def _handle_search_docs(self, action: DomainAction) -> Dict[str, Any]:
+        """
+        Handler específico para búsqueda de documentos.
+        
+        Args:
+            action: Acción de búsqueda
+            
+        Returns:
+            Resultado del procesamiento
+        """
+        try:
+            # Convertir a tipo específico
+            search_action = SearchDocsAction.parse_obj(action.dict())
+            
+            # Procesar búsqueda
+            result = await self.query_handler.handle_search_docs(search_action)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error en handle_search_docs: {str(e)}")
+            return {
+                "success": False,
+                "error": {
+                    "type": type(e).__name__,
+                    "message": str(e)
+                }
+            }
+    
+    def create_action_from_data(self, action_data: Dict[str, Any]) -> DomainAction:
+        """
+        Crea objeto de acción apropiado según los datos.
+        
+        Args:
+            action_data: Datos de la acción en formato JSON
+            
+        Returns:
+            DomainAction del tipo específico
+        """
+        action_type = action_data.get("action_type")
+        
+        if action_type == "query.generate":
+            return QueryGenerateAction.parse_obj(action_data)
+        elif action_type == "query.search":
+            return SearchDocsAction.parse_obj(action_data)
+        elif action_type == "query.callback":
+            return QueryCallbackAction.parse_obj(action_data)
+        else:
+            # Fallback a DomainAction genérica
+            return DomainAction.parse_obj(action_data)
+    
+    async def _send_callback(self, action: DomainAction, result: Dict[str, Any]):
         """
         Envía resultado como callback.
         
         Args:
-            task_id: ID de la tarea
-            tenant_id: ID del tenant
-            success: Si fue exitoso
-            result: Resultado
-            error: Error (si aplica)
-            callback_queue: Cola para callback
+            action: Acción original que generó el resultado
+            result: Resultado del procesamiento
         """
-        if not callback_queue:
-            logger.warning(f"No hay cola de callback para tarea {task_id}")
-            return
+        try:
+            # Validar que haya cola de callback
+            if not action.callback_queue:
+                logger.warning(f"No se especificó cola de callback para {action.task_id}")
+                return
             
-        # Crear acción de callback usando el modelo específico
-        callback_action = QueryCallbackAction(
-            task_id=task_id,
-            tenant_id=tenant_id,
-            status="completed" if success else "error",
-            result=result,
-            error=error if error else None
-        )
-        
-        # Convertir a DomainAction para enviar
-        domain_action = DomainAction.parse_obj(callback_action.dict())
-        
-        # Enviar callback
-        await self.action_processor.enqueue_action(domain_action, callback_queue)
-        logger.debug(f"Callback enviado para tarea {task_id}")
-        
-    async def _send_error_callback(
-        self,
-        task_id: str,
-        tenant_id: str,
-        error_type: str,
-        error_message: str,
-        callback_queue: str = None
-    ) -> None:
+            # Determinar tipo de callback según resultado y acción
+            if result.get("success", False) and "result" in result:
+                if action.action_type == "query.generate":
+                    # Callback de consulta RAG exitosa
+                    await self.query_callback_handler.send_query_success_callback(
+                        task_id=action.task_id,
+                        tenant_id=action.tenant_id,
+                        session_id=action.session_id,
+                        callback_queue=action.callback_queue,
+                        query_result=result["result"],
+                        processing_time=result.get("execution_time", 0.0),
+                        tokens_used=result.get("result", {}).get("metadata", {}).get("tokens_used")
+                    )
+                elif action.action_type == "query.search":
+                    # Callback de búsqueda exitosa
+                    await self.query_callback_handler.send_search_success_callback(
+                        task_id=action.task_id,
+                        tenant_id=action.tenant_id,
+                        session_id=action.session_id,
+                        callback_queue=action.callback_queue,
+                        search_result=result["result"],
+                        processing_time=result.get("execution_time", 0.0)
+                    )
+            else:
+                # Callback de error
+                await self.query_callback_handler.send_error_callback(
+                    task_id=action.task_id,
+                    tenant_id=action.tenant_id,
+                    session_id=action.session_id,
+                    callback_queue=action.callback_queue,
+                    error_info=result.get("error", {}),
+                    processing_time=result.get("execution_time")
+                )
+            
+        except Exception as e:
+            logger.error(f"Error enviando callback: {str(e)}")
+    
+    async def _send_error_callback(self, action_data: Dict[str, Any], error_message: str):
         """
-        Envía error como callback.
+        Envía callback de error.
         
         Args:
-            task_id: ID de la tarea
-            tenant_id: ID del tenant
-            error_type: Tipo de error
+            action_data: Datos originales de la acción
             error_message: Mensaje de error
-            callback_queue: Cola para callback
         """
-        if not callback_queue:
-            logger.warning(f"No hay cola de callback para error de tarea {task_id}")
-            return
+        try:
+            # Extraer información necesaria
+            task_id = action_data.get("task_id") or action_data.get("action_id")
+            tenant_id = action_data.get("tenant_id", "unknown")
+            session_id = action_data.get("session_id", "unknown")
+            callback_queue = action_data.get("callback_queue")
             
-        # Crear acción de callback con error usando modelo específico
-        callback_action = QueryCallbackAction(
-            task_id=task_id,
-            tenant_id=tenant_id,
-            status="error",
-            result={},
-            error={
-                "type": error_type,
-                "message": error_message
+            if not callback_queue or not task_id:
+                logger.warning("Información insuficiente para enviar error callback")
+                return
+            
+            # Enviar error callback
+            await self.query_callback_handler.send_error_callback(
+                task_id=task_id,
+                tenant_id=tenant_id,
+                session_id=session_id,
+                callback_queue=callback_queue,
+                error_info={
+                    "type": "ProcessingError",
+                    "message": error_message
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"Error enviando error callback: {str(e)}")
+    
+    # NUEVO: Métodos auxiliares específicos del query service
+    async def get_query_stats(self) -> Dict[str, Any]:
+        """Obtiene estadísticas específicas del query service."""
+        
+        # Stats de colas
+        queue_stats = await self.get_queue_stats()
+        
+        # Stats de consultas
+        query_stats = await self.query_handler.get_query_stats("all")
+        
+        # Stats de callbacks
+        callback_stats = await self.query_callback_handler.get_callback_stats("all")
+        
+        # Stats de búsqueda vectorial
+        search_stats = await self.query_handler.vector_search_service.get_search_stats("all")
+        
+        return {
+            "queue_stats": queue_stats,
+            "query_stats": query_stats,
+            "callback_stats": callback_stats,
+            "search_stats": search_stats,
+            "worker_info": {
+                "domain": self.domain,
+                "running": self.running
             }
-        )
-        
-        # Convertir a DomainAction para enviar
-        domain_action = DomainAction.parse_obj(callback_action.dict())
-        
-        # Enviar callback
-        await self.action_processor.enqueue_action(domain_action, callback_queue)
-        logger.debug(f"Callback de error enviado para tarea {task_id}")
+        }

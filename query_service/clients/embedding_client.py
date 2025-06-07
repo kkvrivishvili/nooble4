@@ -1,5 +1,6 @@
 """
 Cliente para comunicarse con Embedding Service usando Domain Actions.
+MODIFICADO: Integración con sistema de colas por tier.
 """
 
 import logging
@@ -8,10 +9,10 @@ from typing import List, Dict, Any, Optional
 from uuid import UUID
 
 from common.models.actions import DomainAction
-from common.services.action_processor import ActionProcessor
+from common.services.domain_queue_manager import DomainQueueManager
 from common.redis_pool import get_redis_client
-from query_service.config.settings import get_settings
 from embedding_service.models.actions import EmbeddingGenerateAction
+from query_service.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -19,25 +20,27 @@ settings = get_settings()
 class EmbeddingClient:
     """
     Cliente para solicitar embeddings usando Domain Actions.
-    
-    Permite enviar solicitudes de embedding al servicio de embeddings
-    desde el query service.
+    MODIFICADO: Usar DomainQueueManager en lugar de ActionProcessor.
     """
     
-    def __init__(self, action_processor: Optional[ActionProcessor] = None):
+    def __init__(self, queue_manager: Optional[DomainQueueManager] = None):
         """
         Inicializa el cliente.
         
         Args:
-            action_processor: Procesador de acciones (opcional)
+            queue_manager: Gestor de colas por tier (opcional)
         """
-        redis_client = get_redis_client(settings.redis_url)
-        self.action_processor = action_processor or ActionProcessor(redis_client)
+        if queue_manager:
+            self.queue_manager = queue_manager
+        else:
+            redis_client = get_redis_client(settings.redis_url)
+            self.queue_manager = DomainQueueManager(redis_client)
     
     async def generate_embeddings(
         self,
         texts: List[str],
         tenant_id: str,
+        tenant_tier: str,
         session_id: str,
         callback_queue: str,
         model: Optional[str] = None,
@@ -50,6 +53,7 @@ class EmbeddingClient:
         Args:
             texts: Textos para generar embeddings
             tenant_id: ID del tenant
+            tenant_tier: Tier del tenant
             session_id: ID de la sesión
             callback_queue: Cola para recibir el callback
             model: Modelo a utilizar (default si no se especifica)
@@ -65,27 +69,38 @@ class EmbeddingClient:
         # Crear ID único si no se proporciona
         task_id = task_id or str(uuid.uuid4())
         
+        # Crear contexto básico para embedding
+        from common.models.execution_context import ExecutionContext
+        context = ExecutionContext(
+            context_id=f"query-embedding-{task_id}",
+            context_type="query",
+            tenant_id=tenant_id,
+            tenant_tier=tenant_tier,
+            primary_agent_id="query-service",
+            agents=["query-service"],
+            collections=[],
+            metadata=metadata or {}
+        )
+        
         # Crear acción usando modelo específico
         embedding_action = EmbeddingGenerateAction(
-            tenant_id=tenant_id,
-            session_id=session_id,
             task_id=task_id,
+            tenant_id=tenant_id,
+            tenant_tier=tenant_tier,
+            session_id=session_id,
+            execution_context=context.to_dict(),
             callback_queue=callback_queue,
             texts=texts,
             model=model,
             metadata=metadata or {}
         )
         
-        # Convertir a DomainAction para el action_processor
-        domain_action = DomainAction.parse_obj(embedding_action.dict())
+        # Encolar usando DomainQueueManager
+        queue_name = await self.queue_manager.enqueue_execution(
+            action=embedding_action,
+            target_domain="embedding",
+            context=context
+        )
         
-        # Encolar acción
-        queue_name = f"embedding.{tenant_id}.actions"
-        success = await self.action_processor.enqueue_action(domain_action, queue_name)
-        
-        if not success:
-            logger.error(f"Error encolando acción de embedding: {task_id}")
-            raise Exception("Error al solicitar embeddings")
-        
-        logger.info(f"Acción de embedding encolada: {task_id}")
+        logger.info(f"Acción de embedding encolada en {queue_name}: {task_id}")
         return task_id

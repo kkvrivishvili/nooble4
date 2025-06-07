@@ -1,24 +1,30 @@
-# Query Service - Requirements
-# Dependencias básicas
-aiohttp==3.9.3
-pydantic==2.5.3
-redis==5.0.1
-uvicorn==0.25.0
-fastapi==0.104.1
+# MODIFICADO: Dependencias actualizadas para sistema de colas
+fastapi==0.115.12
+uvicorn==0.34.0
+pydantic==2.10.6
+redis==5.0.0
+httpx==0.28.1
+python-dotenv==1.0.1
+python-multipart==0.0.20
 
-# APIs externas
-groq==0.4.1  # Cliente oficial de Groq (alternativa a usar aiohttp directamente)
+# APIs externas (mantenemos las existentes)
+groq==0.4.1
 
-# Persistencia y búsqueda vectorial
+# Persistencia y búsqueda vectorial (mantenemos las existentes)
 chromadb==0.4.22
 pinecone-client==2.2.4
 
-# Procesamiento de texto
+# Procesamiento de texto (mantenemos las existentes)
 nltk==3.8.1
 tiktoken==0.5.2
 
-# Utilidades
-python-dotenv==1.0.0
+# NUEVO: Dependencias para el sistema de colas
+asyncio==3.4.3
+
+# Utilities (mantenemos las existentes)
 tenacity==8.2.3
-structlog==23.2.0
 async-timeout==4.0.3
+
+# Testing
+pytest==8.3.5
+pytest-asyncio==0.21.1

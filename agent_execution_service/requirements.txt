@@ -1,17 +1,21 @@
+# MODIFICADO: Dependencias actualizadas para sistema de colas
 fastapi==0.115.12
 uvicorn==0.34.0
 pydantic==2.10.6
 redis==5.0.0
 httpx==0.28.1
 python-dotenv==1.0.1
+python-multipart==0.0.20
 
-# LangChain
+# LangChain (mantenemos las existentes)
 langchain==0.1.0
 langchain-community==0.0.10
 langchain-core==0.1.0
 
+# NUEVO: Dependencias para el sistema de colas
+asyncio==3.4.3
+
 # Utilities
-python-multipart==0.0.20
 tenacity==9.0.0
 
 # Testing

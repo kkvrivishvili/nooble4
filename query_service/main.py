@@ -1,11 +1,11 @@
 """
-Punto de entrada del Query Service.
+Punto de entrada principal para Query Service.
+
+MODIFICADO: Integración completa con sistema de colas por tier.
 """
 
 import asyncio
 import logging
-import signal
-import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -14,8 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from common.errors import setup_error_handling
 from common.utils.logging import init_logging
 from common.helpers.health import register_health_routes
-from common.db.supabase import init_supabase
-
+from common.redis_pool import get_redis_client
+from common.services.domain_queue_manager import DomainQueueManager
 from query_service.workers.query_worker import QueryWorker
 from query_service.config.settings import get_settings
 
@@ -24,25 +24,37 @@ logger = logging.getLogger(__name__)
 
 # Worker global
 query_worker = None
+queue_manager = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Gestiona el ciclo de vida de la aplicación."""
-    global query_worker
+    global query_worker, queue_manager
     
     logger.info("Iniciando Query Service")
     
-    # Inicializar conexión a bases de datos
-    await init_supabase()
-    
-    # Inicializar worker
-    query_worker = QueryWorker()
-    
-    # Iniciar worker en background
-    worker_task = asyncio.create_task(query_worker.start())
-    
     try:
+        # Inicializar Redis y Queue Manager
+        redis_client = await get_redis_client()
+        queue_manager = DomainQueueManager(redis_client)
+        
+        # Verificar conexión Redis
+        await redis_client.ping()
+        logger.info("Conexión a Redis establecida")
+        
+        # Inicializar worker
+        query_worker = QueryWorker(redis_client)
+        
+        # Iniciar worker en background
+        worker_task = asyncio.create_task(query_worker.start())
+        logger.info("QueryWorker iniciado")
+        
+        # Hacer queue_manager disponible para la app
+        app.state.queue_manager = queue_manager
+        app.state.redis_client = redis_client
+        
         yield
+        
     finally:
         logger.info("Deteniendo Query Service")
         
@@ -51,17 +63,21 @@ async def lifespan(app: FastAPI):
             await query_worker.stop()
         
         # Cancelar task
-        worker_task.cancel()
+        if 'worker_task' in locals():
+            worker_task.cancel()
+            try:
+                await worker_task
+            except asyncio.CancelledError:
+                pass
         
-        try:
-            await worker_task
-        except asyncio.CancelledError:
-            pass
+        # Cerrar conexiones Redis
+        if queue_manager and hasattr(queue_manager, 'redis'):
+            await queue_manager.redis.close()
 
-# Crear aplicación FastAPI (solo para health checks)
+# Crear aplicación
 app = FastAPI(
     title="Query Service",
-    description="Servicio RAG para búsqueda y generación de respuestas con Domain Actions",
+    description="Servicio RAG para búsqueda y generación de respuestas con colas por tier",
     version=settings.service_version,
     lifespan=lifespan
 )
@@ -69,7 +85,7 @@ app = FastAPI(
 # Configurar CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # En producción, especificar orígenes permitidos
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -78,61 +94,35 @@ app.add_middleware(
 # Configurar manejo de errores
 setup_error_handling(app)
 
-# Health checks
+# Registrar health routes
 register_health_routes(app)
+
+# Health checks específicos del query service
+@app.get("/metrics/overview")
+async def get_metrics_overview():
+    """Métricas generales del query service."""
+    if query_worker:
+        return await query_worker.get_query_stats()
+    else:
+        return {"error": "Worker no inicializado"}
+
+@app.get("/metrics/queues")
+async def get_queue_metrics():
+    """Métricas específicas de colas."""
+    if queue_manager:
+        return await queue_manager.get_queue_stats(settings.domain_name)
+    else:
+        return {"error": "Queue manager no inicializado"}
 
 # Configurar logging
 init_logging(settings.log_level, service_name="query-service")
 
-async def shutdown(signal_type):
-    """Manejo de señales para shutdown graceful."""
-    logger.info(f"Recibida señal {signal_type.name}, cerrando...")
-    
-    # Detener worker
-    global query_worker
-    if query_worker:
-        await query_worker.stop()
-        
-    sys.exit(0)
-
-def handle_exception(loop, context):
-    """Maneja excepciones no capturadas en el event loop."""
-    msg = context.get("exception", context["message"])
-    logger.error(f"Error no capturado: {msg}")
-    logger.info("Cerrando servicio...")
-    asyncio.create_task(shutdown(signal.SIGTERM))
-
-async def main():
-    """Función principal para ejecución independiente."""
-    # Configurar logging
-    init_logging(settings.log_level, service_name="query-service")
-    
-    # Manejar señales de sistema
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(
-            sig, lambda sig=sig: asyncio.create_task(shutdown(sig))
-        )
-    
-    # Configurar handler para excepciones no capturadas
-    loop.set_exception_handler(handle_exception)
-    
-    # Inicializar conexión a bases de datos
-    await init_supabase()
-    
-    # Inicializar worker
-    global query_worker
-    query_worker = QueryWorker()
-    
-    logger.info("Iniciando Query Service en modo standalone")
-    
-    try:
-        # Iniciar worker y esperar a que termine
-        await query_worker.start()
-    finally:
-        if query_worker:
-            await query_worker.stop()
-        logger.info("Query Service detenido")
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    import uvicorn
+    uvicorn.run(
+        "main:app", 
+        host="0.0.0.0", 
+        port=8002,
+        reload=True,
+        log_level="info"
+    )
