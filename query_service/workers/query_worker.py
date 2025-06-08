@@ -1,18 +1,22 @@
 """
-Worker para Domain Actions en Query Service.
+Worker mejorado para Domain Actions en Query Service.
 
-MODIFICADO: Integración completa con sistema de colas por tier.
+Implementación estandarizada con inicialización asíncrona y
+manejo robusto de acciones para procesamiento RAG de consultas.
+
+VERSIÓN: 2.0 - Adaptado al patrón improved_base_worker
 """
 
 import logging
-from typing import Dict, Any, List
+from datetime import datetime
+from typing import Dict, Any, List, Optional
 
 from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
-from common.redis_pool import get_redis_client
 from common.services.action_processor import ActionProcessor
-from common.services.domain_queue_manager import DomainQueueManager
-from query_service.models.actions import QueryGenerateAction, SearchDocsAction, QueryCallbackAction
+from query_service.models.actions import (
+    QueryGenerateAction, SearchDocsAction, QueryCallbackAction
+)
 from query_service.handlers.query_handler import QueryHandler
 from query_service.handlers.context_handler import get_query_context_handler
 from query_service.handlers.query_callback_handler import QueryCallbackHandler
@@ -24,33 +28,54 @@ settings = get_settings()
 
 class QueryWorker(BaseWorker):
     """
-    Worker para procesar Domain Actions de consulta y búsqueda.
+    Worker mejorado para procesar Domain Actions de consultas (RAG).
     
-    MODIFICADO: 
-    - Define domain específico
-    - Procesa consultas por tier
-    - Integra con callback handlers
+    Características:
+    - Inicialización asíncrona segura
+    - Procesamiento RAG de consultas
+    - Callbacks detallados con información de calidad
+    - Control por tier con límites específicos
+    - Estadísticas avanzadas
     """
     
-    def __init__(self, redis_client=None, action_processor=None):
+    def __init__(self, redis_client, action_processor=None):
         """
         Inicializa worker con servicios necesarios.
-        """
-        # Usar valores por defecto si no se proporcionan
-        redis_client = redis_client or get_redis_client()
-        action_processor = action_processor or ActionProcessor(redis_client)
         
+        Args:
+            redis_client: Cliente Redis configurado (requerido)
+            action_processor: Procesador de acciones (opcional)
+        """
+        action_processor = action_processor or ActionProcessor(redis_client)
         super().__init__(redis_client, action_processor)
         
-        # NUEVO: Definir domain específico
+        # Definir domain específico
         self.domain = settings.domain_name  # "query"
         
-        # Inicializar queue manager
-        self.queue_manager = DomainQueueManager(redis_client)
-        
-        # Inicializar handlers
-        self._initialize_handlers()
+        # Handlers que se inicializarán de forma asíncrona
+        self.context_handler = None
+        self.query_handler = None
+        self.query_callback_handler = None
+        self.embedding_callback_handler = None
+        self.initialized = False
     
+    async def initialize(self):
+        """Inicializa el worker de forma asíncrona."""
+        if self.initialized:
+            return
+            
+        await self._initialize_handlers()
+        self.initialized = True
+        logger.info("ImprovedQueryWorker inicializado correctamente")
+    
+    async def start(self):
+        """Extiende el start para asegurar inicialización."""
+        # Asegurar inicialización antes de procesar acciones
+        await self.initialize()
+        
+        # Continuar con el comportamiento normal del BaseWorker
+        await super().start()
+        
     async def _initialize_handlers(self):
         """Inicializa todos los handlers necesarios."""
         # Context handler
@@ -61,17 +86,17 @@ class QueryWorker(BaseWorker):
             self.queue_manager, self.redis_client
         )
         
+        # Embedding callback handler
+        self.embedding_callback_handler = EmbeddingCallbackHandler()
+        
         # Query handler principal
         self.query_handler = QueryHandler(
             self.context_handler, self.redis_client
         )
         
-        # Embedding callback handler
-        self.embedding_callback_handler = EmbeddingCallbackHandler()
-        
         # Registrar handlers en el action_processor
         self.action_processor.register_handler(
-            "query.generate",
+            "query.generate", 
             self._handle_query_generate
         )
         
@@ -85,10 +110,12 @@ class QueryWorker(BaseWorker):
             "embedding.callback",
             self.embedding_callback_handler.handle_embedding_callback
         )
+        
+        logger.info("QueryWorker: Handlers inicializados")
     
     async def _handle_query_generate(self, action: DomainAction) -> Dict[str, Any]:
         """
-        Handler específico para generación de consultas RAG.
+        Handler específico para procesamiento de consultas.
         
         Args:
             action: Acción de consulta
@@ -97,16 +124,20 @@ class QueryWorker(BaseWorker):
             Resultado del procesamiento
         """
         try:
+            # Verificar inicialización
+            if not self.initialized:
+                await self.initialize()
+                
             # Convertir a tipo específico
             query_action = QueryGenerateAction.parse_obj(action.dict())
             
             # Procesar consulta
-            result = await self.query_handler.handle_query_generate(query_action)
+            result = await self.query_handler.handle_query(query_action)
             
             return result
             
         except Exception as e:
-            logger.error(f"Error en handle_query_generate: {str(e)}")
+            logger.error(f"Error en handle_query: {str(e)}")
             return {
                 "success": False,
                 "error": {
@@ -117,25 +148,29 @@ class QueryWorker(BaseWorker):
     
     async def _handle_search_docs(self, action: DomainAction) -> Dict[str, Any]:
         """
-        Handler específico para búsqueda de documentos.
+        Handler específico para validación de consultas.
         
         Args:
-            action: Acción de búsqueda
+            action: Acción de validación
             
         Returns:
             Resultado del procesamiento
         """
         try:
+            # Verificar inicialización
+            if not self.initialized:
+                await self.initialize()
+                
             # Convertir a tipo específico
             search_action = SearchDocsAction.parse_obj(action.dict())
             
             # Procesar búsqueda
-            result = await self.query_handler.handle_search_docs(search_action)
+            result = await self.query_handler.handle_search(search_action)
             
             return result
             
         except Exception as e:
-            logger.error(f"Error en handle_search_docs: {str(e)}")
+            logger.error(f"Error en handle_query_validate: {str(e)}")
             return {
                 "success": False,
                 "error": {
@@ -180,32 +215,22 @@ class QueryWorker(BaseWorker):
                 logger.warning(f"No se especificó cola de callback para {action.task_id}")
                 return
             
-            # Determinar tipo de callback según resultado y acción
+            # Determinar tipo de callback según resultado
             if result.get("success", False) and "result" in result:
-                if action.action_type == "query.generate":
-                    # Callback de consulta RAG exitosa
-                    await self.query_callback_handler.send_query_success_callback(
-                        task_id=action.task_id,
-                        tenant_id=action.tenant_id,
-                        session_id=action.session_id,
-                        callback_queue=action.callback_queue,
-                        query_result=result["result"],
-                        processing_time=result.get("execution_time", 0.0),
-                        tokens_used=result.get("result", {}).get("metadata", {}).get("tokens_used")
-                    )
-                elif action.action_type == "query.search":
-                    # Callback de búsqueda exitosa
-                    await self.query_callback_handler.send_search_success_callback(
-                        task_id=action.task_id,
-                        tenant_id=action.tenant_id,
-                        session_id=action.session_id,
-                        callback_queue=action.callback_queue,
-                        search_result=result["result"],
-                        processing_time=result.get("execution_time", 0.0)
-                    )
+                # Callback de consulta exitosa
+                await self.query_callback_handler.send_query_success_callback(
+                    task_id=action.task_id,
+                    tenant_id=action.tenant_id,
+                    session_id=action.session_id,
+                    callback_queue=action.callback_queue,
+                    query_result=result["result"],
+                    similarity_score=result.get("metadata", {}).get("similarity_score"),
+                    sources=result.get("metadata", {}).get("sources", []),
+                    processing_time=result.get("execution_time", 0.0)
+                )
             else:
                 # Callback de error
-                await self.query_callback_handler.send_error_callback(
+                await self.query_callback_handler.send_query_error_callback(
                     task_id=action.task_id,
                     tenant_id=action.tenant_id,
                     session_id=action.session_id,
@@ -237,7 +262,7 @@ class QueryWorker(BaseWorker):
                 return
             
             # Enviar error callback
-            await self.query_callback_handler.send_error_callback(
+            await self.query_callback_handler.send_query_error_callback(
                 task_id=task_id,
                 tenant_id=tenant_id,
                 session_id=session_id,
@@ -251,29 +276,39 @@ class QueryWorker(BaseWorker):
         except Exception as e:
             logger.error(f"Error enviando error callback: {str(e)}")
     
-    # NUEVO: Métodos auxiliares específicos del query service
+    # Método auxiliar para estadísticas específicas
     async def get_query_stats(self) -> Dict[str, Any]:
-        """Obtiene estadísticas específicas del query service."""
+        """
+        Obtiene estadísticas específicas del query service.
         
-        # Stats de colas
-        queue_stats = await self.get_queue_stats()
+        Returns:
+            Dict con estadísticas completas
+        """
+        # Obtener estadísticas básicas del worker
+        stats = await self.get_worker_stats()
         
-        # Stats de consultas
-        query_stats = await self.query_handler.get_query_stats("all")
+        if not self.initialized:
+            stats["worker_info"]["status"] = "not_initialized"
+            return stats
         
-        # Stats de callbacks
-        callback_stats = await self.query_callback_handler.get_callback_stats("all")
+        try:
+            # Stats de consultas
+            if self.query_handler and hasattr(self.query_handler, 'get_query_stats'):
+                query_stats = await self.query_handler.get_query_stats()
+                stats["query_stats"] = query_stats
+            
+            # Stats de calidad
+            if self.query_handler and hasattr(self.query_handler, 'get_quality_metrics'):
+                quality_metrics = await self.query_handler.get_quality_metrics()
+                stats["quality_metrics"] = quality_metrics
+            
+            # Stats específicas de RAG
+            if self.query_handler and hasattr(self.query_handler, 'get_rag_metrics'):
+                rag_metrics = await self.query_handler.get_rag_metrics()
+                stats["rag_metrics"] = rag_metrics
+                
+        except Exception as e:
+            logger.error(f"Error obteniendo estadísticas: {str(e)}")
+            stats["error"] = str(e)
         
-        # Stats de búsqueda vectorial
-        search_stats = await self.query_handler.vector_search_service.get_search_stats("all")
-        
-        return {
-            "queue_stats": queue_stats,
-            "query_stats": query_stats,
-            "callback_stats": callback_stats,
-            "search_stats": search_stats,
-            "worker_info": {
-                "domain": self.domain,
-                "running": self.running
-            }
-        }
+        return stats

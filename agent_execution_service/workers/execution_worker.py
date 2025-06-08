@@ -1,7 +1,10 @@
 """
-Worker para Domain Actions en Agent Execution Service.
+Worker mejorado para Domain Actions en Agent Execution Service.
 
-MODIFICADO: Integración completa con sistema de colas por tier.
+Implementación estandarizada con inicialización asíncrona y
+manejo robusto de callbacks y acciones de ejecución.
+
+VERSIÓN: 2.0 - Adaptado al patrón improved_base_worker
 """
 
 import logging
@@ -9,13 +12,12 @@ from typing import Dict, Any, List
 
 from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
-from common.redis_pool import get_redis_client
 from common.services.action_processor import ActionProcessor
-from common.services.domain_queue_manager import DomainQueueManager
-from agent_execution_service.models.actions_model import (
-    AgentExecutionAction, ExecutionCallbackAction
+from common.services.domain_queue_manager import DomainQueueManager 
+from agent_execution_service.models.actions import (
+    AgentRunAction, ExecutionCallbackAction
 )
-from agent_execution_service.handlers.agent_execution_handler import AgentExecutionHandler
+from agent_execution_service.handlers.execution_handler import AgentExecutionHandler
 from agent_execution_service.handlers.context_handler import get_context_handler
 from agent_execution_service.handlers.execution_callback_handler import ExecutionCallbackHandler
 from agent_execution_service.handlers.embedding_callback_handler import EmbeddingCallbackHandler
@@ -27,12 +29,13 @@ settings = get_settings()
 
 class ExecutionWorker(BaseWorker):
     """
-    Worker para procesar Domain Actions de ejecución de agentes.
+    Worker mejorado para procesar Domain Actions de ejecución de agentes.
     
-    MODIFICADO: 
-    - Define domain específico
-    - Procesa ejecuciones por tier
-    - Integra con callback handlers
+    Características:
+    - Inicialización asíncrona segura
+    - Integración con context handlers
+    - Manejo de callbacks específicos
+    - Estadísticas detalladas
     """
     
     def __init__(self, redis_client, action_processor=None):
@@ -40,23 +43,39 @@ class ExecutionWorker(BaseWorker):
         Inicializa worker con servicios necesarios.
         
         Args:
-            redis_client: Cliente Redis configurado
-            action_processor: Procesador de acciones opcional
+            redis_client: Cliente Redis configurado (requerido)
+            action_processor: Procesador de acciones (opcional)
         """
-        # Redis client debe venir configurado desde fuera
-        self.redis_client = redis_client
         action_processor = action_processor or ActionProcessor(redis_client)
-        
         super().__init__(redis_client, action_processor)
         
-        # NUEVO: Definir domain específico
+        # Definir domain específico
         self.domain = settings.domain_name  # "execution"
         
-        # Inicializar queue manager
-        self.queue_manager = DomainQueueManager(redis_client)
+        # Variables que se inicializarán de forma asíncrona
+        self.context_handler = None
+        self.execution_callback_handler = None
+        self.agent_execution_handler = None
+        self.embedding_callback_handler = None
+        self.query_callback_handler = None
+        self.initialized = False
+    
+    async def initialize(self):
+        """Inicializa el worker de forma asíncrona."""
+        if self.initialized:
+            return
+            
+        await self._initialize_handlers()
+        self.initialized = True
+        logger.info("ImprovedExecutionWorker inicializado correctamente")
+    
+    async def start(self):
+        """Extiende el start para asegurar inicialización."""
+        # Asegurar inicialización antes de procesar acciones
+        await self.initialize()
         
-        # Inicializar handlers
-        self._initialize_handlers()
+        # Continuar con el comportamiento normal del BaseWorker
+        await super().start()
     
     async def _initialize_handlers(self):
         """Inicializa todos los handlers necesarios."""
@@ -93,6 +112,8 @@ class ExecutionWorker(BaseWorker):
             "query.callback",
             self.query_callback_handler.handle_query_callback
         )
+        
+        logger.info("ExecutionWorker: Handlers inicializados")
     
     async def _handle_agent_execution(self, action: DomainAction) -> Dict[str, Any]:
         """
@@ -105,11 +126,15 @@ class ExecutionWorker(BaseWorker):
             Resultado del procesamiento
         """
         try:
+            # Verificar inicialización
+            if not self.initialized:
+                await self.initialize()
+            
             # Convertir a tipo específico
-            execution_action = AgentExecutionAction.parse_obj(action.dict())
+            agent_action = AgentRunAction.parse_obj(action.dict())
             
             # Procesar ejecución
-            result = await self.agent_execution_handler.handle_agent_execution(execution_action)
+            result = await self.agent_execution_handler.handle_agent_execution(agent_action)
             
             return result
             
@@ -122,7 +147,7 @@ class ExecutionWorker(BaseWorker):
                     "message": str(e)
                 }
             }
-    
+
     def create_action_from_data(self, action_data: Dict[str, Any]) -> DomainAction:
         """
         Crea objeto de acción apropiado según los datos.
@@ -136,7 +161,7 @@ class ExecutionWorker(BaseWorker):
         action_type = action_data.get("action_type")
         
         if action_type == "execution.agent_run":
-            return AgentExecutionAction.parse_obj(action_data)
+            return AgentRunAction.parse_obj(action_data)
         elif action_type == "execution.callback":
             return ExecutionCallbackAction.parse_obj(action_data)
         else:
@@ -219,25 +244,39 @@ class ExecutionWorker(BaseWorker):
         except Exception as e:
             logger.error(f"Error enviando error callback: {str(e)}")
     
-    # NUEVO: Métodos auxiliares específicos del execution service
+    # Método auxiliar para estadísticas específicas del execution service
     async def get_execution_stats(self) -> Dict[str, Any]:
         """Obtiene estadísticas específicas del execution service."""
+        # Obtener estadísticas básicas del worker
+        stats = await self.get_worker_stats()
         
-        # Stats de colas
-        queue_stats = await self.get_queue_stats()
+        if not self.initialized:
+            stats["worker_info"]["status"] = "not_initialized"
+            return stats
         
-        # Stats de ejecución
-        execution_stats = await self.agent_execution_handler.get_execution_stats("all")
+        try:
+            # Stats de colas
+            queue_stats = await self.get_queue_stats()
+            
+            # Stats de ejecución si están disponibles
+            execution_stats = {}
+            if self.agent_execution_handler and hasattr(self.agent_execution_handler, 'get_execution_stats'):
+                execution_stats = await self.agent_execution_handler.get_execution_stats("all")
+            
+            # Stats de callbacks
+            callback_stats = {}
+            if self.execution_callback_handler and hasattr(self.execution_callback_handler, 'get_callback_stats'):
+                callback_stats = await self.execution_callback_handler.get_callback_stats("all")
+            
+            # Añadir estadísticas específicas
+            stats.update({
+                "queue_stats": queue_stats,
+                "execution_stats": execution_stats,
+                "callback_stats": callback_stats
+            })
+            
+        except Exception as e:
+            logger.error(f"Error obteniendo estadísticas: {str(e)}")
+            stats["error"] = str(e)
         
-        # Stats de callbacks
-        callback_stats = await self.execution_callback_handler.get_callback_stats("all")
-        
-        return {
-            "queue_stats": queue_stats,
-            "execution_stats": execution_stats,
-            "callback_stats": callback_stats,
-            "worker_info": {
-                "domain": self.domain,
-                "running": self.running
-            }
-        }
+        return stats

@@ -1,7 +1,10 @@
 """
-Worker para Domain Actions en Embedding Service.
+Worker mejorado para Domain Actions en Embedding Service.
 
-MODIFICADO: Integración completa con sistema de colas por tier.
+Implementación estandarizada con inicialización asíncrona y
+manejo robusto de acciones de generación de embeddings.
+
+VERSIÓN: 2.0 - Adaptado al patrón improved_base_worker
 """
 
 import logging
@@ -9,9 +12,7 @@ from typing import Dict, Any, List
 
 from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
-from common.redis_pool import get_redis_client
 from common.services.action_processor import ActionProcessor
-from common.services.domain_queue_manager import DomainQueueManager
 from embedding_service.models.actions import EmbeddingGenerateAction, EmbeddingValidateAction, EmbeddingCallbackAction
 from embedding_service.handlers.embedding_handler import EmbeddingHandler
 from embedding_service.handlers.context_handler import get_embedding_context_handler
@@ -23,29 +24,28 @@ settings = get_settings()
 
 class EmbeddingWorker(BaseWorker):
     """
-    Worker para procesar Domain Actions de embeddings.
+    Worker mejorado para procesar Domain Actions de embeddings.
     
-    MODIFICADO: 
-    - Define domain específico
-    - Procesa embeddings por tier
-    - Integra con callback handlers
+    Características:
+    - Inicialización asíncrona robusta
+    - Procesamiento de embeddings por tier
+    - Manejo detallado de callbacks
+    - Estadísticas avanzadas
     """
     
-    def __init__(self, redis_client=None, action_processor=None):
+    def __init__(self, redis_client, action_processor=None):
         """
         Inicializa worker con servicios necesarios.
+        
+        Args:
+            redis_client: Cliente Redis configurado (requerido)
+            action_processor: Procesador de acciones (opcional)
         """
-        # Usar valores por defecto si no se proporcionan
-        self.redis_client = redis_client or get_redis_client()
-        action_processor = action_processor or ActionProcessor(self.redis_client)
+        action_processor = action_processor or ActionProcessor(redis_client)
+        super().__init__(redis_client, action_processor)
         
-        super().__init__(self.redis_client, action_processor)
-        
-        # NUEVO: Definir domain específico
+        # Definir domain específico
         self.domain = settings.domain_name  # "embedding"
-        
-        # Inicializar queue manager
-        self.queue_manager = DomainQueueManager(self.redis_client)
         
         # Handlers que se inicializarán de forma asíncrona
         self.context_handler = None
@@ -60,12 +60,10 @@ class EmbeddingWorker(BaseWorker):
             
         await self._initialize_handlers()
         self.initialized = True
-        logger.info("EmbeddingWorker inicializado correctamente")
-        
+        logger.info("ImprovedEmbeddingWorker inicializado correctamente")
+    
     async def start(self):
-        """
-        Extiende el start de BaseWorker para asegurar inicialización asincrónica.
-        """
+        """Extiende el start para asegurar inicialización."""
         # Asegurar inicialización antes de procesar acciones
         await self.initialize()
         
@@ -97,6 +95,8 @@ class EmbeddingWorker(BaseWorker):
             "embedding.validate",
             self._handle_embedding_validate
         )
+        
+        logger.info("EmbeddingWorker: Handlers inicializados")
     
     async def _handle_embedding_generate(self, action: DomainAction) -> Dict[str, Any]:
         """
@@ -109,6 +109,10 @@ class EmbeddingWorker(BaseWorker):
             Resultado del procesamiento
         """
         try:
+            # Verificar inicialización
+            if not self.initialized:
+                await self.initialize()
+                
             # Convertir a tipo específico
             embedding_action = EmbeddingGenerateAction.parse_obj(action.dict())
             
@@ -138,6 +142,10 @@ class EmbeddingWorker(BaseWorker):
             Resultado del procesamiento
         """
         try:
+            # Verificar inicialización
+            if not self.initialized:
+                await self.initialize()
+                
             # Convertir a tipo específico
             validate_action = EmbeddingValidateAction.parse_obj(action.dict())
             
@@ -155,7 +163,7 @@ class EmbeddingWorker(BaseWorker):
                     "message": str(e)
                 }
             }
-    
+
     def create_action_from_data(self, action_data: Dict[str, Any]) -> DomainAction:
         """
         Crea objeto de acción apropiado según los datos.
@@ -254,25 +262,34 @@ class EmbeddingWorker(BaseWorker):
         except Exception as e:
             logger.error(f"Error enviando error callback: {str(e)}")
     
-    # NUEVO: Métodos auxiliares específicos del embedding service
+    # Método auxiliar para estadísticas específicas
     async def get_embedding_stats(self) -> Dict[str, Any]:
-        """Obtiene estadísticas específicas del embedding service."""
+        """
+        Obtiene estadísticas específicas del embedding service.
         
-        # Stats de colas
-        queue_stats = await self.get_queue_stats()
+        Returns:
+            Dict con estadísticas completas
+        """
+        # Obtener estadísticas básicas del worker
+        stats = await self.get_worker_stats()
         
-        # Stats de embeddings
-        embedding_stats = await self.embedding_handler.get_embedding_stats("all")
+        if not self.initialized:
+            stats["worker_info"]["status"] = "not_initialized"
+            return stats
         
-        # Stats de callbacks
-        callback_stats = await self.embedding_callback_handler.get_callback_stats("all")
+        try:
+            # Stats de embeddings
+            if self.embedding_handler and hasattr(self.embedding_handler, 'get_embedding_stats'):
+                embedding_stats = await self.embedding_handler.get_embedding_stats("all")
+                stats["embedding_stats"] = embedding_stats
+            
+            # Stats de callbacks
+            if self.embedding_callback_handler and hasattr(self.embedding_callback_handler, 'get_callback_stats'):
+                callback_stats = await self.embedding_callback_handler.get_callback_stats("all")
+                stats["callback_stats"] = callback_stats
+                
+        except Exception as e:
+            logger.error(f"Error obteniendo estadísticas: {str(e)}")
+            stats["error"] = str(e)
         
-        return {
-            "queue_stats": queue_stats,
-            "embedding_stats": embedding_stats,
-            "callback_stats": callback_stats,
-            "worker_info": {
-                "domain": self.domain,
-                "running": self.running
-            }
-        }
+        return stats

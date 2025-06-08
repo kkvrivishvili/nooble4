@@ -28,6 +28,11 @@ class GroqClient:
     def __init__(self):
         """Inicializa el cliente con la API key desde configuración."""
         self.api_key = settings.groq_api_key
+        
+        # Validar que la API key esté configurada
+        if not self.api_key:
+            raise ValueError("API key de Groq no configurada. Verifique la configuración del servicio.")
+            
         self.api_base_url = "https://api.groq.com/openai/v1"
         self.default_model = settings.default_llm_model
     

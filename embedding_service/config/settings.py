@@ -127,7 +127,9 @@ def get_settings() -> EmbeddingServiceSettings:
     # Completar con valores específicos de OpenAI
     settings_dict = base_settings.copy()
     settings_dict.update({
-        "openai_api_key": "sk-", # En producción se obtiene de variables de entorno
+        # IMPORTANTE: Esta API key debe reemplazarse por una variable de entorno en producción
+        # TODO: Cambiar a os.getenv("EMBEDDING_OPENAI_API_KEY") cuando se implemente el manejo de .env
+        "openai_api_key": "sk-your-actual-openai-api-key-here", # Temporalmente hardcodeada, reemplazar en producción
         "default_embedding_model": "text-embedding-3-small",
         "preferred_dimensions": 0,  # 0 = usar dimensiones default del modelo
         "encoding_format": "float",

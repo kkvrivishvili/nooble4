@@ -6,6 +6,7 @@ Maneja búsquedas en el vector store con cache y optimizaciones.
 
 import logging
 import time
+from datetime import datetime
 from typing import List, Dict, Any, Optional
 
 from query_service.clients.vector_store_client import VectorStoreClient

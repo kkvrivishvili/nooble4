@@ -14,16 +14,18 @@ class ConversationSettings(BaseSettings):
     domain_name: str = "conversation"
     
     # Database (preparado para Supabase)
+    # IMPORTANTE: Estas credenciales deben configurarse correctamente en producción
+    # TODO: Cambiar a os.getenv() cuando se implemente el manejo de .env
     database_url: str = Field(
-        "",
+        "",  # Temporalmente vacío, configurar en producción
         description="URL de Supabase (cuando esté implementado auth)"
     )
     supabase_url: str = Field(
-        "",
+        "",  # Temporalmente vacío, configurar en producción
         description="URL de Supabase"
     )
     supabase_key: str = Field(
-        "",
+        "",  # Temporalmente vacío, configurar en producción
         description="Supabase anon key"
     )
     
