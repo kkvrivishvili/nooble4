@@ -12,7 +12,8 @@ from .websocket_model import (
 # Domain Actions
 from .actions_model import (
     WebSocketSendAction, WebSocketBroadcastAction,
-    ChatProcessAction, ChatStatusAction, ChatCancelAction
+    ChatProcessAction, ChatStatusAction, ChatCancelAction,
+    ExecutionCallbackAction, ChatSendMessageAction
 )
 
 __all__ = [
@@ -21,5 +22,6 @@ __all__ = [
     
     # Domain Actions
     'WebSocketSendAction', 'WebSocketBroadcastAction',
-    'ChatProcessAction', 'ChatStatusAction', 'ChatCancelAction'
+    'ChatProcessAction', 'ChatStatusAction', 'ChatCancelAction',
+    'ExecutionCallbackAction', 'ChatSendMessageAction'
 ]

@@ -6,8 +6,8 @@ import logging
 from fastapi import APIRouter, Depends
 
 from common.helpers.health import get_health_status, HealthStatus
-from services.websocket_manager import get_websocket_manager
-from config.settings import get_settings, OrchestratorSettings
+from ..services.websocket_manager import get_websocket_manager
+from ..config.settings import get_settings, OrchestratorSettings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["health"])
