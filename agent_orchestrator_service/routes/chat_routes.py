@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional
 from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Header, status
 from pydantic import BaseModel, Field
+from datetime import datetime
 
 from common.services.domain_queue_manager import DomainQueueManager
 from common.redis_pool import get_redis_client
@@ -204,7 +205,7 @@ async def get_chat_stats(
         return {
             "tenant_id": x_tenant_id,
             "queue_stats": queue_stats,
-            "timestamp": context.created_at.isoformat()
+            "timestamp": datetime.utcnow().isoformat()
         }
         
     except Exception as e:
