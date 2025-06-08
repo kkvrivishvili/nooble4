@@ -36,20 +36,42 @@ class EmbeddingWorker(BaseWorker):
         Inicializa worker con servicios necesarios.
         """
         # Usar valores por defecto si no se proporcionan
-        redis_client = redis_client or get_redis_client()
-        action_processor = action_processor or ActionProcessor(redis_client)
+        self.redis_client = redis_client or get_redis_client()
+        action_processor = action_processor or ActionProcessor(self.redis_client)
         
-        super().__init__(redis_client, action_processor)
+        super().__init__(self.redis_client, action_processor)
         
         # NUEVO: Definir domain específico
         self.domain = settings.domain_name  # "embedding"
         
         # Inicializar queue manager
-        self.queue_manager = DomainQueueManager(redis_client)
+        self.queue_manager = DomainQueueManager(self.redis_client)
         
-        # Inicializar handlers
-        self._initialize_handlers()
+        # Handlers que se inicializarán de forma asíncrona
+        self.context_handler = None
+        self.embedding_callback_handler = None
+        self.embedding_handler = None
+        self.initialized = False
     
+    async def initialize(self):
+        """Inicializa el worker de forma asíncrona."""
+        if self.initialized:
+            return
+            
+        await self._initialize_handlers()
+        self.initialized = True
+        logger.info("EmbeddingWorker inicializado correctamente")
+        
+    async def start(self):
+        """
+        Extiende el start de BaseWorker para asegurar inicialización asincrónica.
+        """
+        # Asegurar inicialización antes de procesar acciones
+        await self.initialize()
+        
+        # Continuar con el comportamiento normal del BaseWorker
+        await super().start()
+        
     async def _initialize_handlers(self):
         """Inicializa todos los handlers necesarios."""
         # Context handler

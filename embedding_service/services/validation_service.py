@@ -5,6 +5,7 @@ Maneja validaciones específicas por tier y modelo.
 """
 
 import logging
+from datetime import datetime
 from typing import Dict, Any, List, Optional
 
 from common.models.execution_context import ExecutionContext
@@ -165,7 +166,6 @@ class ValidationService:
             return {"metrics": "disabled"}
         
         try:
-            from datetime import datetime
             today = datetime.now().date().isoformat()
             
             # Por ahora retornar estructura básica
@@ -176,6 +176,15 @@ class ValidationService:
                 "tier_validation": "active"
             }
             
+        except (ValueError, TypeError) as e:
+            # Captura errores de conversión de tipos o valores incorrectos
+            logger.error(f"Error de datos en validation stats: {str(e)}")
+            return {"error": "Error en datos de validación", "details": str(e)}
+        except ConnectionError as e:
+            # Captura errores de conexión específicos
+            logger.error(f"Error de conexión al obtener validation stats: {str(e)}")
+            return {"error": "Error de conexión en servicio de validación", "details": str(e)}
         except Exception as e:
-            logger.error(f"Error obteniendo validation stats: {str(e)}")
-            return {"error": str(e)}
+            # Fallback para otros errores inesperados
+            logger.error(f"Error inesperado en validation stats: {str(e)}")
+            return {"error": "Error interno en servicio", "details": str(e)}

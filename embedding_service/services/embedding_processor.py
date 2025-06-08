@@ -7,6 +7,7 @@ Coordina la validación, generación y cache de embeddings.
 import logging
 import time
 import hashlib
+from datetime import datetime
 from typing import Dict, Any, List, Optional
 
 from common.models.execution_context import ExecutionContext
@@ -139,8 +140,21 @@ class EmbeddingProcessor:
                 logger.info(f"Embeddings obtenidos desde cache: {len(texts)} textos")
                 return result
                 
+        except json.JSONDecodeError as e:
+            # Error específico al decodificar JSON inválido en la caché
+            logger.error(f"Error al decodificar JSON de cache: {str(e)}")
+            # Remover clave de cache inválida
+            try:
+                await self.redis.delete(cache_key)
+                logger.warning(f"Cache inválida eliminada: {cache_key}")
+            except Exception:
+                pass
+        except ConnectionError as e:
+            # Error específico de conexión a Redis
+            logger.error(f"Error de conexión a Redis: {str(e)}")
         except Exception as e:
-            logger.error(f"Error verificando cache: {str(e)}")
+            # Fallback para otros errores inesperados
+            logger.error(f"Error inesperado verificando cache: {str(e)}")
         
         return None
     
@@ -177,16 +191,32 @@ class EmbeddingProcessor:
             
             logger.debug(f"Embeddings cacheados: {cache_key}")
             
+        except KeyError as e:
+            # Error específico cuando falta un campo en embeddings_result
+            logger.error(f"Error de estructura en embeddings_result: falta campo {str(e)}")
+        except json.JSONEncodeError as e:
+            # Error específico al codificar los datos como JSON
+            logger.error(f"Error al codificar embeddings como JSON: {str(e)}")
+        except ConnectionError as e:
+            # Error específico de conexión a Redis
+            logger.error(f"Error de conexión a Redis al cachear: {str(e)}")
         except Exception as e:
-            logger.error(f"Error cacheando embeddings: {str(e)}")
+            # Fallback para otros errores inesperados
+            logger.error(f"Error inesperado cacheando embeddings: {str(e)}")
     
     def _generate_cache_key(self, texts: List[str], model: str, tenant_id: str) -> str:
-        """Genera clave de cache para embeddings."""
-        # Crear hash de los textos
-        texts_content = "|".join(texts)
-        texts_hash = hashlib.md5(texts_content.encode()).hexdigest()[:8]
+        """Genera clave de cache para embeddings con mayor resistencia a colisiones."""
+        # Crear un salt combinando modelo, tenant y el contenido del primer texto (parcial)
+        first_text = texts[0][:50] if texts else ""
+        salt = f"{model}:{tenant_id}:{first_text}"
         
-        return f"embeddings_cache:{tenant_id}:{model}:{texts_hash}:{len(texts)}"
+        # Crear hash de los textos con el salt
+        texts_content = "|".join(texts)
+        combined_content = f"{salt}:{texts_content}"
+        texts_hash = hashlib.md5(combined_content.encode()).hexdigest()
+        
+        # Usar un hash más largo (16 caracteres) para reducir posibilidad de colisiones
+        return f"embeddings_cache:{tenant_id}:{model}:{texts_hash[:16]}:{len(texts)}"
     
     async def _track_embedding_metrics(
         self,
