@@ -1,5 +1,5 @@
 """
-Configuración del Conversation Service.
+Configuración del Conversation Service con integración LangChain.
 """
 
 from typing import Dict, Any
@@ -13,62 +13,98 @@ class ConversationSettings(BaseSettings):
     # Domain específico para colas
     domain_name: str = "conversation"
     
-    # Database
+    # Database (preparado para Supabase)
     database_url: str = Field(
-        "postgresql://user:pass@localhost/conversations",
-        description="URL de base de datos para conversaciones"
-    )
-    
-    # Cache
-    conversation_cache_ttl: int = Field(
-        300,
-        description="TTL del cache de conversaciones (segundos)"
-    )
-    
-    # Analytics
-    enable_realtime_analytics: bool = Field(
-        True,
-        description="Habilitar analytics en tiempo real"
-    )
-    analytics_batch_size: int = Field(
-        100,
-        description="Tamaño de batch para procesamiento de analytics"
-    )
-    
-    # CRM Integration
-    crm_enabled: bool = Field(
-        False,
-        description="Habilitar integración con CRM"
-    )
-    crm_provider: str = Field(
-        "hubspot",
-        description="Proveedor de CRM"
-    )
-    crm_api_key: str = Field(
         "",
-        description="API Key del CRM"
+        description="URL de Supabase (cuando esté implementado auth)"
+    )
+    supabase_url: str = Field(
+        "",
+        description="URL de Supabase"
+    )
+    supabase_key: str = Field(
+        "",
+        description="Supabase anon key"
     )
     
-    # Retention
-    default_retention_days: int = Field(
-        90,
-        description="Días de retención por defecto"
+    # Redis para conversaciones activas
+    conversation_active_ttl: int = Field(
+        1800,  # 30 minutos
+        description="TTL para conversaciones activas en Redis"
     )
-    max_context_window: int = Field(
+    websocket_grace_period: int = Field(
+        30,
+        description="Segundos de gracia después de cerrar WebSocket"
+    )
+    
+    # LangChain Memory Configuration
+    langchain_memory_type: str = Field(
+        "token_buffer",
+        description="Tipo de memoria: token_buffer, summary_buffer, window"
+    )
+    
+    # Token limits por modelo
+    model_token_limits: Dict[str, int] = Field(
+        default={
+            "llama3-8b-8192": 6000,
+            "llama3-70b-8192": 6000,
+            "gpt-4": 28000,
+            "gpt-4-32k": 28000,
+            "claude-3-sonnet": 120000,
+            "claude-3-opus": 120000
+        },
+        description="Límites de tokens para contexto por modelo"
+    )
+    
+    # Tier limits para conversaciones
+    tier_limits: Dict[str, Dict[str, Any]] = Field(
+        default={
+            "free": {
+                "max_active_conversations": 3,
+                "max_messages_per_conversation": 50,
+                "retention_days": 7,
+                "context_messages": 5
+            },
+            "advance": {
+                "max_active_conversations": 10,
+                "max_messages_per_conversation": 200,
+                "retention_days": 30,
+                "context_messages": 15
+            },
+            "professional": {
+                "max_active_conversations": 50,
+                "max_messages_per_conversation": 1000,
+                "retention_days": 90,
+                "context_messages": 30
+            },
+            "enterprise": {
+                "max_active_conversations": None,
+                "max_messages_per_conversation": None,
+                "retention_days": 365,
+                "context_messages": 50
+            }
+        },
+        description="Límites por tier"
+    )
+    
+    # Workers configuration
+    message_save_worker_batch_size: int = Field(
         50,
-        description="Máximo de mensajes en ventana de contexto"
+        description="Batch size para guardar mensajes"
+    )
+    persistence_migration_interval: int = Field(
+        60,
+        description="Intervalo para verificar migraciones (segundos)"
     )
     
-    # Performance
-    search_index_enabled: bool = Field(
+    # Statistics
+    enable_statistics: bool = Field(
         True,
-        description="Habilitar índice de búsqueda"
+        description="Habilitar recolección de estadísticas"
     )
-    
-    # Worker
-    worker_sleep_seconds: float = Field(
-        1.0,
-        description="Tiempo de espera entre polls"
+    statistics_update_interval: int = Field(
+        300,  # 5 minutos
+        description="Intervalo para actualizar estadísticas"
     )
     
     class Config:
@@ -78,72 +114,3 @@ def get_settings() -> ConversationSettings:
     """Obtiene configuración del servicio."""
     base_settings = get_base_settings("conversation-service")
     return ConversationSettings(**base_settings.model_dump())
-
-
-# conversation_service/models/actions_model.py
-"""
-Domain Actions para Conversation Service.
-"""
-
-from typing import Dict, Any, Optional, List
-from pydantic import Field
-from datetime import datetime
-from common.models.actions import DomainAction
-
-class ConversationSaveAction(DomainAction):
-    """Domain Action para guardar mensaje."""
-    
-    action_type: str = Field("conversation.save_message", description="Tipo de acción")
-    
-    # Datos del mensaje
-    conversation_id: Optional[str] = Field(None, description="ID de conversación")
-    agent_id: str = Field(..., description="ID del agente")
-    user_id: Optional[str] = Field(None, description="ID del usuario")
-    role: str = Field(..., description="Rol del mensaje")
-    content: str = Field(..., description="Contenido del mensaje")
-    message_type: str = Field("text", description="Tipo de mensaje")
-    
-    # Metadatos
-    tokens_used: Optional[int] = Field(None, description="Tokens utilizados")
-    processing_time_ms: Optional[int] = Field(None, description="Tiempo de procesamiento")
-    
-    def get_domain(self) -> str:
-        return "conversation"
-    
-    def get_action_name(self) -> str:
-        return "save_message"
-
-
-class ConversationRetrieveAction(DomainAction):
-    """Domain Action para obtener historial."""
-    
-    action_type: str = Field("conversation.get_history", description="Tipo de acción")
-    
-    # Parámetros de búsqueda
-    conversation_id: Optional[str] = Field(None, description="ID de conversación")
-    limit: int = Field(10, description="Límite de mensajes")
-    include_system: bool = Field(False, description="Incluir mensajes del sistema")
-    order: str = Field("desc", description="Orden de mensajes")
-    
-    def get_domain(self) -> str:
-        return "conversation"
-    
-    def get_action_name(self) -> str:
-        return "get_history"
-
-
-class ConversationAnalyzeAction(DomainAction):
-    """Domain Action para analizar conversación."""
-    
-    action_type: str = Field("conversation.analyze", description="Tipo de acción")
-    
-    # Parámetros de análisis
-    conversation_id: str = Field(..., description="ID de conversación")
-    analysis_types: List[str] = Field(..., description="Tipos de análisis")
-    realtime: bool = Field(False, description="Análisis en tiempo real")
-    
-    def get_domain(self) -> str:
-        return "conversation"
-    
-    def get_action_name(self) -> str:
-        return "analyze"

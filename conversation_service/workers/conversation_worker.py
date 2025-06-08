@@ -1,5 +1,5 @@
 """
-Worker para Domain Actions en Conversation Service.
+Worker principal para Domain Actions.
 """
 
 import logging
@@ -9,9 +9,7 @@ from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
 from common.services.action_processor import ActionProcessor
 from conversation_service.models.actions_model import (
-    ConversationSaveAction,
-    ConversationRetrieveAction,
-    ConversationAnalyzeAction
+    SaveMessageAction, GetContextAction, SessionClosedAction
 )
 from conversation_service.handlers.conversation_handler import ConversationHandler
 from conversation_service.services.conversation_service import ConversationService
@@ -21,18 +19,16 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 class ConversationWorker(BaseWorker):
-    """Worker para procesar Domain Actions de conversaciones."""
+    """Worker principal para Domain Actions de conversaciones."""
     
-    def __init__(self, redis_client=None, action_processor=None):
-        """Inicializa worker."""
+    def __init__(self, redis_client=None, action_processor=None, db_client=None):
         action_processor = action_processor or ActionProcessor(redis_client)
         super().__init__(redis_client, action_processor)
         
-        # Definir domain específico
-        self.domain = settings.domain_name  # "conversation"
+        self.domain = settings.domain_name
         
-        # Inicializar servicios y handlers
-        conversation_service = ConversationService(redis_client)
+        # Inicializar servicios
+        conversation_service = ConversationService(redis_client, db_client)
         conversation_handler = ConversationHandler(conversation_service)
         
         # Registrar handlers
@@ -42,33 +38,29 @@ class ConversationWorker(BaseWorker):
         )
         
         self.action_processor.register_handler(
-            "conversation.get_history",
-            conversation_handler.handle_get_history
+            "conversation.get_context", 
+            conversation_handler.handle_get_context
         )
         
-        # TODO: Registrar handler para analytics
-        # self.action_processor.register_handler(
-        #     "conversation.analyze",
-        #     analytics_handler.handle_analyze
-        # )
+        self.action_processor.register_handler(
+            "conversation.session_closed",
+            conversation_handler.handle_session_closed
+        )
     
     def create_action_from_data(self, action_data: Dict[str, Any]) -> DomainAction:
-        """Crea objeto de acción apropiado según los datos."""
         action_type = action_data.get("action_type")
         
         if action_type == "conversation.save_message":
-            return ConversationSaveAction.parse_obj(action_data)
-        elif action_type == "conversation.get_history":
-            return ConversationRetrieveAction.parse_obj(action_data)
-        elif action_type == "conversation.analyze":
-            return ConversationAnalyzeAction.parse_obj(action_data)
+            return SaveMessageAction.parse_obj(action_data)
+        elif action_type == "conversation.get_context":
+            return GetContextAction.parse_obj(action_data)
+        elif action_type == "conversation.session_closed":
+            return SessionClosedAction.parse_obj(action_data)
         else:
             return DomainAction.parse_obj(action_data)
     
     async def _send_callback(self, action: DomainAction, result: Dict[str, Any]):
-        """Envía resultado como callback."""
         if action.callback_queue and result.get("success"):
-            # Crear acción de callback con resultado
             callback_action = DomainAction(
                 action_type=f"{action.get_action_name()}_callback",
                 task_id=action.task_id,
@@ -77,11 +69,9 @@ class ConversationWorker(BaseWorker):
                 session_id=action.session_id,
                 data=result
             )
-            
             await self.enqueue_callback(callback_action, action.callback_queue)
     
     async def _send_error_callback(self, action_data: Dict[str, Any], error_message: str):
-        """Envía callback de error."""
         callback_queue = action_data.get("callback_queue")
         if callback_queue:
             error_action = DomainAction(
@@ -90,10 +80,7 @@ class ConversationWorker(BaseWorker):
                 tenant_id=action_data.get("tenant_id"),
                 tenant_tier=action_data.get("tenant_tier"),
                 session_id=action_data.get("session_id"),
-                data={
-                    "error": error_message,
-                    "original_action": action_data.get("action_type")
-                }
+                data={"error": error_message}
             )
-            
             await self.enqueue_callback(error_action, callback_queue)
+

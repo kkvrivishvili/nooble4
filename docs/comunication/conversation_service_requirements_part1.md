@@ -12,8 +12,6 @@ El Conversation Service debe ser el repositorio central para el historial comple
 
 - **Almacenamiento Persistente**: Guardar cada mensaje de la conversación con metadatos relevantes.
 - **Consultas Eficientes**: Permitir búsqueda y recuperación rápida por diferentes criterios.
-- **Versionado**: Mantener versiones del historial para auditoría y compliance.
-- **Exportación**: Permitir la exportación del historial en diferentes formatos.
 
 ### 2. Integración con CRM
 
@@ -22,7 +20,6 @@ Debe proporcionar una capa de integración con sistemas CRM que permita:
 - **Sincronización Bidireccional**: Actualizar sistemas CRM con información relevante de las conversaciones.
 - **Enriquecimiento de Perfiles**: Agregar información de conversaciones a perfiles de usuario en CRM.
 - **Tracking de Métricas**: Integrar métricas de conversación con análisis de CRM.
-- **Mapeo de Entidades**: Relacionar entidades del sistema con registros CRM.
 
 ### 3. Persistencia de Estado
 

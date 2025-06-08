@@ -1,10 +1,10 @@
 """
-Modelos de datos para conversaciones.
+Modelos optimizados para conversaciones con LangChain.
 """
 
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-from uuid import UUID, uuid4
+from uuid import uuid4
 from pydantic import BaseModel, Field
 from enum import Enum
 
@@ -12,8 +12,8 @@ class ConversationStatus(str, Enum):
     """Estados de una conversación."""
     ACTIVE = "active"
     COMPLETED = "completed"
+    TRANSFERRED = "transferred"  # Movida a PostgreSQL
     ARCHIVED = "archived"
-    DELETED = "deleted"
 
 class MessageRole(str, Enum):
     """Roles en una conversación."""
@@ -23,65 +23,69 @@ class MessageRole(str, Enum):
     FUNCTION = "function"
 
 class Message(BaseModel):
-    """Modelo de mensaje individual."""
+    """Modelo optimizado de mensaje."""
     
     id: str = Field(default_factory=lambda: str(uuid4()))
     conversation_id: str
     role: MessageRole
     content: str
-    message_type: str = Field("text", description="Tipo de mensaje")
     
-    # Metadatos
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    tokens_used: Optional[int] = None
+    # Metadatos esenciales
+    tokens_estimate: Optional[int] = None  # Para LangChain memory
     processing_time_ms: Optional[int] = None
-    
-    # Referencias
     agent_id: Optional[str] = None
-    user_id: Optional[str] = None
-    parent_message_id: Optional[str] = None
+    model_used: Optional[str] = None
     
     # Timestamps
     created_at: datetime = Field(default_factory=datetime.utcnow)
-    edited_at: Optional[datetime] = None
+    
+    # Metadata para estadísticas
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 class Conversation(BaseModel):
-    """Modelo de conversación completa."""
+    """Modelo optimizado de conversación."""
     
     id: str = Field(default_factory=lambda: str(uuid4()))
     tenant_id: str
     session_id: str
-    
-    # Participantes
+    agent_id: str  # Simplificado: un agente principal
     user_id: Optional[str] = None
-    agent_ids: List[str] = Field(default_factory=list)
-    primary_agent_id: str
     
-    # Estado
+    # Estado y configuración
     status: ConversationStatus = ConversationStatus.ACTIVE
+    model_name: str = "llama3-8b-8192"  # Para LangChain memory
     
-    # Configuración
-    context_window_size: int = 10
-    retention_days: int = 90
-    
-    # Análisis
-    sentiment_score: Optional[float] = None
-    topics: List[str] = Field(default_factory=list)
-    summary: Optional[str] = None
-    language: str = "es"
-    
-    # CRM
-    crm_contact_id: Optional[str] = None
-    crm_metadata: Dict[str, Any] = Field(default_factory=dict)
-    
-    # Métricas
+    # Métricas en tiempo real
     message_count: int = 0
     total_tokens: int = 0
-    avg_response_time_ms: Optional[float] = None
-    customer_satisfaction: Optional[float] = None
     
-    # Timestamps
+    # Timestamps críticos
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
-    completed_at: Optional[datetime] = None
     last_message_at: Optional[datetime] = None
+    websocket_closed_at: Optional[datetime] = None
+    
+    # Metadatos para migración
+    needs_migration: bool = False
+    migrated_to_db: bool = False
+
+class ConversationContext(BaseModel):
+    """Contexto optimizado para Query Service."""
+    
+    conversation_id: str
+    messages: List[Dict[str, Any]]  # Formato LangChain
+    total_tokens: int
+    model_name: str
+    truncation_applied: bool = False
+    
+class ConversationStats(BaseModel):
+    """Estadísticas básicas de conversación."""
+    
+    tenant_id: str
+    agent_id: str
+    total_conversations: int = 0
+    active_conversations: int = 0
+    total_messages: int = 0
+    avg_conversation_length: float = 0.0
+    avg_response_time: float = 0.0
+    last_updated: datetime = Field(default_factory=datetime.utcnow)
