@@ -35,12 +35,16 @@ class ExecutionWorker(BaseWorker):
     - Integra con callback handlers
     """
     
-    def __init__(self, redis_client=None, action_processor=None):
+    def __init__(self, redis_client, action_processor=None):
         """
         Inicializa worker con servicios necesarios.
+        
+        Args:
+            redis_client: Cliente Redis configurado
+            action_processor: Procesador de acciones opcional
         """
-        # Usar valores por defecto si no se proporcionan
-        redis_client = redis_client or get_redis_client()
+        # Redis client debe venir configurado desde fuera
+        self.redis_client = redis_client
         action_processor = action_processor or ActionProcessor(redis_client)
         
         super().__init__(redis_client, action_processor)

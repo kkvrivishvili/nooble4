@@ -91,8 +91,8 @@ class ExecutionContextHandler:
         Raises:
             ValueError: Si el agente no existe o no es accesible
         """
-        # Cache key
-        cache_key = f"agent_config:{tenant_id}:{agent_id}"
+        # Cache key - Más específico para evitar colisiones
+        cache_key = f"agent_execution_config:{tenant_id}:{agent_id}"
         
         # Verificar cache
         if self.redis:
