@@ -9,72 +9,78 @@ import os
 from typing import Dict, Any, List, Optional
 from pydantic import BaseSettings, Field, validator
 from functools import lru_cache
+from common.config import Settings as BaseSettings
+from common.config import get_service_settings
 
 
-class Settings(BaseSettings):
-    """Configuración central del servicio de ingestión."""
+class IngestionServiceSettings(BaseSettings):
+    """
+    Configuración central del servicio de ingestión.
+    
+    Estandarizado para usar el prefijo INGESTION_ en todas las variables de entorno,
+    siguiendo el patrón de los demás servicios del proyecto.
+    """
     
     # Configuración general de la aplicación
-    APP_NAME: str = "ingestion-service"
-    APP_VERSION: str = "1.0.0"
-    DEBUG: bool = Field(default=False)
-    ENVIRONMENT: str = Field(default="development")
-    LOG_LEVEL: str = Field(default="INFO")
+    domain_name: str = Field(default="ingestion", description="Dominio para colas")
     
     # Configuración del servidor
-    HOST: str = Field(default="0.0.0.0")
-    PORT: int = Field(default=8000)
+    host: str = Field(default="0.0.0.0", description="Host del servidor")
+    port: int = Field(default=8000, description="Puerto del servidor")
     
     # Redis para colas y caché
-    REDIS_HOST: str = Field(default="localhost")
-    REDIS_PORT: int = Field(default=6379)
-    REDIS_PASSWORD: Optional[str] = None
-    REDIS_DB: int = Field(default=0)
-    REDIS_QUEUE_PREFIX: str = Field(default="ingestion")
+    redis_host: str = Field(default="localhost", description="Host de Redis")
+    redis_port: int = Field(default=6379, description="Puerto de Redis")
+    redis_password: Optional[str] = Field(default=None, description="Contraseña de Redis")
+    redis_db: int = Field(default=0, description="Base de datos Redis")
+    redis_queue_prefix: str = Field(default="ingestion", description="Prefijo para colas Redis")
     
     # Colas específicas para tareas y callbacks
-    DOCUMENT_QUEUE: str = Field(default="document:processing")
-    CHUNKING_QUEUE: str = Field(default="document:chunking")
-    EMBEDDING_CALLBACK_QUEUE: str = Field(default="embedding:callback")
-    TASK_STATUS_QUEUE: str = Field(default="task:status")
+    document_queue: str = Field(default="document:processing", description="Cola de procesamiento de documentos")
+    chunking_queue: str = Field(default="document:chunking", description="Cola de fragmentación")
+    embedding_callback_queue: str = Field(default="embedding:callback", description="Cola de callbacks de embeddings")
+    task_status_queue: str = Field(default="task:status", description="Cola de estado de tareas")
     
     # Workers y procesamiento
-    WORKER_COUNT: int = Field(default=2)
-    MAX_CONCURRENT_TASKS: int = Field(default=5)
-    JOB_TIMEOUT: int = Field(default=3600)  # 1 hora
-    REDIS_LOCK_TIMEOUT: int = Field(default=600)  # 10 minutos
-    WORKER_SLEEP_TIME: float = Field(default=0.1)  # 100ms
+    worker_count: int = Field(default=2, description="Número de workers")
+    max_concurrent_tasks: int = Field(default=5, description="Máximo de tareas concurrentes")
+    job_timeout: int = Field(default=3600, description="Timeout de trabajos (segundos)")
+    redis_lock_timeout: int = Field(default=600, description="Timeout de bloqueos Redis")
+    worker_sleep_time: float = Field(default=0.1, description="Tiempo entre polls (segundos)")
     
     # Limites de tamaño y procesamiento
-    MAX_FILE_SIZE: int = Field(default=10485760)  # 10MB
-    MAX_DOCUMENT_SIZE: int = Field(default=1048576)  # 1MB texto
-    MAX_URL_SIZE: int = Field(default=10485760)  # 10MB
-    MAX_CHUNKS_PER_DOCUMENT: int = Field(default=1000)
+    max_file_size: int = Field(default=10485760, description="Tamaño máximo de archivo (bytes)")
+    max_document_size: int = Field(default=1048576, description="Tamaño máximo de documento texto (bytes)")
+    max_url_size: int = Field(default=10485760, description="Tamaño máximo de contenido URL (bytes)")
+    max_chunks_per_document: int = Field(default=1000, description="Máximo fragmentos por documento")
     
     # Chunking y procesamiento de documentos
-    DEFAULT_CHUNK_SIZE: int = Field(default=512)
-    DEFAULT_CHUNK_OVERLAP: int = Field(default=50)
-    DEFAULT_CHUNKING_STRATEGY: str = Field(default="sentence")
+    default_chunk_size: int = Field(default=512, description="Tamaño predeterminado de fragmentos")
+    default_chunk_overlap: int = Field(default=50, description="Superposición entre fragmentos")
+    default_chunking_strategy: str = Field(default="sentence", description="Estrategia de fragmentación")
     
     # Embedding
-    EMBEDDING_MODEL: str = Field(default="text-embedding-ada-002")
-    EMBEDDING_SERVICE_URL: str = Field(default="http://embedding-service:8000")
-    EMBEDDING_SERVICE_TIMEOUT: int = Field(default=60)
+    embedding_model: str = Field(default="text-embedding-ada-002", description="Modelo de embedding")
+    embedding_service_url: str = Field(default="http://embedding-service:8000", description="URL del servicio de embeddings")
+    embedding_service_timeout: int = Field(default=60, description="Timeout para servicio de embeddings")
     
     # Storage
-    STORAGE_TYPE: str = Field(default="local")  # local, s3, azure
-    LOCAL_STORAGE_PATH: str = Field(default="/tmp/ingestion")
+    storage_type: str = Field(default="local", description="Tipo de almacenamiento (local, s3, azure)")
+    local_storage_path: str = Field(default="/tmp/ingestion", description="Ruta para almacenamiento local")
     
     # Configuración para autenticación y permisos
-    API_KEY_HEADER: str = Field(default="X-API-Key")
-    ADMIN_API_KEY: Optional[str] = None
+    api_key_header: str = Field(default="X-API-Key", description="Header para API Key")
+    admin_api_key: Optional[str] = Field(default=None, description="API Key para administrador")
+    
+    # Auto-start workers
+    auto_start_workers: bool = Field(default=True, description="Iniciar workers automáticamente")
     
     # CORS
-    CORS_ORIGINS: List[str] = Field(default=["*"])
+    cors_origins: List[str] = Field(default=["*"], description="Orígenes permitidos para CORS")
     
-    @validator("CORS_ORIGINS", pre=True)
+    @validator("cors_origins", pre=True)
     def parse_cors_origins(cls, v):
-        """Parse CORS_ORIGINS de string a lista si viene como string."""
+        """Parse cors_origins de string a lista si viene como string."""
         if isinstance(v, str) and not v.startswith("["):
             return [origin.strip() for origin in v.split(",")]
         return v
@@ -82,10 +88,10 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
-        env_prefix = ""
+        env_prefix = "INGESTION_"
 
 
 @lru_cache()
-def get_settings() -> Settings:
+def get_settings() -> IngestionServiceSettings:
     """Retorna una instancia cacheada de la configuración."""
-    return Settings()
+    return IngestionServiceSettings()
