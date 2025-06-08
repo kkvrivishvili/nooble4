@@ -48,7 +48,8 @@ Se ha implementado el archivo `constants.py` en el Agent Orchestrator Service co
   ```python
   {
       "free": 50,      # 50 requests por sesión por hora
-      "pro": 200,      # 200 requests por sesión por hora
+      "advance": 100,  # 100 requests por sesión por hora
+      "professional": 300,  # 300 requests por sesión por hora
       "enterprise": 500  # 500 requests por sesión por hora
   }
   ```
