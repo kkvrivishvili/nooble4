@@ -1,17 +1,25 @@
 """
 Cliente para interactuar con Query Service usando Domain Actions.
 
+Implementa el patrón de comunicación pseudo-síncrona sobre Redis, que permite realizar
+solicitudes síncronas (esperar respuesta) manteniendo la misma interfaz y comportamiento.
+
 # TODO: Oportunidades de mejora futura:
 # 1. Implementar un BaseClient compartido con QueryClient del Query Service
 # 2. Estandarizar más la conversión entre modelos específicos y DomainAction genérico
-# 3. Añadir manejo avanzado de errors con retries
-# 4. Centralizar la configuración de nombres de colas para evitar inconsistencias
+# 3. Centralizar la configuración de nombres de colas para evitar inconsistencias
+
+Version: 4.0 - Migrado a comunicación Redis pseudo-síncrona
 """
 
 import logging
+import json
+import time
 import uuid
+import asyncio
 from typing import List, Dict, Any, Optional
 from uuid import UUID
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from common.models.actions import DomainAction
 from common.services.domain_queue_manager import DomainQueueManager
@@ -28,9 +36,11 @@ class QueryClient:
     """
     Cliente para enviar solicitudes al Query Service.
     
-    Permite al Agent Execution Service enviar solicitudes de generación
-    de respuestas RAG y búsqueda de documentos de forma asíncrona.
-    Utiliza DomainQueueManager para comunicación enriquecida con contexto.
+    Este cliente implementa el patrón de comunicación pseudo-síncrona sobre Redis 
+    que permite solicitar datos de forma síncrona (esperando respuesta) pero usando 
+    la infraestructura de colas Redis compartida por todos los servicios.
+    
+    Mantiene compatibilidad con el modo asíncrono original para casos de uso que lo requieran.
     """
     
     def __init__(self, queue_manager: Optional[DomainQueueManager] = None):
@@ -38,180 +48,228 @@ class QueryClient:
         Inicializa el cliente.
         
         Args:
-            action_processor: Procesador de acciones (opcional)
+            queue_manager: Gestor de colas de dominio opcional
         """
-        redis_client = get_redis_client(settings.redis_url)
-        self.queue_manager = queue_manager or DomainQueueManager(redis_client)
-        self.callback_queue = f"execution.{settings.service_id}.callbacks"
+        self.timeout = settings.http_timeout_seconds  # Usado como timeout general
+        
+        # Componentes para comunicación Redis (se inicializan de forma asíncrona)
+        self.redis_client = None
+        self.queue_manager = queue_manager
+        self.initialized = False
+        self.callback_queue = f"execution.{settings.service_id}.callbacks"  # Mantenido por compatibilidad
     
-    async def generate_query(
+    async def initialize(self):
+        """
+        Inicializa el cliente de forma asíncrona, configurando Redis y DomainQueueManager.
+        
+        Este método debe llamarse antes de usar cualquier otra función del cliente.
+        """
+        if not self.initialized:
+            self.redis_client = get_redis_client(settings.redis_url)
+            if not self.queue_manager:
+                self.queue_manager = DomainQueueManager(self.redis_client)
+            
+            self.initialized = True
+            logger.info("QueryClient inicializado con comunicación Redis pseudo-síncrona")
+    
+    async def ensure_initialized(self):
+        """Asegura que el cliente está inicializado."""
+        if not self.initialized:
+            await self.initialize()
+    
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10)
+    )
+    async def generate_rag_sync(
         self,
         tenant_id: str,
         query: str,
-        query_embedding: List[float],
-        collection_id: str,
-        task_id: Optional[str] = None,
-        conversation_id: Optional[UUID] = None,
-        agent_id: Optional[str] = None,
-        agent_description: Optional[str] = None,
-        similarity_top_k: int = 5,
-        relevance_threshold: float = 0.7,
+        session_id: str,
+        collection_ids: List[str],
         llm_model: Optional[str] = None,
-        include_sources: bool = True,
-        max_sources: Optional[int] = None,
-        fallback_behavior: str = "use_agent_knowledge",
+        search_limit: int = 5,
         metadata: Optional[Dict[str, Any]] = None,
         context: Optional[ExecutionContext] = None
-    ) -> str:
+    ) -> Dict[str, Any]:
         """
-        Solicita generación de respuesta RAG.
+        Genera una respuesta RAG y espera el resultado (patrón pseudo-síncrono).
+        
+        Reemplaza la comunicación asíncrona con callbacks por una comunicación 
+        pseudo-síncrona que espera la respuesta usando correlation_id.
         
         Args:
             tenant_id: ID del tenant
-            query: Query del usuario
-            query_embedding: Vector embedding de la query
-            collection_id: ID de colección de documentos
-            task_id: ID de tarea (opcional)
-            conversation_id: ID de conversación (opcional)
-            agent_id: ID del agente (opcional)
-            agent_description: Descripción del agente (opcional)
-            similarity_top_k: Número de documentos a recuperar
-            relevance_threshold: Umbral de relevancia
-            llm_model: Modelo de LLM a usar (opcional)
-            include_sources: Incluir fuentes en resultado
-            max_sources: Máximo número de fuentes (opcional)
-            fallback_behavior: Comportamiento si no hay docs
+            query: Consulta en texto natural
+            session_id: ID de la sesión
+            collection_ids: Lista de IDs de colecciones para buscar
+            llm_model: Modelo LLM a utilizar (opcional)
+            search_limit: Límite de resultados de búsqueda
             metadata: Metadatos adicionales (opcional)
             context: Contexto de ejecución (opcional)
             
         Returns:
-            task_id: ID de tarea para seguimiento
+            Dict con la respuesta generada y documentos relevantes
             
         Raises:
-            Exception: Si hay error al encolar
+            TimeoutError: Si no hay respuesta en el tiempo límite
+            Exception: Si hay un error en la comunicación
         """
-        # Crear ID único si no se proporciona
-        task_id = task_id or str(uuid.uuid4())
+        start_time = time.time()
         
-        # Crear datos de la acción
-        action_data = {
-            "task_id": task_id,
-            "tenant_id": tenant_id,
-            "session_id": str(conversation_id) if conversation_id else task_id,
-            "callback_queue": self.callback_queue,
-            "query": query,
-            "query_embedding": query_embedding,
-            "collection_id": collection_id,
-            "agent_id": agent_id,
-            "agent_description": agent_description,
-            "similarity_top_k": similarity_top_k,
-            "relevance_threshold": relevance_threshold,
-            "llm_model": llm_model,
-            "include_sources": include_sources,
-            "max_sources": max_sources,
-            "fallback_behavior": fallback_behavior,
-            "metadata": metadata or {}
-        }
+        # Asegurar inicialización
+        await self.ensure_initialized()
         
-        # Crear DomainAction
-        domain_action = DomainAction(
-            action_id=str(uuid.uuid4()),
-            action_type="query.generate",
-            task_id=task_id,
-            tenant_id=tenant_id,
-            data=action_data
-        )
-        
-        if context:
-            # Usar enqueue_execution con contexto si está disponible
-            logger.info(f"Encolando acción de query con contexto, tenant_tier: {context.tenant_tier}")
-            await self.queue_manager.enqueue_execution(
-                action=domain_action,
-                context=context
-            )
-        else:
-            # Fallback a enqueue sin contexto
-            await self.queue_manager.enqueue(
-                action=domain_action,
-                domain="query",
-                tenant_id=tenant_id
+        try:
+            # Crear ID de correlación único para esta solicitud
+            correlation_id = str(uuid.uuid4())
+            response_queue = f"query:responses:generate:{correlation_id}"
+            
+            # Crear acción con datos de solicitud
+            action = DomainAction(
+                action_id=str(uuid.uuid4()),
+                action_type="query.rag.sync",  # Nueva acción específica para llamadas síncronas
+                task_id=str(uuid.uuid4()),
+                tenant_id=tenant_id,
+                data={
+                    "query": query,
+                    "session_id": session_id,
+                    "collection_ids": collection_ids,
+                    "correlation_id": correlation_id,
+                    "llm_model": llm_model,
+                    "search_limit": search_limit,
+                    "metadata": metadata
+                }
             )
             
-        logger.info(f"Acción de query encolada: {task_id}")
-        return task_id
+            if context:
+                action.context = context.dict()
+                
+            # Publicar solicitud en cola de Query Service
+            logger.debug(f"Enviando solicitud generate_rag_sync con correlation_id={correlation_id}")
+            await self.queue_manager.publish_action(action, queue_name="query.actions")
+            
+            # Establecer un tiempo de expiración para la cola de respuesta
+            await self.redis_client.expire(response_queue, self.timeout)
+            
+            # Esperar respuesta en cola específica para este ID de correlación
+            response_data = await self.redis_client.blpop(response_queue, timeout=self.timeout)
+            
+            # Si no hay respuesta en el tiempo límite, lanzar excepción
+            if not response_data:
+                raise TimeoutError(f"Timeout esperando respuesta de Query Service")
+            
+            # Extraer datos de respuesta (blpop devuelve [queue_name, value])
+            _, response_json = response_data
+            response = json.loads(response_json)
+            
+            if response.get("success", False):
+                logger.debug(f"Recibida respuesta RAG en {time.time() - start_time:.2f}s")
+                return {
+                    "answer": response.get("answer", ""),
+                    "documents": response.get("documents", []),
+                    "metadata": response.get("metadata", {})
+                }
+            else:
+                error_msg = response.get("error", "desconocido")
+                logger.warning(f"Error generando respuesta RAG: {error_msg}")
+                raise Exception(f"Error en Query Service: {error_msg}")
+                
+        except TimeoutError as e:
+            logger.error(f"Timeout generando respuesta RAG: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error en comunicación con Query Service: {str(e)}")
+            raise
     
-    async def search_docs(
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10)
+    )
+    async def search_documents_sync(
         self,
         tenant_id: str,
-        collection_id: str,
-        query_embedding: List[float],
-        task_id: Optional[str] = None,
-        limit: int = 5,
-        similarity_threshold: float = 0.7,
-        metadata_filter: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        query: str,
+        collection_ids: List[str],
+        search_limit: int = 5,
         context: Optional[ExecutionContext] = None
-    ) -> str:
+    ) -> List[Dict[str, Any]]:
         """
-        Solicita búsqueda de documentos por embedding.
+        Busca documentos relevantes y espera el resultado (patrón pseudo-síncrono).
         
         Args:
             tenant_id: ID del tenant
-            collection_id: ID de colección de documentos
-            query_embedding: Vector embedding de búsqueda
-            task_id: ID de tarea (opcional)
-            limit: Número máximo de resultados
-            similarity_threshold: Umbral de similitud
-            metadata_filter: Filtro de metadatos (opcional)
-            metadata: Metadatos adicionales (opcional)
+            query: Consulta en texto natural
+            collection_ids: Lista de IDs de colecciones para buscar
+            search_limit: Límite de resultados de búsqueda
             context: Contexto de ejecución (opcional)
             
         Returns:
-            task_id: ID de tarea para seguimiento
+            Lista de documentos relevantes encontrados
             
         Raises:
-            Exception: Si hay error al encolar
+            TimeoutError: Si no hay respuesta en el tiempo límite
+            Exception: Si hay un error en la comunicación
         """
-        # Crear ID único si no se proporciona
-        task_id = task_id or str(uuid.uuid4())
+        start_time = time.time()
         
-        # Crear datos de la acción
-        action_data = {
-            "task_id": task_id,
-            "tenant_id": tenant_id,
-            "session_id": task_id,
-            "callback_queue": self.callback_queue,
-            "collection_id": collection_id,
-            "query_embedding": query_embedding,
-            "limit": limit,
-            "similarity_threshold": similarity_threshold,
-            "metadata_filter": metadata_filter or {},
-            "metadata": metadata or {}
-        }
+        # Asegurar inicialización
+        await self.ensure_initialized()
         
-        # Crear DomainAction
-        domain_action = DomainAction(
-            action_id=str(uuid.uuid4()),
-            action_type="query.search",
-            task_id=task_id,
-            tenant_id=tenant_id,
-            data=action_data
-        )
-        
-        if context:
-            # Usar enqueue_execution con contexto si está disponible
-            logger.info(f"Encolando acción de búsqueda con contexto, tenant_tier: {context.tenant_tier}")
-            await self.queue_manager.enqueue_execution(
-                action=domain_action,
-                context=context
-            )
-        else:
-            # Fallback a enqueue sin contexto
-            await self.queue_manager.enqueue(
-                action=domain_action,
-                domain="query",
-                tenant_id=tenant_id
+        try:
+            # Crear ID de correlación único para esta solicitud
+            correlation_id = str(uuid.uuid4())
+            response_queue = f"query:responses:search:{correlation_id}"
+            
+            # Crear acción con datos de solicitud
+            action = DomainAction(
+                action_id=str(uuid.uuid4()),
+                action_type="query.search.sync",  # Nueva acción específica para llamadas síncronas
+                task_id=str(uuid.uuid4()),
+                tenant_id=tenant_id,
+                data={
+                    "query": query,
+                    "collection_ids": collection_ids,
+                    "correlation_id": correlation_id,
+                    "search_limit": search_limit
+                }
             )
             
-        logger.info(f"Acción de búsqueda encolada: {task_id}")
-        return task_id
+            if context:
+                action.context = context.dict()
+                
+            # Publicar solicitud en cola de Query Service
+            logger.debug(f"Enviando solicitud search_documents_sync con correlation_id={correlation_id}")
+            await self.queue_manager.publish_action(action, queue_name="query.actions")
+            
+            # Establecer un tiempo de expiración para la cola de respuesta
+            await self.redis_client.expire(response_queue, self.timeout)
+            
+            # Esperar respuesta en cola específica para este ID de correlación
+            response_data = await self.redis_client.blpop(response_queue, timeout=self.timeout)
+            
+            # Si no hay respuesta en el tiempo límite, lanzar excepción
+            if not response_data:
+                raise TimeoutError(f"Timeout esperando respuesta de Query Service")
+            
+            # Extraer datos de respuesta (blpop devuelve [queue_name, value])
+            _, response_json = response_data
+            response = json.loads(response_json)
+            
+            if response.get("success", False) and "documents" in response:
+                logger.debug(f"Recibidos documentos en {time.time() - start_time:.2f}s")
+                return response["documents"]
+            elif not response.get("success", True):
+                error_msg = response.get("error", "desconocido")
+                logger.warning(f"Error buscando documentos: {error_msg}")
+                raise Exception(f"Error en Query Service: {error_msg}")
+            else:
+                logger.warning("Respuesta de Query Service no incluye documentos")
+                return []
+                
+        except TimeoutError as e:
+            logger.error(f"Timeout buscando documentos: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error en comunicación con Query Service: {str(e)}")
+            raise

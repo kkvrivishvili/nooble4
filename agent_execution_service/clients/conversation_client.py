@@ -113,7 +113,7 @@ Asegura que el cliente está inicializado."""
             logger.debug(f"Solicitud de historial encolada con correlation_id: {correlation_id}")
             
             # Esperar respuesta en cola específica para este correlation_id
-            response = await self._wait_for_response(correlation_id)
+            response = await self._wait_for_response(correlation_id, method_name="get_history")
             
             if response and response.get("success", False):
                 logger.info(f"Historial obtenido en {time.time() - start_time:.2f}s")
@@ -134,7 +134,8 @@ Asegura que el cliente está inicializado."""
         return []
     
     async def _wait_for_response(
-        self, correlation_id: str, timeout_seconds: Optional[int] = None
+        self, correlation_id: str, timeout_seconds: Optional[int] = None, 
+        method_name: str = "default"
     ) -> Optional[Dict[str, Any]]:
         """
         Espera la respuesta en una cola específica usando BLPOP de Redis.
@@ -146,6 +147,7 @@ Asegura que el cliente está inicializado."""
         Args:
             correlation_id: ID único que correlaciona solicitud y respuesta
             timeout_seconds: Tiempo máximo de espera (None para usar el timeout por defecto)
+            method_name: Nombre del método para la cola estandarizada (get_history, save_message, etc.)
             
         Returns:
             Respuesta deserializada o None si hay timeout
@@ -153,8 +155,8 @@ Asegura que el cliente está inicializado."""
         if timeout_seconds is None:
             timeout_seconds = self.timeout
             
-        # Cola específica donde esperar la respuesta
-        response_queue = f"conversation:responses:{correlation_id}"
+        # Cola específica donde esperar la respuesta - formato estandarizado
+        response_queue = f"conversation:responses:{method_name}:{correlation_id}"
         start_time = time.time()
         
         try:
@@ -198,10 +200,11 @@ Asegura que el cliente está inicializado."""
         content: str,
         message_type: str = "text",
         metadata: Optional[Dict[str, Any]] = None,
-        processing_time: Optional[float] = None
+        processing_time: Optional[float] = None,
+        wait_for_response: bool = False
     ) -> bool:
         """
-        Guarda un mensaje en la conversación.
+        Guarda un mensaje en la conversación usando el patrón pseudo-síncrono Redis.
         
         Args:
             session_id: ID de la sesión
@@ -211,31 +214,67 @@ Asegura que el cliente está inicializado."""
             message_type: Tipo de mensaje
             metadata: Metadatos adicionales
             processing_time: Tiempo de procesamiento
+            wait_for_response: Si es True, espera confirmación de guardado, si es False
+                              envía de forma asíncrona y retorna inmediatamente
             
         Returns:
-            bool: True si se guardó exitosamente
+            bool: True si se guardó exitosamente o si se envió asíncronamente (según wait_for_response)
         """
-        request_data = {
-            "session_id": session_id,
-            "tenant_id": tenant_id,
-            "role": role,
-            "content": content,
-            "message_type": message_type,
-            "metadata": metadata or {},
-            "processing_time": processing_time
-        }
+        await self.ensure_initialized()
+        start_time = time.time()
         
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    f"{self.base_url}/api/v1/internal/save-message",
-                    json=request_data
-                )
-                response.raise_for_status()
+            # Generar correlation_id único para esta solicitud
+            correlation_id = str(uuid.uuid4())
+            
+            # Crear acción para guardar mensaje
+            action = DomainAction(
+                action_type="conversation.save_message",
+                tenant_id=tenant_id,
+                session_id=session_id,
+                data={
+                    "role": role,
+                    "content": content, 
+                    "message_type": message_type,
+                    "metadata": metadata or {},
+                    "processing_time": processing_time,
+                    "correlation_id": correlation_id
+                },
+                correlation_id=correlation_id  # Este campo es crucial para el patrón request-response
+            )
+            
+            # Encolar solicitud con prioridad alta para mensajes (2 es más prioritario que 1)
+            await self.queue_manager.enqueue_action(
+                action, "conversation", priority=2
+            )
+            
+            logger.debug(f"Solicitud de guardado de mensaje encolada para sesión {session_id}")
+            
+            # Si no se requiere esperar confirmación, retornar inmediatamente
+            if not wait_for_response:
+                return True
                 
-                result = response.json()
-                return result.get("success", False)
+            # Esperar respuesta en cola específica para este correlation_id
+            response = await self._wait_for_response(correlation_id, method_name="save_message")
+            
+            if response and response.get("success", False):
+                logger.info(f"Mensaje guardado en {time.time() - start_time:.2f}s")
+                return True
+            elif response:
+                logger.error(f"Error guardando mensaje: {response.get('error')}")
+                return False
+            else:
+                # Si no hay respuesta pero estamos esperando, considerarlo error
+                logger.warning("Timeout esperando confirmación de guardado de mensaje")
+                return False
                 
         except Exception as e:
-            logger.error(f"Error guardando mensaje: {str(e)}")
-            return False
+            logger.error(f"Error inesperado en save_message: {str(e)}")
+            if wait_for_response:
+                return False
+            else:
+                # En modo asíncrono, seguir intentando en segundo plano
+                return True
+    
+    # Método notify_session_closed ha sido eliminado
+    # No es necesario para el funcionamiento del sistema

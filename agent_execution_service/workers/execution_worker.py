@@ -173,6 +173,9 @@ class ExecutionWorker(BaseWorker):
             if action_type == "execution.agent_run":
                 logger.info(f"Procesando ejecución de agente: {action.task_id}")
                 return await self._handle_agent_execution(action, context)
+            # La funcionalidad de session.closed ha sido eliminada intencionalmente
+            # elif action_type == "session.closed":
+            #     return await self._handle_session_closed(action, context)
             elif action_type == "embedding.callback":
                 logger.info(f"Procesando callback de embedding: {action.task_id}")
                 return await self.embedding_callback_handler.handle_embedding_callback(action, context)
@@ -193,6 +196,25 @@ class ExecutionWorker(BaseWorker):
                 }
             }
     
+    async def _handle_session_closed(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
+        """
+        Este método ha sido deshabilitado intencionalmente.
+        Se mantiene la firma para compatibilidad con el código existente.
+        
+        Args:
+            action: Acción no procesada
+            context: Contexto opcional (no utilizado)
+            
+        Returns:
+            Dict con mensaje indicando que la funcionalidad está deshabilitada
+        """
+        logger.debug(f"Método _handle_session_closed deshabilitado para sesión {action.session_id if hasattr(action, 'session_id') else 'desconocida'}")
+        
+        return {
+            "success": True,
+            "message": "La funcionalidad de cierre de sesión ha sido deshabilitada"
+        }
+        
     async def _handle_agent_execution(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
         """
         Handler específico para ejecución de agentes.

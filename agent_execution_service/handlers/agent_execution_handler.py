@@ -40,6 +40,7 @@ class AgentExecutionHandler:
         """
         self.context_handler = context_handler
         self.redis = redis_client
+        self.settings = settings  # Guardar referencia a configuraciones
         
         # Inicializar executor de agentes
         self.agent_executor = AgentExecutor(context_handler, redis_client)
@@ -70,20 +71,26 @@ class AgentExecutionHandler:
             else:
                 logger.info(f"Usando contexto de ejecución proporcionado. Tier: {context.tenant_tier}")
             
-            # 2. Obtener configuración del agente
-            agent_config = await self.context_handler.get_agent_configuration(
+            # 2. Obtener configuración del agente (con caché)
+            agent_config = await self.context_handler.get_agent_config(
                 agent_id=context.primary_agent_id,
-                tenant_id=context.tenant_id
+                tenant_id=context.tenant_id,
+                session_id=action.session_id
             )
             
             # 3. Validar permisos de ejecución
             await self.context_handler.validate_execution_permissions(context, agent_config)
             
             # 4. Obtener historial de conversación
+            # Detectar si es una nueva conversación revisando si hay algún mensaje previo en la acción
+            is_new_conversation = not action.conversation_history 
+            
             conversation_history = await self.context_handler.get_conversation_history(
                 session_id=action.session_id,
-                tenant_id=context.tenant_id,
-                limit=agent_config.get("max_history_messages", 10)
+                tenant_id=action.tenant_id,
+                limit=agent_config.get("max_history_messages", 10),
+                is_new_conversation=is_new_conversation,
+                tenant_tier=context.tenant_tier
             )
             
             # 5. Configurar timeout según tier
@@ -167,22 +174,26 @@ class AgentExecutionHandler:
         execution_result: ExecutionResult,
         processing_time: float
     ):
-        """Guarda mensajes en el servicio de conversación."""
+        """Guarda mensajes en el historial de conversación con soporte de caché local."""
         try:
-            # Guardar mensaje del usuario
-            await self.context_handler.conversation_client.save_message(
+            # Obtener el tier del tenant desde el contexto
+            tenant_tier = action.execution_context.get("tenant_tier", "free")
+            
+            # Guardar mensaje del usuario en caché local y servicio (asíncrono/síncrono según tier)
+            await self.context_handler.save_conversation_message(
                 session_id=action.session_id,
                 tenant_id=action.tenant_id,
                 role="user",
                 content=action.message,
                 message_type=action.message_type,
                 metadata=action.user_info,
-                processing_time=None
+                processing_time=None,
+                tenant_tier=tenant_tier  # Usar tier para configuraciones específicas
             )
             
-            # Guardar respuesta del agente
+            # Guardar respuesta del agente en caché local y servicio
             if execution_result.response:
-                await self.context_handler.conversation_client.save_message(
+                await self.context_handler.save_conversation_message(
                     session_id=action.session_id,
                     tenant_id=action.tenant_id,
                     role="assistant",
@@ -194,12 +205,13 @@ class AgentExecutionHandler:
                         "tool_calls": len(execution_result.tool_calls),
                         "iterations": execution_result.iterations_used
                     },
-                    processing_time=processing_time
+                    processing_time=processing_time,
+                    tenant_tier=tenant_tier  # Usar tier para configuraciones específicas
                 )
             
         except Exception as e:
             logger.error(f"Error guardando conversación: {str(e)}")
-            # No fallar la ejecución por esto
+            # No fallar la ejecución por problema de persistencia
     
     async def _track_execution_metrics(
         self,
@@ -268,3 +280,24 @@ class AgentExecutionHandler:
             return 0.0
         
         return round((completed / total) * 100, 2)
+        
+    async def handle_session_closed(self, tenant_id: str, session_id: str, tenant_tier: str = "free") -> Dict[str, Any]:
+        """
+        Este método ha sido deshabilitado intencionalmente.
+        Se mantiene la firma para compatibilidad con el código existente.
+        
+        Args:
+            tenant_id: ID del tenant (no utilizado)
+            session_id: ID de la sesión cerrada (no utilizado)
+            tenant_tier: Nivel de servicio del tenant (no utilizado)
+            
+        Returns:
+            Dict con resultado de la operación, siempre éxito
+        """
+        logger.debug(f"Método handle_session_closed deshabilitado para sesión {session_id}")
+            
+        # Devolver un resultado exitoso para mantener compatibilidad
+        return {
+            "success": True,
+            "message": f"Método handle_session_closed deshabilitado"
+        }

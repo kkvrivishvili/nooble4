@@ -8,6 +8,7 @@ VERSIÓN: 4.0 - Adaptado al patrón BaseWorker con procesamiento directo
 """
 
 import logging
+import json
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
@@ -115,10 +116,10 @@ class QueryWorker(BaseWorker):
             await self.initialize()
         
         try:
-            if action_type == "query.generate":
-                return await self._handle_query_generate(action, context)
-            elif action_type == "query.search":
-                return await self._handle_search_docs(action, context)
+            if action_type == "query.generate.sync" or action_type == "query.rag.sync":
+                return await self._handle_query_generate_sync(action, context)
+            elif action_type == "query.search.sync":
+                return await self._handle_search_docs_sync(action, context)
             elif action_type == "embedding.callback":
                 return await self.embedding_callback_handler.handle_embedding_callback(action, context)
             else:
@@ -128,69 +129,6 @@ class QueryWorker(BaseWorker):
                 
         except Exception as e:
             logger.error(f"Error procesando acción {action_type}: {str(e)}")
-            return {
-                "success": False,
-                "error": {
-                    "type": type(e).__name__,
-                    "message": str(e)
-                }
-            }
-    
-    async def _handle_query_generate(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
-        """
-        Handler específico para procesamiento de consultas.
-        
-        Args:
-            action: Acción de consulta
-            context: Contexto de ejecución opcional con metadatos
-            
-        Returns:
-            Resultado del procesamiento
-        """
-        # Convertir a tipo específico
-        query_action = QueryGenerateAction.parse_obj(action.dict())
-        
-        # Enriquecer con datos de contexto si está disponible
-        if context:
-            logger.info(f"Procesando consulta con tier: {context.tenant_tier}")
-            query_action.tenant_tier = context.tenant_tier
-        
-        # Procesar consulta
-        result = await self.query_handler.handle_query(query_action)
-        
-        return result
-        
-    async def _handle_search_docs(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
-        """
-        Handler específico para validación de consultas.
-        
-        Args:
-            action: Acción de validación
-            context: Contexto de ejecución opcional con metadatos
-            
-        Returns:
-            Resultado del procesamiento
-        """
-        try:
-            # Verificar inicialización
-            if not self.initialized:
-                await self.initialize()
-                
-            # Convertir a tipo específico
-            search_action = SearchDocsAction.parse_obj(action.dict())
-            
-            # Enriquecer con datos de contexto si está disponible
-            if context:
-                logger.info(f"Procesando búsqueda con tier: {context.tenant_tier}")
-                search_action.tenant_tier = context.tenant_tier
-            
-            # Procesar búsqueda
-            result = await self.query_handler.handle_search(search_action)
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error en handle_query_validate: {str(e)}")
             return {
                 "success": False,
                 "error": {
@@ -211,109 +149,15 @@ class QueryWorker(BaseWorker):
         """
         action_type = action_data.get("action_type")
         
-        if action_type == "query.generate":
+        if action_type == "query.generate.sync" or action_type == "query.rag.sync":
             return QueryGenerateAction.parse_obj(action_data)
-        elif action_type == "query.search":
+        elif action_type == "query.search.sync":
             return SearchDocsAction.parse_obj(action_data)
         elif action_type == "query.callback":
             return QueryCallbackAction.parse_obj(action_data)
         else:
             # Fallback a DomainAction genérica
             return DomainAction.parse_obj(action_data)
-    
-    async def _send_callback(self, action: DomainAction, result: Dict[str, Any]):
-        """
-        Envía resultado como callback.
-        
-        Args:
-            action: Acción original que generó el resultado
-            result: Resultado del procesamiento
-        """
-        try:
-            # Validar que haya cola de callback
-            if not action.callback_queue:
-                logger.warning(f"No se especificó cola de callback para {action.task_id}")
-                return
-                
-            # Crear contexto de ejecución para el callback
-            context = ExecutionContext(
-                tenant_id=action.tenant_id,
-                tenant_tier=getattr(action, 'tenant_tier', None),
-                session_id=action.session_id
-            )
-            
-            logger.info(f"Preparando callback con contexto. Tier: {context.tenant_tier}")
-            
-            # Determinar tipo de callback según resultado
-            if result.get("success", False) and "result" in result:
-                # Callback de consulta exitosa
-                await self.query_callback_handler.send_query_success_callback(
-                    task_id=action.task_id,
-                    tenant_id=action.tenant_id,
-                    session_id=action.session_id,
-                    callback_queue=action.callback_queue,
-                    query_result=result["result"],
-                    similarity_score=result.get("metadata", {}).get("similarity_score"),
-                    sources=result.get("metadata", {}).get("sources", []),
-                    processing_time=result.get("execution_time", 0.0),
-                    context=context
-                )
-            else:
-                # Callback de error
-                await self.query_callback_handler.send_query_error_callback(
-                    task_id=action.task_id,
-                    tenant_id=action.tenant_id,
-                    session_id=action.session_id,
-                    callback_queue=action.callback_queue,
-                    error_info=result.get("error", {}),
-                    context=context,
-                    processing_time=result.get("execution_time")
-                )
-            
-        except Exception as e:
-            logger.error(f"Error enviando callback: {str(e)}")
-    
-    async def _send_error_callback(self, action_data: Dict[str, Any], error_message: str):
-        """
-        Envía callback de error.
-        
-        Args:
-            action_data: Datos originales de la acción
-            error_message: Mensaje de error
-        """
-        try:
-            # Extraer información necesaria
-            task_id = action_data.get("task_id") or action_data.get("action_id")
-            tenant_id = action_data.get("tenant_id", "unknown")
-            session_id = action_data.get("session_id", "unknown")
-            callback_queue = action_data.get("callback_queue")
-            
-            if not callback_queue or not task_id:
-                logger.warning("Información insuficiente para enviar error callback")
-                return
-            
-            # Crear contexto de ejecución para el callback
-            context = ExecutionContext(
-                tenant_id=tenant_id,
-                tenant_tier=action_data.get('tenant_tier'),
-                session_id=session_id
-            )
-            
-            # Enviar error callback con contexto
-            await self.query_callback_handler.send_query_error_callback(
-                task_id=task_id,
-                tenant_id=tenant_id,
-                session_id=session_id,
-                callback_queue=callback_queue,
-                error_info={
-                    "type": "ProcessingError",
-                    "message": error_message
-                },
-                context=context
-            )
-            
-        except Exception as e:
-            logger.error(f"Error enviando error callback: {str(e)}")
     
     # Método auxiliar para estadísticas específicas
     async def get_query_stats(self) -> Dict[str, Any]:
@@ -351,3 +195,173 @@ class QueryWorker(BaseWorker):
             stats["error"] = str(e)
         
         return stats
+    
+    async def _handle_query_generate_sync(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
+        """
+        Handler específico para procesamiento de consultas RAG con patrón pseudo-síncrono.
+        
+        A diferencia del método asíncrono normal, este método responde directamente
+        a una cola temporal específica con el correlation_id proporcionado en la acción.
+        
+        Args:
+            action: Acción de consulta RAG con correlation_id
+            context: Contexto de ejecución opcional con metadatos
+            
+        Returns:
+            Resultado del procesamiento con la respuesta generada
+        """
+        try:
+            # Verificar inicialización
+            if not self.initialized:
+                await self.initialize()
+                
+            # Convertir a tipo específico
+            query_action = QueryGenerateAction.parse_obj(action.dict())
+            
+            # Extraer correlation_id de los datos
+            correlation_id = query_action.data.get('correlation_id')
+            if not correlation_id:
+                raise ValueError("Se requiere correlation_id para acciones sync")
+                
+            # Generar cola de respuesta basada en correlation_id
+            response_queue = f"query:responses:generate:{correlation_id}"
+                
+            # Enriquecer con datos de contexto si está disponible
+            if context:
+                logger.info(f"Procesando consulta RAG sync con tier: {context.tenant_tier}")
+                query_action.tenant_tier = context.tenant_tier
+            
+            # Procesar consulta RAG
+            result = await self.query_handler.handle_query(query_action)
+            
+            # Publicar resultado directamente en la cola de respuesta
+            if result.get("success", False):
+                await self.redis_client.rpush(
+                    response_queue,
+                    json.dumps({
+                        "success": True,
+                        "result": result.get("result", ""),
+                        "sources": result.get("metadata", {}).get("sources", []),
+                        "similarity_score": result.get("metadata", {}).get("similarity_score"),
+                        "execution_time": result.get("execution_time", 0)
+                    })
+                )
+                # Establecer tiempo de expiración para la cola temporal
+                await self.redis_client.expire(response_queue, 300)  # 5 minutos
+            else:
+                await self.redis_client.rpush(
+                    response_queue,
+                    json.dumps({
+                        "success": False,
+                        "error": result.get("error", "Error desconocido")
+                    })
+                )
+                await self.redis_client.expire(response_queue, 300)  # 5 minutos
+                
+            logger.info(f"Respuesta RAG sync enviada a {response_queue}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error en handle_query_generate_sync: {str(e)}")
+            # Intentar enviar error a cola de respuesta si tenemos correlation_id
+            correlation_id = action.data.get('correlation_id')
+            if correlation_id:
+                response_queue = f"query:responses:generate:{correlation_id}"
+                await self.redis_client.rpush(
+                    response_queue,
+                    json.dumps({
+                        "success": False,
+                        "error": str(e)
+                    })
+                )
+                await self.redis_client.expire(response_queue, 300)  # 5 minutos
+            
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def _handle_search_docs_sync(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
+        """
+        Handler específico para búsqueda de documentos con patrón pseudo-síncrono.
+        
+        A diferencia del método asíncrono normal, este método responde directamente
+        a una cola temporal específica con el correlation_id proporcionado en la acción.
+        
+        Args:
+            action: Acción de búsqueda con correlation_id
+            context: Contexto de ejecución opcional con metadatos
+            
+        Returns:
+            Resultado del procesamiento con los documentos encontrados
+        """
+        try:
+            # Verificar inicialización
+            if not self.initialized:
+                await self.initialize()
+                
+            # Convertir a tipo específico
+            search_action = SearchDocsAction.parse_obj(action.dict())
+            
+            # Extraer correlation_id de los datos
+            correlation_id = search_action.data.get('correlation_id')
+            if not correlation_id:
+                raise ValueError("Se requiere correlation_id para acciones sync")
+                
+            # Generar cola de respuesta basada en correlation_id
+            response_queue = f"query:responses:search:{correlation_id}"
+                
+            # Enriquecer con datos de contexto si está disponible
+            if context:
+                logger.info(f"Procesando búsqueda sync con tier: {context.tenant_tier}")
+                search_action.tenant_tier = context.tenant_tier
+            
+            # Procesar búsqueda
+            result = await self.query_handler.handle_search(search_action)
+            
+            # Publicar resultado directamente en la cola de respuesta
+            if result.get("success", False):
+                await self.redis_client.rpush(
+                    response_queue,
+                    json.dumps({
+                        "success": True,
+                        "documents": result.get("documents", []),
+                        "similarity_scores": result.get("similarity_scores", []),
+                        "execution_time": result.get("execution_time", 0),
+                        "metadata": result.get("metadata", {})
+                    })
+                )
+                # Establecer tiempo de expiración para la cola temporal
+                await self.redis_client.expire(response_queue, 300)  # 5 minutos
+            else:
+                await self.redis_client.rpush(
+                    response_queue,
+                    json.dumps({
+                        "success": False,
+                        "error": result.get("error", "Error desconocido")
+                    })
+                )
+                await self.redis_client.expire(response_queue, 300)  # 5 minutos
+                
+            logger.info(f"Respuesta búsqueda sync enviada a {response_queue}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error en handle_search_docs_sync: {str(e)}")
+            # Intentar enviar error a cola de respuesta si tenemos correlation_id
+            correlation_id = action.data.get('correlation_id')
+            if correlation_id:
+                response_queue = f"query:responses:search:{correlation_id}"
+                await self.redis_client.rpush(
+                    response_queue,
+                    json.dumps({
+                        "success": False,
+                        "error": str(e)
+                    })
+                )
+                await self.redis_client.expire(response_queue, 300)  # 5 minutos
+            
+            return {
+                "success": False,
+                "error": str(e)
+            }

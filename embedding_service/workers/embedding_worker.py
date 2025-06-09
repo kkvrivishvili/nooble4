@@ -9,6 +9,7 @@ VERSIÓN: 4.0 - Actualizado al patrón BaseWorker con _handle_action
 """
 
 import logging
+import json
 from typing import Dict, Any, List, Optional
 
 from common.workers.base_worker import BaseWorker
@@ -120,6 +121,9 @@ class EmbeddingWorker(BaseWorker):
         try:
             if action_type == "embedding.generate":
                 return await self._handle_embedding_generate(action, context)
+                
+            elif action_type == "embedding.generate.sync":
+                return await self._handle_embedding_generate_sync(action, context)
                 
             elif action_type == "embedding.validate":
                 return await self._handle_embedding_validate(action, context)
@@ -366,3 +370,86 @@ class EmbeddingWorker(BaseWorker):
             stats["error"] = str(e)
         
         return stats
+        
+    async def _handle_embedding_generate_sync(self, action: DomainAction, context: ExecutionContext = None) -> Dict[str, Any]:
+        """
+        Handler específico para generación de embeddings con patrón pseudo-síncrono.
+        
+        A diferencia del método asíncrono normal, este método responde directamente
+        a una cola temporal específica con el correlation_id proporcionado en la acción.
+        
+        Args:
+            action: Acción de embedding con correlation_id
+            context: Contexto de ejecución opcional con metadatos
+            
+        Returns:
+            Resultado del procesamiento con los embeddings generados
+        """
+        try:
+            # Verificar inicialización
+            if not self.initialized:
+                await self.initialize()
+                
+            # Convertir a tipo específico
+            generate_action = EmbeddingGenerateAction.parse_obj(action.dict())
+            
+            # Extraer correlation_id de los datos
+            correlation_id = generate_action.data.get('correlation_id')
+            if not correlation_id:
+                raise ValueError("Se requiere correlation_id para acciones sync")
+                
+            # Generar cola de respuesta basada en correlation_id
+            response_queue = f"embedding:responses:generate:{correlation_id}"
+                
+            # Enriquecer con datos de contexto si está disponible
+            if context:
+                logger.info(f"Procesando generación sync con tier: {context.tenant_tier}")
+                generate_action.tenant_tier = context.tenant_tier
+            
+            # Procesar generación de embeddings
+            result = await self.embedding_handler.handle_embedding_generate(generate_action)
+            
+            # Publicar resultado directamente en la cola de respuesta
+            if result.get("success", False):
+                await self.redis_client.rpush(
+                    response_queue,
+                    json.dumps({
+                        "success": True,
+                        "embeddings": result.get("embeddings", []),
+                        "metadata": result.get("metadata", {})
+                    })
+                )
+                # Establecer tiempo de expiración para la cola temporal
+                await self.redis_client.expire(response_queue, 300)  # 5 minutos
+            else:
+                await self.redis_client.rpush(
+                    response_queue,
+                    json.dumps({
+                        "success": False,
+                        "error": result.get("error", "Error desconocido")
+                    })
+                )
+                await self.redis_client.expire(response_queue, 300)  # 5 minutos
+                
+            logger.info(f"Respuesta sync enviada a {response_queue}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error en handle_embedding_generate_sync: {str(e)}")
+            # Intentar enviar error a cola de respuesta si tenemos correlation_id
+            correlation_id = action.data.get('correlation_id')
+            if correlation_id:
+                response_queue = f"embedding:responses:generate:{correlation_id}"
+                await self.redis_client.rpush(
+                    response_queue,
+                    json.dumps({
+                        "success": False,
+                        "error": str(e)
+                    })
+                )
+                await self.redis_client.expire(response_queue, 300)  # 5 minutos
+            
+            return {
+                "success": False,
+                "error": str(e)
+            }

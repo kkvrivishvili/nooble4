@@ -51,21 +51,61 @@ class ExecutionSettings(BaseSettings):
         description="Prefijo para colas de callback hacia orchestrator"
     )
     
-    # NUEVO: Cache de configuraciones
+    # Cache de configuraciones
     agent_config_cache_ttl: int = Field(
-        300,
+        600,  # Aumentado a 10 minutos (estándar)
         description="TTL del cache de configuraciones de agente (segundos)"
     )
     
-    # NUEVO: Límites por tier
+    # Cache de conversaciones
+    conversation_cache_ttl: int = Field(
+        1200,  # 20 minutos por defecto
+        description="TTL del cache de historiales de conversación (segundos)"
+    )
+    
+    # Límite de mensajes en caché por defecto
+    default_conversation_cache_limit: int = Field(
+        20,  # 20 mensajes por defecto
+        description="Número máximo de mensajes para mantener en caché local de conversación"
+    )
+    
+    # Límites por tier
     tier_limits: dict = Field(
         default={
-            "free": {"max_iterations": 3, "max_tools": 2, "timeout": 30},
-            "advance": {"max_iterations": 5, "max_tools": 5, "timeout": 60},
-            "professional": {"max_iterations": 10, "max_tools": 10, "timeout": 120},
-            "enterprise": {"max_iterations": 20, "max_tools": None, "timeout": 300}
+            "free": {
+                "max_iterations": 3, 
+                "max_tools": 2, 
+                "timeout": 30,
+                "conversation_cache_ttl": 600,    # 10 minutos
+                "conversation_cache_limit": 10,   # Máximo 10 mensajes en caché
+                "wait_for_persistence": True,     # Esperar confirmación en tier gratuito
+            },
+            "advance": {
+                "max_iterations": 5, 
+                "max_tools": 5, 
+                "timeout": 60,
+                "conversation_cache_ttl": 900,    # 15 minutos
+                "conversation_cache_limit": 20,   # Máximo 20 mensajes en caché
+                "wait_for_persistence": False,    # No esperar confirmación
+            },
+            "professional": {
+                "max_iterations": 10, 
+                "max_tools": 10, 
+                "timeout": 120,
+                "conversation_cache_ttl": 1200,   # 20 minutos
+                "conversation_cache_limit": 40,   # Máximo 40 mensajes en caché
+                "wait_for_persistence": False,    # No esperar confirmación
+            },
+            "enterprise": {
+                "max_iterations": 20, 
+                "max_tools": None, 
+                "timeout": 300,
+                "conversation_cache_ttl": 1800,   # 30 minutos
+                "conversation_cache_limit": 100,  # Máximo 100 mensajes en caché
+                "wait_for_persistence": False,    # No esperar confirmación
+            }
         },
-        description="Límites por tier"
+        description="Límites y configuraciones por tier"
     )
     
     # Worker configuración

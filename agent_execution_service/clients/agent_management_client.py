@@ -100,7 +100,7 @@ class AgentManagementClient:
         try:
             # Crear ID de correlación único para esta solicitud
             correlation_id = str(uuid.uuid4())
-            response_queue = f"response:{correlation_id}"
+            response_queue = f"management:responses:get_agent_config:{correlation_id}"
             
             # Crear acción con datos de solicitud
             action = DomainAction(

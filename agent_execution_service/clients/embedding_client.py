@@ -1,11 +1,19 @@
 """
 Cliente para comunicarse con Embedding Service usando Domain Actions.
+
+Implementa el patrón de comunicación pseudo-síncrona sobre Redis, que permite realizar
+solicitudes síncronas (esperar respuesta) manteniendo la misma interfaz y comportamiento.
+
+Version: 4.0 - Migrado a comunicación Redis pseudo-síncrona
 """
 
 import logging
+import json
+import time
 import uuid
 from typing import List, Dict, Any, Optional
 from uuid import UUID
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from common.models.actions import DomainAction
 from common.services.domain_queue_manager import DomainQueueManager
@@ -20,9 +28,9 @@ class EmbeddingClient:
     """
     Cliente para solicitar embeddings usando Domain Actions.
     
-    Este cliente envía acciones al servicio de embeddings para
-    generar o validar embeddings de forma asíncrona.
-    Utiliza DomainQueueManager para comunicación enriquecida con contexto.
+    Este cliente implementa el patrón de comunicación pseudo-síncrona sobre Redis 
+    que permite solicitar datos de forma síncrona (esperando respuesta) pero usando 
+    la infraestructura de colas Redis compartida por todos los servicios.
     """
     
     def __init__(self, queue_manager: Optional[DomainQueueManager] = None):
@@ -30,135 +38,132 @@ class EmbeddingClient:
         Inicializa el cliente.
         
         Args:
-            action_processor: Procesador de acciones (opcional)
+            queue_manager: Gestor de colas de dominio opcional
         """
-        redis_client = get_redis_client(settings.redis_url)
-        self.queue_manager = queue_manager or DomainQueueManager(redis_client)
+        self.timeout = settings.http_timeout_seconds  # Usado como timeout general
+        
+        # Componentes para comunicación Redis (se inicializan de forma asíncrona)
+        self.redis_client = None
+        self.queue_manager = queue_manager
+        self.initialized = False
+        self.callback_queue = f"execution.{settings.service_id}.callbacks"  # Mantenido por compatibilidad
     
-    async def generate_embeddings(
+    async def initialize(self):
+        """
+        Inicializa el cliente de forma asíncrona, configurando Redis y DomainQueueManager.
+        
+        Este método debe llamarse antes de usar cualquier otra función del cliente.
+        """
+        if not self.initialized:
+            self.redis_client = get_redis_client(settings.redis_url)
+            if not self.queue_manager:
+                self.queue_manager = DomainQueueManager(self.redis_client)
+            
+            self.initialized = True
+            logger.info("EmbeddingClient inicializado con comunicación Redis pseudo-síncrona")
+    
+    async def ensure_initialized(self):
+        """Asegura que el cliente está inicializado."""
+        if not self.initialized:
+            await self.initialize()
+    
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10)
+    )
+    async def generate_embeddings_sync(
         self,
         texts: List[str],
         tenant_id: str,
         session_id: str,
-        callback_queue: str,
         model: Optional[str] = None,
-        task_id: Optional[str] = None,
         collection_id: Optional[UUID] = None,
         metadata: Optional[Dict[str, Any]] = None,
         context: Optional[ExecutionContext] = None
-    ) -> str:
+    ) -> List[List[float]]:
         """
-        Solicita la generación de embeddings.
+        Genera embeddings y espera el resultado (patrón pseudo-síncrono).
+        
+        Reemplaza la comunicación asíncrona con callbacks por una comunicación 
+        pseudo-síncrona que espera la respuesta usando correlation_id.
         
         Args:
             texts: Textos para generar embeddings
             tenant_id: ID del tenant
             session_id: ID de la sesión
-            callback_queue: Cola para recibir el callback
             model: Modelo a utilizar (default si no se especifica)
-            task_id: ID de la tarea (opcional)
             collection_id: ID de la colección (opcional)
-            metadata: Metadatos adicionales (opcional)
-            
-        Returns:
-            task_id: ID de la tarea para seguimiento
-            
-        Raises:
-            Exception: Si hay un error encolando la acción
-        """
-        # Crear ID único si no se proporciona
-        task_id = task_id or str(uuid.uuid4())
-        
-        action = DomainAction(
-            action_id=str(uuid.uuid4()),
-            action_type="embedding.generate",
-            task_id=task_id,
-            tenant_id=tenant_id,
-            data={
-                "texts": texts,
-                "session_id": session_id,
-                "callback_queue": callback_queue,
-                "model": model,
-                "collection_id": str(collection_id) if collection_id else None,
-                "metadata": metadata or {}
-            }
-        )
-        
-        if context:
-            # Usar enqueue_execution con contexto si está disponible
-            logger.info(f"Encolando acción con contexto, tenant_tier: {context.tenant_tier}")
-            await self.queue_manager.enqueue_execution(
-                action=action,
-                context=context
-            )
-        else:
-            # Fallback a enqueue sin contexto
-            await self.queue_manager.enqueue(
-                action=action,
-                domain="embedding",
-                tenant_id=tenant_id
-            )
-            
-        return task_id
-    
-    async def validate_embeddings(
-        self,
-        embedding_ids: List[str],
-        tenant_id: str,
-        session_id: str,
-        callback_queue: str,
-        task_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        context: Optional[ExecutionContext] = None
-    ) -> str:
-        """
-        Solicita la validación de embeddings.
-        
-        Args:
-            embedding_ids: IDs de los embeddings para validar
-            tenant_id: ID del tenant
-            session_id: ID de la sesión
-            callback_queue: Cola para recibir el callback
-            task_id: ID de la tarea (opcional)
             metadata: Metadatos adicionales (opcional)
             context: Contexto de ejecución (opcional)
             
         Returns:
-            task_id: ID de la tarea para seguimiento
+            List[List[float]]: Lista de vectors de embeddings generados
             
         Raises:
-            Exception: Si hay un error encolando la acción
+            TimeoutError: Si no hay respuesta en el tiempo límite
+            Exception: Si hay un error en la comunicación
         """
-        # Crear ID único si no se proporciona
-        task_id = task_id or str(uuid.uuid4())
+        start_time = time.time()
         
-        action = DomainAction(
-            action_id=str(uuid.uuid4()),
-            action_type="embedding.validate",
-            task_id=task_id,
-            tenant_id=tenant_id,
-            data={
-                "embedding_ids": embedding_ids,
-                "session_id": session_id,
-                "callback_queue": callback_queue,
-                "metadata": metadata or {}
-            }
-        )
+        # Asegurar inicialización
+        await self.ensure_initialized()
         
-        if context:
-            # Usar enqueue_execution con contexto si está disponible
-            logger.info(f"Encolando validación con contexto, tenant_tier: {context.tenant_tier}")
-            await self.queue_manager.enqueue_execution(
-                action=action,
-                context=context
-            )
-        else:
-            # Fallback a enqueue sin contexto
-            await self.queue_manager.enqueue(
-                action=action,
-                domain="embedding",
-                tenant_id=tenant_id
+        try:
+            # Crear ID de correlación único para esta solicitud
+            correlation_id = str(uuid.uuid4())
+            response_queue = f"embedding:responses:generate:{correlation_id}"
+            
+            # Crear acción con datos de solicitud
+            action = DomainAction(
+                action_id=str(uuid.uuid4()),
+                action_type="embedding.generate.sync",  # Nueva acción específica para llamadas síncronas
+                task_id=str(uuid.uuid4()),
+                tenant_id=tenant_id,
+                data={
+                    "texts": texts,
+                    "session_id": session_id,
+                    "correlation_id": correlation_id,
+                    "model": model,
+                    "collection_id": str(collection_id) if collection_id else None,
+                    "metadata": metadata,
+                }
             )
             
-        logger.info(f"Acción de validación encolada: {task_id}")
-        return task_id
+            if context:
+                action.context = context.dict()
+                
+            # Publicar solicitud en cola de Embedding Service
+            logger.debug(f"Enviando solicitud generate_embeddings_sync con correlation_id={correlation_id}")
+            await self.queue_manager.publish_action(action, queue_name="embedding.actions")
+            
+            # Establecer un tiempo de expiración para la cola de respuesta
+            await self.redis_client.expire(response_queue, self.timeout)
+            
+            # Esperar respuesta en cola específica para este ID de correlación
+            response_data = await self.redis_client.blpop(response_queue, timeout=self.timeout)
+            
+            # Si no hay respuesta en el tiempo límite, lanzar excepción
+            if not response_data:
+                raise TimeoutError(f"Timeout esperando respuesta de Embedding Service")
+            
+            # Extraer datos de respuesta (blpop devuelve [queue_name, value])
+            _, response_json = response_data
+            response = json.loads(response_json)
+            
+            if response.get("success", False) and "embeddings" in response:
+                logger.debug(f"Recibidos embeddings en {time.time() - start_time:.2f}s")
+                return response["embeddings"]
+            elif not response.get("success", True):
+                error_msg = response.get("error", "desconocido")
+                logger.warning(f"Error generando embeddings: {error_msg}")
+                raise Exception(f"Error en Embedding Service: {error_msg}")
+            else:
+                logger.warning("Respuesta de Embedding Service no incluye embeddings")
+                return []
+                
+        except TimeoutError as e:
+            logger.error(f"Timeout generando embeddings: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Error en comunicación con Embedding Service: {str(e)}")
+            raise
