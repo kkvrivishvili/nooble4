@@ -9,7 +9,9 @@ VERSIÓN: 2.0 - Adaptado al patrón improved_base_worker
 
 import logging
 import datetime
-from typing import Dict, Any, List
+import json
+import asyncio
+from typing import Dict, Any, List, Optional
 
 from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
@@ -64,12 +66,49 @@ class OrchestratorWorker(BaseWorker):
         logger.info("ImprovedOrchestratorWorker inicializado correctamente")
     
     async def start(self):
-        """Extiende el start para asegurar inicialización."""
+        """Procesa callbacks de múltiples tenants."""
         # Asegurar inicialización antes de procesar acciones
         await self.initialize()
+        self.running = True
         
-        # Continuar con el comportamiento normal del BaseWorker
-        await super().start()
+        while self.running:
+            try:
+                # Buscar todas las colas de callback activas
+                callback_queues = await self.redis_client.keys("orchestrator:*:callbacks")
+                
+                if callback_queues:
+                    # Escuchar con timeout en todas las colas
+                    result = await self.redis_client.brpop(callback_queues, timeout=5)
+                    
+                    if result:
+                        queue_name, action_data = result
+                        action_dict = json.loads(action_data)
+                        
+                        # Procesar callback directamente
+                        if action_dict.get("action_type") == "execution.callback":
+                            action = self.create_action_from_data(action_dict)
+                            
+                            # Extraer contexto si existe
+                            context = None
+                            if hasattr(action, 'execution_context') and action.execution_context:
+                                context = ExecutionContext(
+                                    tenant_id=action.tenant_id,
+                                    tenant_tier=action.tenant_tier,
+                                    session_id=action.session_id
+                                )
+                            
+                            # Procesar con el handler
+                            logger.info(f"Procesando callback para task_id={action.task_id}")
+                            await self.callback_handler.handle_execution_callback(action, context)
+                        else:
+                            logger.warning(f"Acción desconocida recibida: {action_dict.get('action_type')}")
+                else:
+                    # Si no hay colas activas, esperar un poco
+                    await asyncio.sleep(1)
+                    
+            except Exception as e:
+                logger.error(f"Error en orchestrator worker: {str(e)}")
+                await asyncio.sleep(1)
     
     async def _initialize_handlers(self):
         """Inicializa todos los handlers necesarios."""
@@ -77,11 +116,8 @@ class OrchestratorWorker(BaseWorker):
         self.websocket_manager = get_websocket_manager()
         self.callback_handler = CallbackHandler(self.websocket_manager, self.redis_client)
         
-        # Registrar handlers en el queue_manager
-        self.queue_manager.register_handler(
-            "execution.callback",
-            self.callback_handler.handle_execution_callback
-        )
+        # El worker ya no registra handlers con queue_manager
+        # Se procesarán los callbacks directamente en el método start()
         
         logger.info("OrchestratorWorker: Handlers inicializados")
 

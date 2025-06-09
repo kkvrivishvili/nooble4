@@ -13,6 +13,8 @@ import time
 import asyncio
 from typing import Dict, Any, Optional
 
+from common.models.execution_context import ExecutionContext
+
 from common.models.actions import DomainAction
 from query_service.models.actions import QueryCallbackAction
 from agent_execution_service.config.settings import get_settings
@@ -36,12 +38,13 @@ class QueryCallbackHandler:
         # Eventos para sincronizar espera
         self._callback_events = {}
     
-    async def handle_query_callback(self, action: DomainAction) -> Dict[str, Any]:
+    async def handle_query_callback(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
         """
         Procesa un callback del Query Service.
         
         Args:
             action: Acción de callback con resultado
+            context: Contexto de ejecución (opcional)
             
         Returns:
             Dict con resultado del procesamiento

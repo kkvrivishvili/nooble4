@@ -6,11 +6,12 @@ que puede recibir el servicio de ejecución de agentes.
 """
 
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import time
 from uuid import uuid4
 
 from agent_execution_service.models.actions_model import AgentExecutionAction
+from common.models.execution_context import ExecutionContext
 from agent_execution_service.services.agent_executor import AgentExecutor
 
 logger = logging.getLogger(__name__)
@@ -28,12 +29,13 @@ class ExecutionHandler:
         self.agent_service = agent_service
         self.executor = AgentExecutor(agent_service)
     
-    async def handle_agent_run(self, action: AgentExecutionAction) -> Dict[str, Any]:
+    async def handle_agent_run(self, action: AgentExecutionAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
         """
         Procesa una acción de ejecución de agente.
         
         Args:
             action: Acción de ejecución
+            context: Contexto de ejecución (opcional)
             
         Returns:
             Diccionario con resultado

@@ -8,7 +8,9 @@ VERSIÓN: 2.0 - Adaptado al patrón improved_base_worker
 """
 
 import logging
-from typing import Dict, Any, List
+import json
+import asyncio
+from typing import Dict, Any, List, Optional
 
 from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
@@ -70,12 +72,62 @@ class ExecutionWorker(BaseWorker):
         logger.info("ImprovedExecutionWorker inicializado correctamente")
     
     async def start(self):
-        """Extiende el start para asegurar inicialización."""
+        """Procesa acciones de ejecución y callbacks de forma directa."""
         # Asegurar inicialización antes de procesar acciones
         await self.initialize()
+        self.running = True
         
-        # Continuar con el comportamiento normal del BaseWorker
-        await super().start()
+        # Definir las colas que monitorearemos
+        action_queues = [
+            f"{self.domain}:{tenant_id}:actions" 
+            for tenant_id in settings.supported_tenants
+        ]
+        callback_queues = [
+            "embedding:callbacks",
+            "query:callbacks"
+        ]
+        all_queues = action_queues + callback_queues
+        
+        logger.info(f"Escuchando en colas: {all_queues}")
+        
+        while self.running:
+            try:
+                # Escuchar con timeout en todas las colas
+                result = await self.redis_client.brpop(all_queues, timeout=5)
+                
+                if result:
+                    queue_name, action_data = result
+                    action_dict = json.loads(action_data)
+                    action_type = action_dict.get("action_type")
+                    
+                    # Convertir a objeto de acción adecuado
+                    action = self.create_action_from_data(action_dict)
+                    
+                    # Extraer contexto si existe
+                    context = None
+                    if hasattr(action, 'execution_context') and action.execution_context:
+                        context = ExecutionContext(
+                            tenant_id=action.tenant_id,
+                            tenant_tier=action.tenant_tier if hasattr(action, 'tenant_tier') else "standard",
+                            session_id=action.session_id if hasattr(action, 'session_id') else None
+                        )
+                    
+                    # Procesar según tipo de acción
+                    if action_type == "execution.agent_run":
+                        logger.info(f"Procesando ejecución de agente: {action.task_id}")
+                        await self._handle_agent_execution(action, context)
+                    elif action_type == "embedding.callback":
+                        logger.info(f"Procesando callback de embedding: {action.task_id}")
+                        await self.embedding_callback_handler.handle_embedding_callback(action, context)
+                    elif action_type == "query.callback":
+                        logger.info(f"Procesando callback de query: {action.task_id}")
+                        await self.query_callback_handler.handle_query_callback(action, context)
+                    else:
+                        logger.warning(f"Acción no soportada: {action_type}")
+            
+            except Exception as e:
+                logger.error(f"Error en execution worker: {str(e)}")
+                await asyncio.sleep(1)
     
     async def _initialize_handlers(self):
         """Inicializa todos los handlers necesarios."""
@@ -96,26 +148,12 @@ class ExecutionWorker(BaseWorker):
         self.embedding_callback_handler = EmbeddingCallbackHandler()
         self.query_callback_handler = QueryCallbackHandler()
         
-        # Registrar handlers en el queue_manager
-        self.queue_manager.register_handler(
-            "execution.agent_run",
-            self._handle_agent_execution
-        )
-        
-        # Registrar handlers para callbacks de servicios externos
-        self.queue_manager.register_handler(
-            "embedding.callback",
-            self.embedding_callback_handler.handle_embedding_callback
-        )
-        
-        self.queue_manager.register_handler(
-            "query.callback",
-            self.query_callback_handler.handle_query_callback
-        )
+        # El worker ya no registra handlers con queue_manager
+        # Las acciones se procesanán directamente en el método start()
         
         logger.info("ExecutionWorker: Handlers inicializados")
     
-    async def _handle_agent_execution(self, action: DomainAction, context: ExecutionContext = None) -> Dict[str, Any]:
+    async def _handle_agent_execution(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
         """
         Handler específico para ejecución de agentes.
         

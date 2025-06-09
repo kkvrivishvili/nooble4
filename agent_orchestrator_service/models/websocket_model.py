@@ -46,6 +46,7 @@ class ConnectionInfo(BaseModel):
     connection_id: str = Field(..., description="ID único de la conexión")
     tenant_id: str = Field(..., description="ID del tenant")
     session_id: str = Field(..., description="ID de la sesión")
+    tenant_tier: str = Field(..., description="Tier del tenant")
     user_id: Optional[str] = Field(None, description="ID del usuario")
     
     # Estado de la conexión

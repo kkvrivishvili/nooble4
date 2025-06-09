@@ -13,6 +13,8 @@ e integra los resultados en el flujo de ejecución de agentes.
 
 import logging
 from typing import Dict, Any, Optional
+
+from common.models.execution_context import ExecutionContext
 import time
 import json
 import asyncio
@@ -37,12 +39,13 @@ class EmbeddingCallbackHandler:
         self._pending_callbacks = {}
         self._callback_events = {}
     
-    async def handle_embedding_callback(self, action: DomainAction) -> Dict[str, Any]:
+    async def handle_embedding_callback(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
         """
         Procesa un callback de embedding.
         
         Args:
             action: Acción de callback con embeddings
+            context: Contexto de ejecución (opcional)
             
         Returns:
             Dict con resultado del procesamiento

@@ -8,7 +8,8 @@ from typing import List, Dict, Any, Optional
 from uuid import UUID
 
 from common.models.actions import DomainAction
-from common.services.action_processor import ActionProcessor
+from common.services.domain_queue_manager import DomainQueueManager
+from common.models.execution_context import ExecutionContext
 from common.redis_pool import get_redis_client
 from agent_execution_service.config.settings import get_settings
 
@@ -21,9 +22,10 @@ class EmbeddingClient:
     
     Este cliente envía acciones al servicio de embeddings para
     generar o validar embeddings de forma asíncrona.
+    Utiliza DomainQueueManager para comunicación enriquecida con contexto.
     """
     
-    def __init__(self, action_processor: Optional[ActionProcessor] = None):
+    def __init__(self, queue_manager: Optional[DomainQueueManager] = None):
         """
         Inicializa el cliente.
         
@@ -31,7 +33,7 @@ class EmbeddingClient:
             action_processor: Procesador de acciones (opcional)
         """
         redis_client = get_redis_client(settings.redis_url)
-        self.action_processor = action_processor or ActionProcessor(redis_client)
+        self.queue_manager = queue_manager or DomainQueueManager(redis_client)
     
     async def generate_embeddings(
         self,
@@ -42,7 +44,8 @@ class EmbeddingClient:
         model: Optional[str] = None,
         task_id: Optional[str] = None,
         collection_id: Optional[UUID] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        context: Optional[ExecutionContext] = None
     ) -> str:
         """
         Solicita la generación de embeddings.
@@ -66,49 +69,59 @@ class EmbeddingClient:
         # Crear ID único si no se proporciona
         task_id = task_id or str(uuid.uuid4())
         
-        # Crear acción
-        embedding_action = DomainAction(
+        action = DomainAction(
+            action_id=str(uuid.uuid4()),
             action_type="embedding.generate",
-            tenant_id=tenant_id,
-            session_id=session_id,
             task_id=task_id,
-            callback_queue=callback_queue,
-            texts=texts,
-            model=model,
-            collection_id=collection_id,
-            metadata=metadata
+            tenant_id=tenant_id,
+            data={
+                "texts": texts,
+                "session_id": session_id,
+                "callback_queue": callback_queue,
+                "model": model,
+                "collection_id": str(collection_id) if collection_id else None,
+                "metadata": metadata or {}
+            }
         )
         
-        # Encolar acción
-        queue_name = f"embedding.{tenant_id}.actions"
-        success = await self.action_processor.enqueue_action(embedding_action, queue_name)
-        
-        if not success:
-            logger.error(f"Error encolando acción de embedding: {task_id}")
-            raise Exception("Error al solicitar embeddings")
-        
-        logger.info(f"Acción de embedding encolada: {task_id}")
+        if context:
+            # Usar enqueue_execution con contexto si está disponible
+            logger.info(f"Encolando acción con contexto, tenant_tier: {context.tenant_tier}")
+            await self.queue_manager.enqueue_execution(
+                action=action,
+                context=context
+            )
+        else:
+            # Fallback a enqueue sin contexto
+            await self.queue_manager.enqueue(
+                action=action,
+                domain="embedding",
+                tenant_id=tenant_id
+            )
+            
         return task_id
     
-    async def validate_texts(
+    async def validate_embeddings(
         self,
-        texts: List[str],
+        embedding_ids: List[str],
         tenant_id: str,
         session_id: str,
         callback_queue: str,
-        model: Optional[str] = None,
-        task_id: Optional[str] = None
+        task_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        context: Optional[ExecutionContext] = None
     ) -> str:
         """
-        Solicita la validación de textos.
+        Solicita la validación de embeddings.
         
         Args:
-            texts: Textos para validar
+            embedding_ids: IDs de los embeddings para validar
             tenant_id: ID del tenant
             session_id: ID de la sesión
             callback_queue: Cola para recibir el callback
-            model: Modelo a validar contra (default si no se especifica)
             task_id: ID de la tarea (opcional)
+            metadata: Metadatos adicionales (opcional)
+            context: Contexto de ejecución (opcional)
             
         Returns:
             task_id: ID de la tarea para seguimiento
@@ -119,24 +132,33 @@ class EmbeddingClient:
         # Crear ID único si no se proporciona
         task_id = task_id or str(uuid.uuid4())
         
-        # Crear acción
-        validate_action = DomainAction(
+        action = DomainAction(
+            action_id=str(uuid.uuid4()),
             action_type="embedding.validate",
-            tenant_id=tenant_id,
-            session_id=session_id,
             task_id=task_id,
-            callback_queue=callback_queue,
-            texts=texts,
-            model=model
+            tenant_id=tenant_id,
+            data={
+                "embedding_ids": embedding_ids,
+                "session_id": session_id,
+                "callback_queue": callback_queue,
+                "metadata": metadata or {}
+            }
         )
         
-        # Encolar acción
-        queue_name = f"embedding.{tenant_id}.actions"
-        success = await self.action_processor.enqueue_action(validate_action, queue_name)
-        
-        if not success:
-            logger.error(f"Error encolando acción de validación: {task_id}")
-            raise Exception("Error al solicitar validación de textos")
-        
+        if context:
+            # Usar enqueue_execution con contexto si está disponible
+            logger.info(f"Encolando validación con contexto, tenant_tier: {context.tenant_tier}")
+            await self.queue_manager.enqueue_execution(
+                action=action,
+                context=context
+            )
+        else:
+            # Fallback a enqueue sin contexto
+            await self.queue_manager.enqueue(
+                action=action,
+                domain="embedding",
+                tenant_id=tenant_id
+            )
+            
         logger.info(f"Acción de validación encolada: {task_id}")
         return task_id

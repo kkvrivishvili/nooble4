@@ -14,7 +14,8 @@ from typing import List, Dict, Any, Optional
 from uuid import UUID
 
 from common.models.actions import DomainAction
-from common.services.action_processor import ActionProcessor
+from common.services.domain_queue_manager import DomainQueueManager
+from common.models.execution_context import ExecutionContext
 from common.redis_pool import get_redis_client
 from agent_execution_service.config.settings import get_settings
 
@@ -30,9 +31,10 @@ class QueryClient:
     
     Permite al Agent Execution Service enviar solicitudes de generación
     de respuestas RAG y búsqueda de documentos de forma asíncrona.
+    Utiliza DomainQueueManager para comunicación enriquecida con contexto.
     """
     
-    def __init__(self, action_processor: Optional[ActionProcessor] = None):
+    def __init__(self, queue_manager: Optional[DomainQueueManager] = None):
         """
         Inicializa el cliente.
         
@@ -40,7 +42,7 @@ class QueryClient:
             action_processor: Procesador de acciones (opcional)
         """
         redis_client = get_redis_client(settings.redis_url)
-        self.action_processor = action_processor or ActionProcessor(redis_client)
+        self.queue_manager = queue_manager or DomainQueueManager(redis_client)
         self.callback_queue = f"execution.{settings.service_id}.callbacks"
     
     async def generate_query(
@@ -59,7 +61,8 @@ class QueryClient:
         include_sources: bool = True,
         max_sources: Optional[int] = None,
         fallback_behavior: str = "use_agent_knowledge",
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        context: Optional[ExecutionContext] = None
     ) -> str:
         """
         Solicita generación de respuesta RAG.
@@ -80,6 +83,7 @@ class QueryClient:
             max_sources: Máximo número de fuentes (opcional)
             fallback_behavior: Comportamiento si no hay docs
             metadata: Metadatos adicionales (opcional)
+            context: Contexto de ejecución (opcional)
             
         Returns:
             task_id: ID de tarea para seguimiento
@@ -90,39 +94,51 @@ class QueryClient:
         # Crear ID único si no se proporciona
         task_id = task_id or str(uuid.uuid4())
         
-        # Crear acción usando el modelo específico
-        query_action = QueryGenerateAction(
+        # Crear datos de la acción
+        action_data = {
+            "task_id": task_id,
+            "tenant_id": tenant_id,
+            "session_id": str(conversation_id) if conversation_id else task_id,
+            "callback_queue": self.callback_queue,
+            "query": query,
+            "query_embedding": query_embedding,
+            "collection_id": collection_id,
+            "agent_id": agent_id,
+            "agent_description": agent_description,
+            "similarity_top_k": similarity_top_k,
+            "relevance_threshold": relevance_threshold,
+            "llm_model": llm_model,
+            "include_sources": include_sources,
+            "max_sources": max_sources,
+            "fallback_behavior": fallback_behavior,
+            "metadata": metadata or {}
+        }
+        
+        # Crear DomainAction
+        domain_action = DomainAction(
+            action_id=str(uuid.uuid4()),
+            action_type="query.generate",
             task_id=task_id,
             tenant_id=tenant_id,
-            session_id=str(conversation_id) if conversation_id else task_id,  # Usar conversation_id como session_id si existe
-            callback_queue=self.callback_queue,
-            query=query,
-            query_embedding=query_embedding,
-            collection_id=collection_id,
-            conversation_id=conversation_id,
-            agent_id=agent_id,
-            agent_description=agent_description,
-            similarity_top_k=similarity_top_k,
-            relevance_threshold=relevance_threshold,
-            llm_model=llm_model,
-            include_sources=include_sources,
-            max_sources=max_sources if max_sources is not None else 3,
-            fallback_behavior=fallback_behavior,
-            metadata=metadata or {}
+            data=action_data
         )
         
-        # Convertir a DomainAction para el action_processor
-        domain_action = DomainAction.parse_obj(query_action.dict())
-        
-        # Encolar acción
-        queue_name = f"query.{tenant_id}.actions"
-        success = await self.action_processor.enqueue_action(domain_action, queue_name)
-        
-        if not success:
-            logger.error(f"Error encolando acción de consulta: {task_id}")
-            raise Exception("Error al solicitar generación de consulta")
-        
-        logger.info(f"Acción de consulta encolada: {task_id}")
+        if context:
+            # Usar enqueue_execution con contexto si está disponible
+            logger.info(f"Encolando acción de query con contexto, tenant_tier: {context.tenant_tier}")
+            await self.queue_manager.enqueue_execution(
+                action=domain_action,
+                context=context
+            )
+        else:
+            # Fallback a enqueue sin contexto
+            await self.queue_manager.enqueue(
+                action=domain_action,
+                domain="query",
+                tenant_id=tenant_id
+            )
+            
+        logger.info(f"Acción de query encolada: {task_id}")
         return task_id
     
     async def search_docs(
@@ -134,7 +150,8 @@ class QueryClient:
         limit: int = 5,
         similarity_threshold: float = 0.7,
         metadata_filter: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        context: Optional[ExecutionContext] = None
     ) -> str:
         """
         Solicita búsqueda de documentos por embedding.
@@ -148,6 +165,7 @@ class QueryClient:
             similarity_threshold: Umbral de similitud
             metadata_filter: Filtro de metadatos (opcional)
             metadata: Metadatos adicionales (opcional)
+            context: Contexto de ejecución (opcional)
             
         Returns:
             task_id: ID de tarea para seguimiento
@@ -158,30 +176,43 @@ class QueryClient:
         # Crear ID único si no se proporciona
         task_id = task_id or str(uuid.uuid4())
         
-        # Crear acción usando modelo específico
-        search_action = SearchDocsAction(
+        # Crear datos de la acción
+        action_data = {
+            "task_id": task_id,
+            "tenant_id": tenant_id,
+            "session_id": task_id,
+            "callback_queue": self.callback_queue,
+            "collection_id": collection_id,
+            "query_embedding": query_embedding,
+            "limit": limit,
+            "similarity_threshold": similarity_threshold,
+            "metadata_filter": metadata_filter or {},
+            "metadata": metadata or {}
+        }
+        
+        # Crear DomainAction
+        domain_action = DomainAction(
+            action_id=str(uuid.uuid4()),
+            action_type="query.search",
             task_id=task_id,
             tenant_id=tenant_id,
-            session_id=task_id,  # Usar task_id como session_id ya que no hay otros identificadores
-            callback_queue=self.callback_queue,
-            collection_id=collection_id,
-            query_embedding=query_embedding,
-            limit=limit,
-            similarity_threshold=similarity_threshold,
-            metadata_filter=metadata_filter or {},
-            metadata=metadata or {}
+            data=action_data
         )
         
-        # Convertir a DomainAction para el action_processor
-        domain_action = DomainAction.parse_obj(search_action.dict())
-        
-        # Encolar acción
-        queue_name = f"query.{tenant_id}.actions"
-        success = await self.action_processor.enqueue_action(domain_action, queue_name)
-        
-        if not success:
-            logger.error(f"Error encolando acción de búsqueda: {task_id}")
-            raise Exception("Error al solicitar búsqueda de documentos")
-        
+        if context:
+            # Usar enqueue_execution con contexto si está disponible
+            logger.info(f"Encolando acción de búsqueda con contexto, tenant_tier: {context.tenant_tier}")
+            await self.queue_manager.enqueue_execution(
+                action=domain_action,
+                context=context
+            )
+        else:
+            # Fallback a enqueue sin contexto
+            await self.queue_manager.enqueue(
+                action=domain_action,
+                domain="query",
+                tenant_id=tenant_id
+            )
+            
         logger.info(f"Acción de búsqueda encolada: {task_id}")
         return task_id
