@@ -5,7 +5,8 @@ Proporciona una implementación estándar para procesar acciones
 de colas Redis mediante DomainQueueManager con soporte completo para tiers.
 Incluye inicialización asíncrona estandarizada y gestión robusta de errores.
 
-VERSIÓN: 3.0 - Migración completa a DomainQueueManager para sistema de colas por tier.
+VERSIÓN: 4.0 - Arquitectura unificada para procesamiento directo de Domain Actions
+sin dependencias de métodos de registro de handlers.
 """
 
 import asyncio
@@ -31,9 +32,10 @@ class BaseWorker:
     Características:
     - Inicialización asíncrona segura
     - Validación de redis_client
-    - Patrón consistente para registrar handlers
+    - Procesamiento directo de acciones por tipo
     - Manejo seguro de ciclo de procesamiento
     - Implementación de callbacks
+    - Soporte completo para ExecutionContext
     """
     
     def __init__(self, redis_client, queue_manager=None):
@@ -68,26 +70,15 @@ class BaseWorker:
         Inicializa el worker de forma asíncrona.
         
         Las subclases deben implementar este método para cualquier
-        inicialización asíncrona necesaria (ej: registrar handlers,
-        configurar servicios externos, etc).
+        inicialización asíncrona necesaria (ej: configurar servicios externos,
+        conectarse a bases de datos, etc).
         """
         if self.initialized:
             return
             
-        await self._initialize_handlers()
+        # Las subclases pueden extender este método para inicialización personalizada
         self.initialized = True
         logger.info(f"{self.__class__.__name__} inicializado correctamente")
-        
-    async def _initialize_handlers(self):
-        """
-        Inicializa y registra handlers.
-        
-        Las subclases deben implementar este método para registrar
-        sus handlers específicos en el queue_manager.
-        """
-        # Implementación vacía por defecto
-        # Las subclases deben sobrescribir este método
-        pass
         
     async def start(self):
         """
@@ -148,25 +139,17 @@ class BaseWorker:
         try:
             # Convertir datos a objeto DomainAction
             action = self.create_action_from_data(action_data)
-            
-            # Buscar y ejecutar el handler correspondiente
             action_type = action.action_type
-            handler = self.queue_manager.get_handler(action_type)
-            
-            if not handler:
-                raise ValueError(f"No hay handler registrado para la acción: {action_type}")
             
             # Extraer contexto si existe
             context = None
             if "execution_context" in action_data:
                 context = ExecutionContext.parse_obj(action_data["execution_context"])
             
-            # Procesar la acción (con contexto si está disponible)
+            # Obtener el handler adecuado mediante _get_handler_for_action
+            # Este método debe ser implementado por las subclases
             logger.info(f"Procesando acción: {action_type} para tenant: {action.tenant_id}")
-            if context:
-                result = await handler(action, context)
-            else:
-                result = await handler(action)
+            result = await self._handle_action(action, context)
             
             # Manejar resultado si es necesario
             if action.callback_queue and result:
@@ -177,6 +160,27 @@ class BaseWorker:
             # Intentar enviar callback de error si es posible
             if action_data.get("callback_queue"):
                 await self._send_error_callback(action_data, str(e))
+    
+    async def _handle_action(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
+        """
+        Método abstracto para manejar una acción específica.
+        
+        Las subclases DEBEN implementar este método para procesar
+        las acciones específicas de su dominio.
+        
+        Args:
+            action: La acción a procesar
+            context: Contexto opcional de ejecución
+            
+        Returns:
+            Diccionario con el resultado del procesamiento
+            
+        Raises:
+            NotImplementedError: Si la subclase no implementa este método
+            ValueError: Si no hay handler implementado para ese tipo de acción
+        """
+        raise NotImplementedError(f"La clase {self.__class__.__name__} debe implementar _handle_action()")
+
     
     def create_action_from_data(self, action_data: Dict[str, Any]) -> DomainAction:
         """

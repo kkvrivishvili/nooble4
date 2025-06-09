@@ -51,10 +51,11 @@ class ManagementWorker(BaseWorker):
         """Inicializa el worker de forma asíncrona."""
         if self.initialized:
             return
-            
-        await self._initialize_handlers()
+        
+        # Ya no registramos handlers sino que procesamos directamente
+        # las acciones en el método _process_action
         self.initialized = True
-        logger.info("ImprovedManagementWorker inicializado correctamente")
+        logger.info("ManagementWorker inicializado correctamente")
     
     async def start(self):
         """Extiende el start para asegurar inicialización."""
@@ -63,21 +64,9 @@ class ManagementWorker(BaseWorker):
         
         # Continuar con el comportamiento normal del BaseWorker
         await super().start()
-        
-    async def _initialize_handlers(self):
-        """Inicializa todos los handlers necesarios."""
-        # Registrar handlers en el queue_manager
-        self.queue_manager.register_handler(
-            "management.validate_agent",
-            self._handle_agent_validation
-        )
-        
-        self.queue_manager.register_handler(
-            "management.invalidate_cache",
-            self._handle_cache_invalidation
-        )
-        
-        logger.info("ManagementWorker: Handlers inicializados")
+    
+    # Ya no es necesario sobrescribir _process_queue_loop
+    # porque BaseWorker ahora proporciona la implementación correcta
     
     def create_action_from_data(self, action_data: Dict[str, Any]) -> DomainAction:
         """
@@ -99,6 +88,35 @@ class ManagementWorker(BaseWorker):
             # Fallback a DomainAction genérica
             return DomainAction.parse_obj(action_data)
     
+    # Ya no necesitamos sobrescribir _process_action ya que ahora
+    # implementamos _handle_action en su lugar
+    
+    async def _handle_action(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
+        """
+        Implementa el método abstracto de BaseWorker para manejar acciones específicas
+        del dominio de management.
+        
+        Args:
+            action: La acción a procesar
+            context: Contexto opcional de ejecución
+            
+        Returns:
+            Diccionario con el resultado del procesamiento
+        
+        Raises:
+            ValueError: Si no hay handler implementado para ese tipo de acción
+        """
+        action_type = action.action_type
+        
+        if action_type == "management.validate_agent":
+            return await self._handle_agent_validation(action, context)
+        elif action_type == "management.invalidate_cache":
+            return await self._handle_cache_invalidation(action, context)
+        else:
+            error_msg = f"No hay handler implementado para la acción: {action_type}"
+            logger.warning(error_msg)
+            raise ValueError(error_msg)
+    
     async def _handle_agent_validation(self, action: DomainAction, context: ExecutionContext = None) -> Dict[str, Any]:
         """
         Handler para validación de agentes.
@@ -111,10 +129,7 @@ class ManagementWorker(BaseWorker):
             Resultado de la validación
         """
         try:
-            # Verificar inicialización
-            if not self.initialized:
-                await self.initialize()
-                
+            # Ya no necesitamos verificar inicialización aquí
             validation_action = AgentValidationAction.parse_obj(action.dict())
             
             # Enriquecer acción con contexto si está disponible
@@ -150,10 +165,7 @@ class ManagementWorker(BaseWorker):
             Resultado de la invalidación
         """
         try:
-            # Verificar inicialización
-            if not self.initialized:
-                await self.initialize()
-                
+            # Ya no necesitamos verificar inicialización aquí
             cache_action = CacheInvalidationAction.parse_obj(action.dict())
             
             # Enriquecer acción con contexto si está disponible

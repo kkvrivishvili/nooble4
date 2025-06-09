@@ -4,7 +4,7 @@ Worker mejorado para Domain Actions en Agent Orchestrator Service.
 Implementación estandarizada con inicialización asíncrona y
 manejo robusto de callbacks vía WebSocket.
 
-VERSIÓN: 2.0 - Adaptado al patrón improved_base_worker
+VERSIÓN: 3.0 - Adaptado al patrón BaseWorker 4.0 con procesamiento directo
 """
 
 import logging
@@ -60,17 +60,45 @@ class OrchestratorWorker(BaseWorker):
         """Inicializa el worker de forma asíncrona."""
         if self.initialized:
             return
-            
-        await self._initialize_handlers()
+        
+        # Inicializar handlers necesarios para el procesamiento
+        self.websocket_manager = get_websocket_manager()
+        self.callback_handler = CallbackHandler(self.websocket_manager, self.redis_client)
+        
+        # Configurar estado inicializado
         self.initialized = True
-        logger.info("ImprovedOrchestratorWorker inicializado correctamente")
+        logger.info("OrchestratorWorker inicializado correctamente")
     
     async def start(self):
-        """Procesa callbacks de múltiples tenants."""
+        """Extiende el start para asegurar inicialización e iniciar dos procesadores."""
         # Asegurar inicialización antes de procesar acciones
         await self.initialize()
-        self.running = True
         
+        # Iniciar dos tareas en paralelo: el procesador estándar de BaseWorker
+        # y el procesador especializado de callbacks
+        self.running = True
+        logger.info("Iniciando OrchestratorWorker con procesadores dual")
+        
+        try:
+            # Crear tarea para procesar callbacks directos
+            callback_task = asyncio.create_task(self._process_callbacks_loop())
+            
+            # Iniciar el procesador estándar de BaseWorker
+            # (este llama a _process_queue_loop del BaseWorker)
+            await super().start()
+            
+            # Si el super().start() termina, cancelar la otra tarea
+            if not callback_task.done():
+                callback_task.cancel()
+        except asyncio.CancelledError:
+            logger.info("OrchestratorWorker detenido")
+            self.running = False
+        except Exception as e:
+            logger.error(f"Error en orchestrator worker: {str(e)}")
+            self.running = False
+    
+    async def _process_callbacks_loop(self):
+        """Procesa callbacks directamente de las colas specificas."""
         while self.running:
             try:
                 # Buscar todas las colas de callback activas
@@ -98,7 +126,7 @@ class OrchestratorWorker(BaseWorker):
                                 )
                             
                             # Procesar con el handler
-                            logger.info(f"Procesando callback para task_id={action.task_id}")
+                            logger.info(f"Procesando callback directo para task_id={action.task_id}")
                             await self.callback_handler.handle_execution_callback(action, context)
                         else:
                             logger.warning(f"Acción desconocida recibida: {action_dict.get('action_type')}")
@@ -106,20 +134,38 @@ class OrchestratorWorker(BaseWorker):
                     # Si no hay colas activas, esperar un poco
                     await asyncio.sleep(1)
                     
+            except asyncio.CancelledError:
+                logger.info("Procesador de callbacks detenido")
+                break
             except Exception as e:
-                logger.error(f"Error en orchestrator worker: {str(e)}")
+                logger.error(f"Error procesando callbacks: {str(e)}")
                 await asyncio.sleep(1)
     
-    async def _initialize_handlers(self):
-        """Inicializa todos los handlers necesarios."""
-        # Inicializar handlers
-        self.websocket_manager = get_websocket_manager()
-        self.callback_handler = CallbackHandler(self.websocket_manager, self.redis_client)
+    # Ya no es necesario el método _initialize_handlers
+    # La inicialización se realiza directamente en el método initialize()
+    
+    async def _handle_action(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
+        """
+        Implementa el método abstracto de BaseWorker para manejar acciones específicas
+        del dominio de orchestrator.
         
-        # El worker ya no registra handlers con queue_manager
-        # Se procesarán los callbacks directamente en el método start()
+        Args:
+            action: La acción a procesar
+            context: Contexto opcional de ejecución
+            
+        Returns:
+            Diccionario con el resultado del procesamiento
         
-        logger.info("OrchestratorWorker: Handlers inicializados")
+        Raises:
+            ValueError: Si no hay handler implementado para ese tipo de acción
+        """
+        action_type = action.action_type
+        
+        # Nota: actualmente el orchestrator no procesa acciones estándar a través del sistema
+        # de colas de DomainQueueManager, pero podríamos añadir handlers aquí en el futuro
+        error_msg = f"No hay handler implementado para la acción: {action_type}"
+        logger.warning(error_msg)
+        raise ValueError(error_msg)
 
     def create_action_from_data(self, action_data: Dict[str, Any]) -> DomainAction:
         """
