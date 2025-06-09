@@ -14,6 +14,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 
 from common.models.actions import DomainAction
+from common.models.execution_context import ExecutionContext
 from agent_orchestrator_service.models.actions_model import ExecutionCallbackAction
 from agent_orchestrator_service.models.websocket_model import WebSocketMessage, WebSocketMessageType
 from agent_orchestrator_service.services.websocket_manager import WebSocketManager
@@ -39,12 +40,13 @@ class CallbackHandler:
         self.websocket_manager = websocket_manager
         self.redis = redis_client
     
-    async def handle_execution_callback(self, action: DomainAction) -> Dict[str, Any]:
+    async def handle_execution_callback(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
         """
         Procesa callback de ejecución de agente.
         
         Args:
             action: Callback action desde Agent Execution Service
+            context: Contexto de ejecución (opcional)
             
         Returns:
             Resultado del procesamiento
@@ -55,16 +57,21 @@ class CallbackHandler:
             # Convertir a tipo específico para mejor validación
             callback = ExecutionCallbackAction.parse_obj(action.dict())
             
-            logger.info(f"Procesando callback de ejecución: task_id={callback.task_id}, status={callback.status}")
+            # Extraer tier del contexto si está disponible
+            tenant_tier = "professional"  # Valor por defecto
+            if context:
+                tenant_tier = context.tenant_tier
+            
+            logger.info(f"Procesando callback de ejecución: task_id={callback.task_id}, status={callback.status}, tier={tenant_tier}")
             
             # Procesar según estado
             if callback.status == "completed":
-                await self._handle_successful_execution(callback)
+                await self._handle_successful_execution(callback, tenant_tier)
             elif callback.status == "failed":
-                await self._handle_failed_execution(callback)
+                await self._handle_failed_execution(callback, tenant_tier)
             else:
                 logger.warning(f"Estado de callback desconocido: {callback.status}")
-                await self._handle_unknown_status(callback)
+                await self._handle_unknown_status(callback, tenant_tier)
             
             # Tracking de performance
             await self._track_callback_performance(callback, start_time)
@@ -72,7 +79,8 @@ class CallbackHandler:
             return {
                 "success": True,
                 "callback_processed": True,
-                "task_id": callback.task_id
+                "task_id": callback.task_id,
+                "tenant_tier": tenant_tier
             }
             
         except Exception as e:
@@ -85,7 +93,7 @@ class CallbackHandler:
                 }
             }
     
-    async def _handle_successful_execution(self, callback: ExecutionCallbackAction):
+    async def _handle_successful_execution(self, callback: ExecutionCallbackAction, tenant_tier: str = "professional"):
         """Maneja ejecución exitosa."""
         
         # Extraer resultado
@@ -97,6 +105,7 @@ class CallbackHandler:
         # Crear mensaje WebSocket
         ws_message = WebSocketMessage(
             type=WebSocketMessageType.AGENT_RESPONSE,
+            tenant_tier=tenant_tier,
             data={
                 "response": response_text,
                 "sources": sources,
@@ -126,7 +135,7 @@ class CallbackHandler:
             logger.warning(f"No se pudo enviar WebSocket: session={callback.session_id} no encontrada")
             # TODO: Considerar store & forward para sesiones desconectadas
     
-    async def _handle_failed_execution(self, callback: ExecutionCallbackAction):
+    async def _handle_failed_execution(self, callback: ExecutionCallbackAction, tenant_tier: str = "professional"):
         """Maneja ejecución fallida."""
         
         # Extraer error
@@ -137,6 +146,7 @@ class CallbackHandler:
         # Crear mensaje de error
         ws_message = WebSocketMessage(
             type=WebSocketMessageType.ERROR,
+            tenant_tier=tenant_tier,
             data={
                 "error": error_message,
                 "error_type": error_type,
@@ -160,11 +170,12 @@ class CallbackHandler:
         
         logger.error(f"Error en ejecución enviado: session={callback.session_id}, error={error_message}")
     
-    async def _handle_unknown_status(self, callback: ExecutionCallbackAction):
+    async def _handle_unknown_status(self, callback: ExecutionCallbackAction, tenant_tier: str = "professional"):
         """Maneja estados desconocidos."""
         
         ws_message = WebSocketMessage(
             type=WebSocketMessageType.ERROR,
+            tenant_tier=tenant_tier,
             data={
                 "error": f"Estado de ejecución desconocido: {callback.status}",
                 "task_id": callback.task_id,

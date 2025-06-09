@@ -12,7 +12,8 @@ from typing import Dict, Any
 
 from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
-from common.services.action_processor import ActionProcessor
+from common.models.execution_context import ExecutionContext
+from common.services.domain_queue_manager import DomainQueueManager
 from agent_management_service.models.actions_model import AgentValidationAction, CacheInvalidationAction
 from agent_management_service.config.settings import get_settings
 
@@ -29,16 +30,16 @@ class ManagementWorker(BaseWorker):
     - Invalidación de cache
     """
     
-    def __init__(self, redis_client, action_processor=None):
+    def __init__(self, redis_client, queue_manager=None):
         """
         Inicializa worker con servicios necesarios.
         
         Args:
             redis_client: Cliente Redis configurado (requerido)
-            action_processor: Procesador de acciones (opcional)
+            queue_manager: Gestor de colas por dominio (opcional)
         """
-        action_processor = action_processor or ActionProcessor(redis_client)
-        super().__init__(redis_client, action_processor)
+        queue_manager = queue_manager or DomainQueueManager(redis_client)
+        super().__init__(redis_client, queue_manager)
         
         # Definir domain específico
         self.domain = settings.domain_name  # "management"
@@ -65,13 +66,13 @@ class ManagementWorker(BaseWorker):
         
     async def _initialize_handlers(self):
         """Inicializa todos los handlers necesarios."""
-        # Registrar handlers en el action_processor
-        self.action_processor.register_handler(
+        # Registrar handlers en el queue_manager
+        self.queue_manager.register_handler(
             "management.validate_agent",
             self._handle_agent_validation
         )
         
-        self.action_processor.register_handler(
+        self.queue_manager.register_handler(
             "management.invalidate_cache",
             self._handle_cache_invalidation
         )
@@ -98,12 +99,13 @@ class ManagementWorker(BaseWorker):
             # Fallback a DomainAction genérica
             return DomainAction.parse_obj(action_data)
     
-    async def _handle_agent_validation(self, action: DomainAction) -> Dict[str, Any]:
+    async def _handle_agent_validation(self, action: DomainAction, context: ExecutionContext = None) -> Dict[str, Any]:
         """
         Handler para validación de agentes.
         
         Args:
             action: Acción de validación
+            context: Contexto de ejecución opcional con metadatos adicionales
             
         Returns:
             Resultado de la validación
@@ -115,6 +117,11 @@ class ManagementWorker(BaseWorker):
                 
             validation_action = AgentValidationAction.parse_obj(action.dict())
             
+            # Enriquecer acción con contexto si está disponible
+            if context:
+                logger.info(f"Validando agente con tier: {context.tenant_tier}")
+                validation_action.tenant_tier = context.tenant_tier
+                
             # TODO: Implementar lógica de validación
             logger.info(f"Validando configuración de agente: {validation_action.task_id}")
             
@@ -131,12 +138,13 @@ class ManagementWorker(BaseWorker):
                 "error": {"type": type(e).__name__, "message": str(e)}
             }
     
-    async def _handle_cache_invalidation(self, action: DomainAction) -> Dict[str, Any]:
+    async def _handle_cache_invalidation(self, action: DomainAction, context: ExecutionContext = None) -> Dict[str, Any]:
         """
         Handler para invalidación de cache.
         
         Args:
             action: Acción de invalidación
+            context: Contexto de ejecución opcional con metadatos adicionales
             
         Returns:
             Resultado de la invalidación
@@ -147,6 +155,11 @@ class ManagementWorker(BaseWorker):
                 await self.initialize()
                 
             cache_action = CacheInvalidationAction.parse_obj(action.dict())
+            
+            # Enriquecer acción con contexto si está disponible
+            if context:
+                logger.info(f"Invalidando cache con tier: {context.tenant_tier}")
+                cache_action.tenant_tier = context.tenant_tier
             
             # TODO: Implementar lógica de invalidación
             logger.info(f"Invalidando cache para agente: {cache_action.agent_id}")
@@ -175,9 +188,20 @@ class ManagementWorker(BaseWorker):
             result: Resultado del procesamiento
         """
         # Para management service, usualmente no necesitamos enviar callbacks
-        # pero podríamos implementarlo si es necesario
+        # pero si fuera necesario, debemos crearlo con ExecutionContext
         if action.callback_queue and result.get("success"):
             logger.debug(f"Callback disponible para {action.task_id} pero no implementado")
+            # Si implementáramos callbacks, se haría así:
+            # context = ExecutionContext(
+            #     tenant_id=action.tenant_id,
+            #     tenant_tier=action.tenant_tier,
+            #     session_id=action.session_id
+            # )
+            # await self.queue_manager.enqueue_execution(
+            #     action=callback_action,
+            #     target_domain=action.callback_queue.split(".")[0],
+            #     context=context
+            # )
     
     async def _send_error_callback(self, action_data: Dict[str, Any], error_message: str):
         """

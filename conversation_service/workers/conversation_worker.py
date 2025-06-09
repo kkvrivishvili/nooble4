@@ -12,7 +12,8 @@ from typing import Dict, Any
 
 from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
-from common.services.action_processor import ActionProcessor
+from common.models.execution_context import ExecutionContext
+from common.services.domain_queue_manager import DomainQueueManager
 from conversation_service.models.actions_model import (
     SaveMessageAction, GetContextAction, SessionClosedAction
 )
@@ -34,17 +35,17 @@ class ConversationWorker(BaseWorker):
     - Manejo de cierre de sesiones
     """
     
-    def __init__(self, redis_client, action_processor=None, db_client=None):
+    def __init__(self, redis_client, queue_manager=None, db_client=None):
         """
         Inicializa worker con servicios necesarios.
         
         Args:
             redis_client: Cliente Redis configurado (requerido)
-            action_processor: Procesador de acciones (opcional)
+            queue_manager: Gestor de colas por dominio (opcional)
             db_client: Cliente de base de datos (opcional)
         """
-        action_processor = action_processor or ActionProcessor(redis_client)
-        super().__init__(redis_client, action_processor)
+        queue_manager = queue_manager or DomainQueueManager(redis_client)
+        super().__init__(redis_client, queue_manager)
         
         # Definir domain específico
         self.domain = settings.domain_name  # "conversation"
@@ -80,18 +81,18 @@ class ConversationWorker(BaseWorker):
         self.conversation_service = ConversationService(self.redis_client, self.db_client)
         self.conversation_handler = ConversationHandler(self.conversation_service)
         
-        # Registrar handlers en el action_processor
-        self.action_processor.register_handler(
+        # Registrar handlers en el queue_manager
+        self.queue_manager.register_handler(
             "conversation.save_message",
             self.conversation_handler.handle_save_message
         )
         
-        self.action_processor.register_handler(
+        self.queue_manager.register_handler(
             "conversation.get_context", 
             self.conversation_handler.handle_get_context
         )
         
-        self.action_processor.register_handler(
+        self.queue_manager.register_handler(
             "conversation.session_closed",
             self.conversation_handler.handle_session_closed
         )

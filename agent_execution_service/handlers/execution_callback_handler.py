@@ -15,6 +15,7 @@ from datetime import datetime
 
 from common.models.actions import DomainAction
 from common.services.domain_queue_manager import DomainQueueManager
+from common.models.execution_context import ExecutionContext
 from agent_execution_service.models.actions_model import ExecutionCallbackAction
 from agent_execution_service.models.execution_model import ExecutionResult, ExecutionStatus
 from agent_execution_service.config.settings import get_settings
@@ -46,7 +47,8 @@ class ExecutionCallbackHandler:
         tenant_tier: str,
         session_id: str,
         callback_queue: str,
-        execution_result: ExecutionResult
+        execution_result: ExecutionResult,
+        context: ExecutionContext = None
     ) -> bool:
         """
         Envía callback de ejecución exitosa.
@@ -58,6 +60,7 @@ class ExecutionCallbackHandler:
             session_id: ID de la sesión
             callback_queue: Cola destino del callback
             execution_result: Resultado de la ejecución
+            context: Contexto de ejecución (opcional)
             
         Returns:
             True si se envió correctamente
@@ -66,21 +69,33 @@ class ExecutionCallbackHandler:
             # Formatear resultado para callback
             formatted_result = self._format_execution_result(execution_result)
             
-            # Crear acción de callback
+            # Usar contexto si está disponible, o crear uno nuevo
+            exec_context = context or ExecutionContext(
+                tenant_id=tenant_id,
+                tenant_tier=tenant_tier,
+                session_id=session_id
+            )
+        
+            # Crear acción callback con resultado de ejecución
             callback_action = ExecutionCallbackAction(
                 task_id=task_id,
+                action_id=f"exec_cb_{task_id}",
                 tenant_id=tenant_id,
                 tenant_tier=tenant_tier,
                 session_id=session_id,
-                status="completed",
-                result=formatted_result,
-                execution_time=execution_result.execution_time,
-                tokens_used=self._extract_token_usage(execution_result),
-                callback_queue=callback_queue  # No se usa en enqueue_callback pero lo mantenemos
+                callback_queue=callback_queue,
+                execution_result=execution_result.dict(),
+                status=ExecutionStatus.COMPLETED,
+                timestamp=datetime.utcnow().isoformat()
             )
             
             # Enviar callback
-            success = await self.queue_manager.enqueue_callback(callback_action, callback_queue)
+            logger.info(f"Encolando callback de éxito para {task_id} a {callback_queue} con tier {exec_context.tenant_tier}")
+            success = await self.queue_manager.enqueue_execution(
+                action=callback_action,
+                target_domain=callback_queue.split(".")[0],  # Extraer dominio de la cola
+                context=exec_context
+            )
             
             if success:
                 logger.info(f"Callback de éxito enviado: task_id={task_id}")
@@ -101,8 +116,8 @@ class ExecutionCallbackHandler:
         tenant_tier: str,
         session_id: str,
         callback_queue: str,
-        error_info: Dict[str, Any],
-        execution_time: Optional[float] = None
+        error_message: str,
+        context: ExecutionContext = None
     ) -> bool:
         """
         Envía callback de error de ejecución.
@@ -113,31 +128,43 @@ class ExecutionCallbackHandler:
             tenant_tier: Tier del tenant
             session_id: ID de la sesión
             callback_queue: Cola destino del callback
-            error_info: Información del error
-            execution_time: Tiempo de ejecución antes del error
+            error_message: Mensaje de error
+            context: Contexto de ejecución (opcional)
             
         Returns:
             True si se envió correctamente
         """
         try:
-            # Crear acción de callback de error
+            # Usar contexto si está disponible, o crear uno nuevo
+            exec_context = context or ExecutionContext(
+                tenant_id=tenant_id,
+                tenant_tier=tenant_tier,
+                session_id=session_id
+            )
+        
+            # Crear acción callback con información de error
             callback_action = ExecutionCallbackAction(
                 task_id=task_id,
+                action_id=f"err_cb_{task_id}",
                 tenant_id=tenant_id,
                 tenant_tier=tenant_tier,
                 session_id=session_id,
-                status="failed",
-                result={
-                    "status": "failed",
-                    "error": error_info
+                callback_queue=callback_queue,
+                error={
+                    "type": "ProcessingError",
+                    "message": error_message
                 },
-                execution_time=execution_time,
-                tokens_used=None,
-                callback_queue=callback_queue
+                status=ExecutionStatus.ERROR,
+                timestamp=datetime.utcnow().isoformat()
             )
             
             # Enviar callback
-            success = await self.queue_manager.enqueue_callback(callback_action, callback_queue)
+            logger.info(f"Encolando callback de error para {task_id} a {callback_queue} con tier {exec_context.tenant_tier}")
+            success = await self.queue_manager.enqueue_execution(
+                action=callback_action,
+                target_domain=callback_queue.split(".")[0],  # Extraer dominio de la cola
+                context=exec_context
+            )
             
             if success:
                 logger.info(f"Callback de error enviado: task_id={task_id}")

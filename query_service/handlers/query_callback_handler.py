@@ -14,6 +14,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 from common.models.actions import DomainAction
+from common.models.execution_context import ExecutionContext
 from common.services.domain_queue_manager import DomainQueueManager
 from query_service.models.actions import QueryCallbackAction
 from query_service.config.settings import get_settings
@@ -46,7 +47,10 @@ class QueryCallbackHandler:
         callback_queue: str,
         query_result: Dict[str, Any],
         processing_time: float,
-        tokens_used: Optional[int] = None
+        tokens_used: Optional[int] = None,
+        context: Optional[ExecutionContext] = None,
+        similarity_score: Optional[float] = None,
+        sources: Optional[List[Dict[str, Any]]] = None
     ) -> bool:
         """
         Envía callback de consulta exitosa.
@@ -59,6 +63,9 @@ class QueryCallbackHandler:
             query_result: Resultado de la consulta
             processing_time: Tiempo de procesamiento
             tokens_used: Tokens utilizados (opcional)
+            context: Contexto de ejecución (opcional)
+            similarity_score: Puntuación de similitud (opcional)
+            sources: Fuentes de información (opcional)
             
         Returns:
             True si se envió correctamente
@@ -73,11 +80,24 @@ class QueryCallbackHandler:
                 result=query_result,
                 processing_time=processing_time,
                 tokens_used=tokens_used,
-                callback_queue=callback_queue  # Mantener por compatibilidad
+                callback_queue=callback_queue,  # Mantener por compatibilidad
+                similarity_score=similarity_score,
+                sources=sources
             )
             
-            # Enviar callback
-            success = await self.queue_manager.enqueue_callback(callback_action, callback_queue)
+            # Determinar si usar encolado con contexto o legacy
+            if context:
+                logger.info(f"Enviando callback de consulta exitosa con contexto. Tenant: {tenant_id}, Tier: {context.tenant_tier}")
+                target_domain = callback_queue.split(".")[0] if "." in callback_queue else "generic"
+                success = await self.queue_manager.enqueue_execution(
+                    action=callback_action,
+                    target_domain=target_domain,
+                    context=context
+                )
+            else:
+                # Fallback al método legacy
+                logger.info(f"Enviando callback de consulta exitosa (legacy). Tenant: {tenant_id}")
+                success = await self.queue_manager.enqueue_callback(callback_action, callback_queue)
             
             if success:
                 logger.info(f"Callback de consulta exitosa enviado: task_id={task_id}")
@@ -98,7 +118,8 @@ class QueryCallbackHandler:
         session_id: str,
         callback_queue: str,
         search_result: Dict[str, Any],
-        processing_time: float
+        processing_time: float,
+        context: Optional[ExecutionContext] = None
     ) -> bool:
         """
         Envía callback de búsqueda exitosa.
@@ -110,6 +131,7 @@ class QueryCallbackHandler:
             callback_queue: Cola destino del callback
             search_result: Resultado de la búsqueda
             processing_time: Tiempo de procesamiento
+            context: Contexto de ejecución (opcional)
             
         Returns:
             True si se envió correctamente
@@ -127,8 +149,19 @@ class QueryCallbackHandler:
                 callback_queue=callback_queue
             )
             
-            # Enviar callback
-            success = await self.queue_manager.enqueue_callback(callback_action, callback_queue)
+            # Determinar si usar encolado con contexto o legacy
+            if context:
+                logger.info(f"Enviando callback de búsqueda exitosa con contexto. Tenant: {tenant_id}, Tier: {context.tenant_tier}")
+                target_domain = callback_queue.split(".")[0] if "." in callback_queue else "generic"
+                success = await self.queue_manager.enqueue_execution(
+                    action=callback_action,
+                    target_domain=target_domain,
+                    context=context
+                )
+            else:
+                # Fallback al método legacy
+                logger.info(f"Enviando callback de búsqueda exitosa (legacy). Tenant: {tenant_id}")
+                success = await self.queue_manager.enqueue_callback(callback_action, callback_queue)
             
             if success:
                 logger.info(f"Callback de búsqueda exitosa enviado: task_id={task_id}")
@@ -149,7 +182,8 @@ class QueryCallbackHandler:
         session_id: str,
         callback_queue: str,
         error_info: Dict[str, Any],
-        processing_time: Optional[float] = None
+        processing_time: Optional[float] = None,
+        context: Optional[ExecutionContext] = None
     ) -> bool:
         """
         Envía callback de error de consulta.
@@ -161,6 +195,7 @@ class QueryCallbackHandler:
             callback_queue: Cola destino del callback
             error_info: Información del error
             processing_time: Tiempo de procesamiento antes del error
+            context: Contexto de ejecución (opcional)
             
         Returns:
             True si se envió correctamente
@@ -181,8 +216,19 @@ class QueryCallbackHandler:
                 callback_queue=callback_queue
             )
             
-            # Enviar callback
-            success = await self.queue_manager.enqueue_callback(callback_action, callback_queue)
+            # Determinar si usar encolado con contexto o legacy
+            if context:
+                logger.info(f"Enviando callback de error con contexto. Tenant: {tenant_id}, Tier: {context.tenant_tier}")
+                target_domain = callback_queue.split(".")[0] if "." in callback_queue else "generic"
+                success = await self.queue_manager.enqueue_execution(
+                    action=callback_action,
+                    target_domain=target_domain,
+                    context=context
+                )
+            else:
+                # Fallback al método legacy
+                logger.info(f"Enviando callback de error (legacy). Tenant: {tenant_id}")
+                success = await self.queue_manager.enqueue_callback(callback_action, callback_queue)
             
             if success:
                 logger.info(f"Callback de error enviado: task_id={task_id}")

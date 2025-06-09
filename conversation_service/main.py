@@ -13,6 +13,7 @@ from common.errors import setup_error_handling
 from common.utils.logging import init_logging
 from common.helpers.health import register_health_routes
 from common.redis_pool import get_redis_client
+from common.services.domain_queue_manager import DomainQueueManager
 from conversation_service.workers.conversation_worker import ConversationWorker
 from conversation_service.workers.migration_worker import MigrationWorker
 from conversation_service.routes.crm_routes import router as crm_router
@@ -23,10 +24,11 @@ logger = logging.getLogger(__name__)
 
 conversation_worker = None
 migration_worker = None
+queue_manager = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global conversation_worker, migration_worker
+    global conversation_worker, migration_worker, queue_manager
     
     logger.info("Iniciando Conversation Service")
     
@@ -35,9 +37,13 @@ async def lifespan(app: FastAPI):
         await redis_client.ping()
         logger.info("Redis conectado")
         
-        # Inicializar workers
-        conversation_worker = ConversationWorker(redis_client)
-        migration_worker = MigrationWorker(redis_client)
+        # Inicializar DomainQueueManager
+        queue_manager = DomainQueueManager(redis_client)
+        logger.info("DomainQueueManager inicializado")
+        
+        # Inicializar workers con queue_manager
+        conversation_worker = ConversationWorker(redis_client, queue_manager)
+        migration_worker = MigrationWorker(redis_client, queue_manager)
         
         # Iniciar workers
         worker_tasks = [
@@ -45,9 +51,10 @@ async def lifespan(app: FastAPI):
             asyncio.create_task(migration_worker.start())
         ]
         
-        logger.info("Workers iniciados")
+        logger.info("Workers iniciados con DomainQueueManager")
         
         app.state.redis_client = redis_client
+        app.state.queue_manager = queue_manager
         yield
         
     finally:

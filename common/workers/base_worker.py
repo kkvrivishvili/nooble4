@@ -2,10 +2,10 @@
 BaseWorker Mejorado: Clase base para workers que procesan Domain Actions.
 
 Proporciona una implementación estándar para procesar acciones
-de colas Redis con implementación común de ciclo de procesamiento.
+de colas Redis mediante DomainQueueManager con soporte completo para tiers.
 Incluye inicialización asíncrona estandarizada y gestión robusta de errores.
 
-VERSIÓN: 2.0 - Estandarización completa con mejores prácticas.
+VERSIÓN: 3.0 - Migración completa a DomainQueueManager para sistema de colas por tier.
 """
 
 import asyncio
@@ -16,7 +16,6 @@ from typing import Dict, Any, List, Optional
 
 from common.models.actions import DomainAction
 from common.models.execution_context import ExecutionContext
-from common.services.action_processor import ActionProcessor
 from common.services.domain_queue_manager import DomainQueueManager
 
 logger = logging.getLogger(__name__)
@@ -37,13 +36,13 @@ class BaseWorker:
     - Implementación de callbacks
     """
     
-    def __init__(self, redis_client, action_processor=None):
+    def __init__(self, redis_client, queue_manager=None):
         """
         Inicializa el worker base con validación de parámetros.
         
         Args:
             redis_client: Cliente Redis para acceso a colas (requerido)
-            action_processor: Procesador de acciones (opcional)
+            queue_manager: Gestor de colas por dominio y tier (opcional)
         """
         # Validación de redis_client
         if redis_client is None:
@@ -51,13 +50,12 @@ class BaseWorker:
             
         # Inicialización básica
         self.redis_client = redis_client
-        self.action_processor = action_processor or ActionProcessor(self.redis_client)
         self.running = False
         self.sleep_seconds = 1.0
         self.initialized = False
         
-        # Integración con DomainQueueManager
-        self.queue_manager = DomainQueueManager(self.redis_client)
+        # Gestor de colas por dominio
+        self.queue_manager = queue_manager or DomainQueueManager(self.redis_client)
         
         # Domain específico (debe ser definido por subclases)
         self.domain = getattr(self, 'domain', 'unknown')
@@ -85,7 +83,7 @@ class BaseWorker:
         Inicializa y registra handlers.
         
         Las subclases deben implementar este método para registrar
-        sus handlers específicos en el action_processor.
+        sus handlers específicos en el queue_manager.
         """
         # Implementación vacía por defecto
         # Las subclases deben sobrescribir este método
@@ -151,8 +149,24 @@ class BaseWorker:
             # Convertir datos a objeto DomainAction
             action = self.create_action_from_data(action_data)
             
-            # Procesar la acción
-            result = await self.action_processor.process(action)
+            # Buscar y ejecutar el handler correspondiente
+            action_type = action.action_type
+            handler = self.queue_manager.get_handler(action_type)
+            
+            if not handler:
+                raise ValueError(f"No hay handler registrado para la acción: {action_type}")
+            
+            # Extraer contexto si existe
+            context = None
+            if "execution_context" in action_data:
+                context = ExecutionContext.parse_obj(action_data["execution_context"])
+            
+            # Procesar la acción (con contexto si está disponible)
+            logger.info(f"Procesando acción: {action_type} para tenant: {action.tenant_id}")
+            if context:
+                result = await handler(action, context)
+            else:
+                result = await handler(action)
             
             # Manejar resultado si es necesario
             if action.callback_queue and result:

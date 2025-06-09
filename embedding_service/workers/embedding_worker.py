@@ -12,7 +12,8 @@ from typing import Dict, Any, List
 
 from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
-from common.services.action_processor import ActionProcessor
+from common.models.execution_context import ExecutionContext
+from common.services.domain_queue_manager import DomainQueueManager
 from embedding_service.models.actions import EmbeddingGenerateAction, EmbeddingValidateAction, EmbeddingCallbackAction
 from embedding_service.handlers.embedding_handler import EmbeddingHandler
 from embedding_service.handlers.context_handler import get_embedding_context_handler
@@ -33,16 +34,16 @@ class EmbeddingWorker(BaseWorker):
     - Estadísticas avanzadas
     """
     
-    def __init__(self, redis_client, action_processor=None):
+    def __init__(self, redis_client, queue_manager=None):
         """
         Inicializa worker con servicios necesarios.
         
         Args:
             redis_client: Cliente Redis configurado (requerido)
-            action_processor: Procesador de acciones (opcional)
+            queue_manager: Gestor de colas por dominio (opcional)
         """
-        action_processor = action_processor or ActionProcessor(redis_client)
-        super().__init__(redis_client, action_processor)
+        queue_manager = queue_manager or DomainQueueManager(redis_client)
+        super().__init__(redis_client, queue_manager)
         
         # Definir domain específico
         self.domain = settings.domain_name  # "embedding"
@@ -85,25 +86,26 @@ class EmbeddingWorker(BaseWorker):
             self.context_handler, self.redis_client
         )
         
-        # Registrar handlers en el action_processor
-        self.action_processor.register_handler(
+        # Registrar handlers en el queue_manager
+        self.queue_manager.register_handler(
             "embedding.generate",
             self._handle_embedding_generate
         )
         
-        self.action_processor.register_handler(
+        self.queue_manager.register_handler(
             "embedding.validate",
             self._handle_embedding_validate
         )
         
         logger.info("EmbeddingWorker: Handlers inicializados")
     
-    async def _handle_embedding_generate(self, action: DomainAction) -> Dict[str, Any]:
+    async def _handle_embedding_generate(self, action: DomainAction, context: ExecutionContext = None) -> Dict[str, Any]:
         """
         Handler específico para generación de embeddings.
         
         Args:
             action: Acción de embedding
+            context: Contexto de ejecución opcional con metadatos
             
         Returns:
             Resultado del procesamiento
@@ -115,6 +117,11 @@ class EmbeddingWorker(BaseWorker):
                 
             # Convertir a tipo específico
             embedding_action = EmbeddingGenerateAction.parse_obj(action.dict())
+            
+            # Enriquecer con datos de contexto si está disponible
+            if context:
+                logger.info(f"Generando embeddings con tier: {context.tenant_tier}")
+                embedding_action.tenant_tier = context.tenant_tier
             
             # Procesar embedding
             result = await self.embedding_handler.handle_generate(embedding_action)
@@ -131,12 +138,13 @@ class EmbeddingWorker(BaseWorker):
                 }
             }
     
-    async def _handle_embedding_validate(self, action: DomainAction) -> Dict[str, Any]:
+    async def _handle_embedding_validate(self, action: DomainAction, context: ExecutionContext = None) -> Dict[str, Any]:
         """
         Handler específico para validación de embeddings.
         
         Args:
             action: Acción de validación
+            context: Contexto de ejecución opcional con metadatos
             
         Returns:
             Resultado del procesamiento
@@ -148,6 +156,11 @@ class EmbeddingWorker(BaseWorker):
                 
             # Convertir a tipo específico
             validate_action = EmbeddingValidateAction.parse_obj(action.dict())
+            
+            # Enriquecer con datos de contexto si está disponible
+            if context:
+                logger.info(f"Validando embeddings con tier: {context.tenant_tier}")
+                validate_action.tenant_tier = context.tenant_tier
             
             # Procesar validación
             result = await self.embedding_handler.handle_validate(validate_action)
@@ -188,7 +201,7 @@ class EmbeddingWorker(BaseWorker):
     
     async def _send_callback(self, action: DomainAction, result: Dict[str, Any]):
         """
-        Envía resultado como callback.
+        Envía resultado como callback con contexto de ejecución.
         
         Args:
             action: Acción original que generó el resultado
@@ -199,6 +212,15 @@ class EmbeddingWorker(BaseWorker):
             if not action.callback_queue:
                 logger.warning(f"No se especificó cola de callback para {action.task_id}")
                 return
+                
+            # Crear contexto de ejecución para el callback
+            context = ExecutionContext(
+                tenant_id=action.tenant_id,
+                tenant_tier=getattr(action, 'tenant_tier', None),
+                session_id=action.session_id
+            )
+            
+            logger.info(f"Preparando callback con contexto. Tier: {context.tenant_tier}")
             
             # Determinar tipo de callback según resultado
             if result.get("success", False) and "result" in result:
@@ -212,7 +234,8 @@ class EmbeddingWorker(BaseWorker):
                     model=result["result"]["model"],
                     dimensions=result["result"]["dimensions"],
                     total_tokens=result["result"]["total_tokens"],
-                    processing_time=result.get("execution_time", 0.0)
+                    processing_time=result.get("execution_time", 0.0),
+                    context=context
                 )
             else:
                 # Callback de error
@@ -222,7 +245,8 @@ class EmbeddingWorker(BaseWorker):
                     session_id=action.session_id,
                     callback_queue=action.callback_queue,
                     error_info=result.get("error", {}),
-                    processing_time=result.get("execution_time")
+                    processing_time=result.get("execution_time"),
+                    context=context
                 )
             
         except Exception as e:
@@ -230,7 +254,7 @@ class EmbeddingWorker(BaseWorker):
     
     async def _send_error_callback(self, action_data: Dict[str, Any], error_message: str):
         """
-        Envía callback de error.
+        Envía callback de error con contexto de ejecución.
         
         Args:
             action_data: Datos originales de la acción
@@ -241,11 +265,19 @@ class EmbeddingWorker(BaseWorker):
             task_id = action_data.get("task_id") or action_data.get("action_id")
             tenant_id = action_data.get("tenant_id", "unknown")
             session_id = action_data.get("session_id", "unknown")
+            tenant_tier = action_data.get("tenant_tier")
             callback_queue = action_data.get("callback_queue")
             
             if not callback_queue or not task_id:
                 logger.warning("Información insuficiente para enviar error callback")
                 return
+                
+            # Crear contexto de ejecución
+            context = ExecutionContext(
+                tenant_id=tenant_id,
+                tenant_tier=tenant_tier,
+                session_id=session_id
+            )
             
             # Enviar error callback
             await self.embedding_callback_handler.send_error_callback(
@@ -256,7 +288,8 @@ class EmbeddingWorker(BaseWorker):
                 error_info={
                     "type": "ProcessingError",
                     "message": error_message
-                }
+                },
+                context=context
             )
             
         except Exception as e:

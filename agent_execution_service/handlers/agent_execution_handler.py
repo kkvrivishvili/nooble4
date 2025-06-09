@@ -44,12 +44,13 @@ class AgentExecutionHandler:
         # Inicializar executor de agentes
         self.agent_executor = AgentExecutor(context_handler, redis_client)
     
-    async def handle_agent_execution(self, action: AgentExecutionAction) -> Dict[str, Any]:
+    async def handle_agent_execution(self, action: AgentExecutionAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
         """
         Maneja ejecución completa de agente.
         
         Args:
             action: Acción de ejecución
+            context: Contexto de ejecución (opcional)
             
         Returns:
             Dict con resultado del procesamiento
@@ -60,10 +61,14 @@ class AgentExecutionHandler:
         try:
             logger.info(f"Iniciando ejecución de agente: task_id={task_id}")
             
-            # 1. Resolver contexto de ejecución
-            context = await self.context_handler.resolve_execution_context(
-                action.execution_context
-            )
+            # 1. Usar contexto proporcionado o resolverlo
+            if not context:
+                logger.info("Resolviendo contexto de ejecución desde la acción")
+                context = await self.context_handler.resolve_execution_context(
+                    action.execution_context
+                )
+            else:
+                logger.info(f"Usando contexto de ejecución proporcionado. Tier: {context.tenant_tier}")
             
             # 2. Obtener configuración del agente
             agent_config = await self.context_handler.get_agent_configuration(

@@ -14,6 +14,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 from common.models.actions import DomainAction
+from common.models.execution_context import ExecutionContext
 from common.services.domain_queue_manager import DomainQueueManager
 from embedding_service.models.actions import EmbeddingCallbackAction
 from embedding_service.config.settings import get_settings
@@ -48,7 +49,8 @@ class EmbeddingCallbackHandler:
         model: str,
         dimensions: int,
         total_tokens: int,
-        processing_time: float
+        processing_time: float,
+        context: Optional[ExecutionContext] = None
     ) -> bool:
         """
         Envía callback de embedding exitoso.
@@ -63,6 +65,7 @@ class EmbeddingCallbackHandler:
             dimensions: Dimensiones de los vectores
             total_tokens: Tokens utilizados
             processing_time: Tiempo de procesamiento
+            context: ExecutionContext (opcional)
             
         Returns:
             True si se envió correctamente
@@ -79,6 +82,7 @@ class EmbeddingCallbackHandler:
                 dimensions=dimensions,
                 total_tokens=total_tokens,
                 processing_time=processing_time,
+                context=context,
                 callback_queue=callback_queue  # Mantener por compatibilidad
             )
             
@@ -104,7 +108,8 @@ class EmbeddingCallbackHandler:
         session_id: str,
         callback_queue: str,
         error_info: Dict[str, Any],
-        processing_time: Optional[float] = None
+        processing_time: Optional[float] = None,
+        context: Optional[ExecutionContext] = None
     ) -> bool:
         """
         Envía callback de error de embedding.

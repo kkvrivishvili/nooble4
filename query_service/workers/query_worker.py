@@ -13,7 +13,8 @@ from typing import Dict, Any, List, Optional
 
 from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
-from common.services.action_processor import ActionProcessor
+from common.models.execution_context import ExecutionContext
+from common.services.domain_queue_manager import DomainQueueManager
 from query_service.models.actions import (
     QueryGenerateAction, SearchDocsAction, QueryCallbackAction
 )
@@ -38,16 +39,16 @@ class QueryWorker(BaseWorker):
     - Estadísticas avanzadas
     """
     
-    def __init__(self, redis_client, action_processor=None):
+    def __init__(self, redis_client, queue_manager=None):
         """
         Inicializa worker con servicios necesarios.
         
         Args:
             redis_client: Cliente Redis configurado (requerido)
-            action_processor: Procesador de acciones (opcional)
+            queue_manager: Gestor de colas por dominio (opcional)
         """
-        action_processor = action_processor or ActionProcessor(redis_client)
-        super().__init__(redis_client, action_processor)
+        queue_manager = queue_manager or DomainQueueManager(redis_client)
+        super().__init__(redis_client, queue_manager)
         
         # Definir domain específico
         self.domain = settings.domain_name  # "query"
@@ -94,31 +95,32 @@ class QueryWorker(BaseWorker):
             self.context_handler, self.redis_client
         )
         
-        # Registrar handlers en el action_processor
-        self.action_processor.register_handler(
+        # Registrar handlers en el queue_manager
+        self.queue_manager.register_handler(
             "query.generate", 
             self._handle_query_generate
         )
         
-        self.action_processor.register_handler(
+        self.queue_manager.register_handler(
             "query.search",
             self._handle_search_docs
         )
         
         # Registrar handler para callbacks de embeddings
-        self.action_processor.register_handler(
+        self.queue_manager.register_handler(
             "embedding.callback",
             self.embedding_callback_handler.handle_embedding_callback
         )
         
         logger.info("QueryWorker: Handlers inicializados")
     
-    async def _handle_query_generate(self, action: DomainAction) -> Dict[str, Any]:
+    async def _handle_query_generate(self, action: DomainAction, context: ExecutionContext = None) -> Dict[str, Any]:
         """
         Handler específico para procesamiento de consultas.
         
         Args:
             action: Acción de consulta
+            context: Contexto de ejecución opcional con metadatos
             
         Returns:
             Resultado del procesamiento
@@ -130,6 +132,11 @@ class QueryWorker(BaseWorker):
                 
             # Convertir a tipo específico
             query_action = QueryGenerateAction.parse_obj(action.dict())
+            
+            # Enriquecer con datos de contexto si está disponible
+            if context:
+                logger.info(f"Procesando consulta con tier: {context.tenant_tier}")
+                query_action.tenant_tier = context.tenant_tier
             
             # Procesar consulta
             result = await self.query_handler.handle_query(query_action)
@@ -146,12 +153,13 @@ class QueryWorker(BaseWorker):
                 }
             }
     
-    async def _handle_search_docs(self, action: DomainAction) -> Dict[str, Any]:
+    async def _handle_search_docs(self, action: DomainAction, context: ExecutionContext = None) -> Dict[str, Any]:
         """
         Handler específico para validación de consultas.
         
         Args:
             action: Acción de validación
+            context: Contexto de ejecución opcional con metadatos
             
         Returns:
             Resultado del procesamiento
@@ -163,6 +171,11 @@ class QueryWorker(BaseWorker):
                 
             # Convertir a tipo específico
             search_action = SearchDocsAction.parse_obj(action.dict())
+            
+            # Enriquecer con datos de contexto si está disponible
+            if context:
+                logger.info(f"Procesando búsqueda con tier: {context.tenant_tier}")
+                search_action.tenant_tier = context.tenant_tier
             
             # Procesar búsqueda
             result = await self.query_handler.handle_search(search_action)
@@ -214,6 +227,15 @@ class QueryWorker(BaseWorker):
             if not action.callback_queue:
                 logger.warning(f"No se especificó cola de callback para {action.task_id}")
                 return
+                
+            # Crear contexto de ejecución para el callback
+            context = ExecutionContext(
+                tenant_id=action.tenant_id,
+                tenant_tier=getattr(action, 'tenant_tier', None),
+                session_id=action.session_id
+            )
+            
+            logger.info(f"Preparando callback con contexto. Tier: {context.tenant_tier}")
             
             # Determinar tipo de callback según resultado
             if result.get("success", False) and "result" in result:
@@ -226,7 +248,8 @@ class QueryWorker(BaseWorker):
                     query_result=result["result"],
                     similarity_score=result.get("metadata", {}).get("similarity_score"),
                     sources=result.get("metadata", {}).get("sources", []),
-                    processing_time=result.get("execution_time", 0.0)
+                    processing_time=result.get("execution_time", 0.0),
+                    context=context
                 )
             else:
                 # Callback de error
@@ -236,6 +259,7 @@ class QueryWorker(BaseWorker):
                     session_id=action.session_id,
                     callback_queue=action.callback_queue,
                     error_info=result.get("error", {}),
+                    context=context,
                     processing_time=result.get("execution_time")
                 )
             
@@ -261,7 +285,14 @@ class QueryWorker(BaseWorker):
                 logger.warning("Información insuficiente para enviar error callback")
                 return
             
-            # Enviar error callback
+            # Crear contexto de ejecución para el callback
+            context = ExecutionContext(
+                tenant_id=tenant_id,
+                tenant_tier=action_data.get('tenant_tier'),
+                session_id=session_id
+            )
+            
+            # Enviar error callback con contexto
             await self.query_callback_handler.send_query_error_callback(
                 task_id=task_id,
                 tenant_id=tenant_id,
@@ -270,7 +301,8 @@ class QueryWorker(BaseWorker):
                 error_info={
                     "type": "ProcessingError",
                     "message": error_message
-                }
+                },
+                context=context
             )
             
         except Exception as e:

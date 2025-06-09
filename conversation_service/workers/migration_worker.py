@@ -9,7 +9,8 @@ from datetime import datetime
 
 from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
-from common.services.action_processor import ActionProcessor
+from common.models.execution_context import ExecutionContext
+from common.services.domain_queue_manager import DomainQueueManager
 from conversation_service.services.persistence_manager import PersistenceManager
 from conversation_service.services.memory_manager import MemoryManager
 from conversation_service.config.settings import get_settings
@@ -26,17 +27,17 @@ class MigrationWorker(BaseWorker):
     de inicialización asíncrona del BaseWorker.
     """
     
-    def __init__(self, redis_client, action_processor=None, db_client=None):
+    def __init__(self, redis_client, queue_manager=None, db_client=None):
         """
         Inicializa worker con servicios necesarios.
         
         Args:
             redis_client: Cliente Redis configurado (requerido)
-            action_processor: Procesador de acciones (opcional)
+            queue_manager: Gestor de colas por dominio (opcional)
             db_client: Cliente de base de datos PostgreSQL (opcional)
         """
-        action_processor = action_processor or ActionProcessor(redis_client)
-        super().__init__(redis_client, action_processor)
+        queue_manager = queue_manager or DomainQueueManager(redis_client)
+        super().__init__(redis_client, queue_manager)
         
         # Definir domain específico
         self.domain = settings.domain_name  # "conversation"

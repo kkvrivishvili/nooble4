@@ -42,12 +42,12 @@ async def lifespan(app: FastAPI):
         await redis_client.ping()
         logger.info("Conexión a Redis establecida")
         
-        # Inicializar worker
-        execution_worker = ExecutionWorker(redis_client)
+        # Inicializar worker con queue_manager
+        execution_worker = ExecutionWorker(redis_client, queue_manager)
         
         # Iniciar worker en background
         worker_task = asyncio.create_task(execution_worker.start())
-        logger.info("ExecutionWorker iniciado")
+        logger.info("ExecutionWorker iniciado con DomainQueueManager")
         
         # Hacer queue_manager disponible para la app
         app.state.queue_manager = queue_manager

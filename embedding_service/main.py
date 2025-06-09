@@ -42,8 +42,8 @@ async def lifespan(app: FastAPI):
         await redis_client.ping()
         logger.info("Conexión a Redis establecida")
         
-        # Inicializar worker
-        embedding_worker = EmbeddingWorker(redis_client)
+        # Inicializar worker con queue_manager
+        embedding_worker = EmbeddingWorker(redis_client, queue_manager)
         
         # Iniciar worker en background
         worker_task = asyncio.create_task(embedding_worker.start())

@@ -12,8 +12,8 @@ from typing import Dict, Any, List
 
 from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
-from common.services.action_processor import ActionProcessor
-from common.services.domain_queue_manager import DomainQueueManager 
+from common.services.domain_queue_manager import DomainQueueManager
+from common.models.execution_context import ExecutionContext
 from agent_execution_service.models.actions import (
     AgentRunAction, ExecutionCallbackAction
 )
@@ -38,16 +38,16 @@ class ExecutionWorker(BaseWorker):
     - Estadísticas detalladas
     """
     
-    def __init__(self, redis_client, action_processor=None):
+    def __init__(self, redis_client, queue_manager=None):
         """
         Inicializa worker con servicios necesarios.
         
         Args:
             redis_client: Cliente Redis configurado (requerido)
-            action_processor: Procesador de acciones (opcional)
+            queue_manager: Gestor de colas por dominio (opcional)
         """
-        action_processor = action_processor or ActionProcessor(redis_client)
-        super().__init__(redis_client, action_processor)
+        queue_manager = queue_manager or DomainQueueManager(redis_client)
+        super().__init__(redis_client, queue_manager)
         
         # Definir domain específico
         self.domain = settings.domain_name  # "execution"
@@ -96,31 +96,32 @@ class ExecutionWorker(BaseWorker):
         self.embedding_callback_handler = EmbeddingCallbackHandler()
         self.query_callback_handler = QueryCallbackHandler()
         
-        # Registrar handlers en el action_processor
-        self.action_processor.register_handler(
+        # Registrar handlers en el queue_manager
+        self.queue_manager.register_handler(
             "execution.agent_run",
             self._handle_agent_execution
         )
         
         # Registrar handlers para callbacks de servicios externos
-        self.action_processor.register_handler(
+        self.queue_manager.register_handler(
             "embedding.callback",
             self.embedding_callback_handler.handle_embedding_callback
         )
         
-        self.action_processor.register_handler(
+        self.queue_manager.register_handler(
             "query.callback",
             self.query_callback_handler.handle_query_callback
         )
         
         logger.info("ExecutionWorker: Handlers inicializados")
     
-    async def _handle_agent_execution(self, action: DomainAction) -> Dict[str, Any]:
+    async def _handle_agent_execution(self, action: DomainAction, context: ExecutionContext = None) -> Dict[str, Any]:
         """
         Handler específico para ejecución de agentes.
         
         Args:
             action: Acción de ejecución
+            context: Contexto de ejecución opcional con metadatos adicionales
             
         Returns:
             Resultado del procesamiento
@@ -132,6 +133,11 @@ class ExecutionWorker(BaseWorker):
             
             # Convertir a tipo específico
             agent_action = AgentRunAction.parse_obj(action.dict())
+            
+            # Enriquecer acción con contexto si está disponible
+            if context:
+                logger.info(f"Procesando acción con tier: {context.tenant_tier}")
+                agent_action.tenant_tier = context.tenant_tier
             
             # Procesar ejecución
             result = await self.agent_execution_handler.handle_agent_execution(agent_action)
@@ -182,16 +188,24 @@ class ExecutionWorker(BaseWorker):
                 logger.warning(f"No se especificó cola de callback para {action.task_id}")
                 return
             
+            # Crear contexto de ejecución para el callback
+            context = ExecutionContext(
+                tenant_id=action.tenant_id,
+                tenant_tier=action.tenant_tier or "free",  # Asegurar tier por defecto
+                session_id=action.session_id
+            )
+            
             # Determinar tipo de callback según resultado
             if result.get("success", False) and "execution_result" in result:
-                # Callback de ejecución exitosa
+                # Callback de ejecución exitosa con contexto
                 await self.execution_callback_handler.send_success_callback(
                     task_id=action.task_id,
                     tenant_id=action.tenant_id,
                     tenant_tier=action.tenant_tier,
                     session_id=action.session_id,
                     callback_queue=action.callback_queue,
-                    execution_result=result["execution_result"]
+                    execution_result=result["execution_result"],
+                    context=context
                 )
             else:
                 # Callback de error
@@ -208,37 +222,42 @@ class ExecutionWorker(BaseWorker):
         except Exception as e:
             logger.error(f"Error enviando callback: {str(e)}")
     
-    async def _send_error_callback(self, action_data: Dict[str, Any], error_message: str):
+    async def _send_error_callback(self, action_data: Dict[str, Any], error_msg: str):
         """
-        Envía callback de error.
+        Envía callback de error para una acción.
         
         Args:
             action_data: Datos originales de la acción
-            error_message: Mensaje de error
+            error_msg: Mensaje de error
         """
         try:
-            # Extraer información necesaria
-            task_id = action_data.get("task_id") or action_data.get("action_id")
+            # Extraer datos mínimos necesarios
+            task_id = action_data.get("task_id", "unknown")
             tenant_id = action_data.get("tenant_id", "unknown")
             tenant_tier = action_data.get("tenant_tier", "free")
             session_id = action_data.get("session_id", "unknown")
-            callback_queue = action_data.get("callback_queue")
+            callback_queue = action_data.get("callback_queue", "")
             
-            if not callback_queue or not task_id:
-                logger.warning("Información insuficiente para enviar error callback")
+            if not callback_queue:
+                logger.warning(f"No hay cola de callback para error: {task_id}")
                 return
             
-            # Enviar error callback
+            # Crear contexto de ejecución para el callback
+            context = ExecutionContext(
+                tenant_id=tenant_id,
+                tenant_tier=tenant_tier,
+                session_id=session_id
+            )
+                
+            # Enviar callback de error con contexto
             await self.execution_callback_handler.send_error_callback(
                 task_id=task_id,
                 tenant_id=tenant_id,
                 tenant_tier=tenant_tier,
                 session_id=session_id,
                 callback_queue=callback_queue,
-                error_info={
-                    "type": "ProcessingError",
-                    "message": error_message
-                }
+                error_message=error_msg,
+                context=context
             )
             
         except Exception as e:

@@ -13,7 +13,8 @@ from typing import Dict, Any, List
 
 from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
-from common.services.action_processor import ActionProcessor
+from common.models.execution_context import ExecutionContext
+from common.services.domain_queue_manager import DomainQueueManager
 from agent_orchestrator_service.models.actions_model import ExecutionCallbackAction
 from agent_orchestrator_service.handlers.callback_handler import CallbackHandler
 from agent_orchestrator_service.services.websocket_manager import get_websocket_manager
@@ -34,16 +35,16 @@ class OrchestratorWorker(BaseWorker):
     - Estadísticas detalladas
     """
     
-    def __init__(self, redis_client, action_processor=None):
+    def __init__(self, redis_client, queue_manager=None):
         """
         Inicializa worker con servicios necesarios.
         
         Args:
             redis_client: Cliente Redis configurado (requerido)
-            action_processor: Procesador de acciones (opcional)
+            queue_manager: Gestor de colas por dominio (opcional)
         """
-        action_processor = action_processor or ActionProcessor(redis_client)
-        super().__init__(redis_client, action_processor)
+        queue_manager = queue_manager or DomainQueueManager(redis_client)
+        super().__init__(redis_client, queue_manager)
         
         # Definir domain específico
         self.domain = settings.domain_name  # "orchestrator"
@@ -76,8 +77,8 @@ class OrchestratorWorker(BaseWorker):
         self.websocket_manager = get_websocket_manager()
         self.callback_handler = CallbackHandler(self.websocket_manager, self.redis_client)
         
-        # Registrar handlers en el action_processor
-        self.action_processor.register_handler(
+        # Registrar handlers en el queue_manager
+        self.queue_manager.register_handler(
             "execution.callback",
             self.callback_handler.handle_execution_callback
         )

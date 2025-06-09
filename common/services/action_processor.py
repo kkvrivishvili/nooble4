@@ -1,10 +1,14 @@
 """
-ActionProcessor: Procesador centralizado de Domain Actions.
+[LEGACY] ActionProcessor: Procesador centralizado de Domain Actions.
 
-Este componente se encarga de procesar acciones del dominio y 
-manejar su ejecución asíncrona a través de handlers registrados.
+IMPORTANTE: ESTA CLASE ESTÁ DEPRECADA Y SERÁ REMOVIDA EN FUTURAS VERSIONES.
+MIGRAR TODO EL CÓDIGO A 'common.services.domain_queue_manager.DomainQueueManager'.
 
-MODIFICADO: Integración con DomainQueueManager para sistema de colas por tier.
+Este componente se encargaba de procesar acciones del dominio y 
+manejar su ejecución asíncrona a través de handlers registrados, pero
+ha sido reemplazado por DomainQueueManager para mejorar el sistema de colas por tier.
+
+Véase: common/services/domain_queue_manager.py para la implementación recomendada.
 """
 
 import logging
@@ -22,17 +26,21 @@ logger = logging.getLogger(__name__)
 
 class ActionProcessor:
     """
-    Procesador centralizado de acciones.
+    [LEGACY] Procesador centralizado de acciones.
     
-    Permite registrar handlers para cada tipo de acción y
-    encolar/procesar acciones de forma consistente.
+    DEPRECADO: Esta clase será eliminada en futuras versiones.
+    Se debe migrar todo el código a usar DomainQueueManager directamente.
     
-    MODIFICADO: Integra con DomainQueueManager para colas por tier.
+    Anteriormente permitía registrar handlers para cada tipo de acción y
+    encolar/procesar acciones de forma consistente, pero ahora solo actúa
+    como wrapper temporal sobre DomainQueueManager durante la migración.
     """
     
     def __init__(self, redis_client=None, queue_manager=None):
         """
-        Inicializa el procesador.
+        [LEGACY] Inicializa el procesador.
+        
+        DEPRECADO: Usar DomainQueueManager directamente.
         
         Args:
             redis_client: Cliente Redis para encolado (opcional)
@@ -50,7 +58,9 @@ class ActionProcessor:
         
     def register_handler(self, action_type: str, handler_func: Callable):
         """
-        Registra un handler para un tipo de acción específico.
+        [LEGACY] Registra un handler para un tipo de acción específico.
+        
+        DEPRECADO: Usar DomainQueueManager.register_handler() en su lugar.
         
         Args:
             action_type: Tipo de acción en formato "dominio.accion"
@@ -61,7 +71,9 @@ class ActionProcessor:
     
     async def process(self, action: DomainAction) -> Dict[str, Any]:
         """
-        Procesa una acción usando el handler correspondiente.
+        [LEGACY] Procesa una acción usando el handler correspondiente.
+        
+        DEPRECADO: Usar DomainQueueManager y sus handlers directamente.
         
         Args:
             action: Acción a procesar
