@@ -4,7 +4,7 @@ Worker mejorado para Domain Actions en Query Service.
 Implementación estandarizada con inicialización asíncrona y
 manejo robusto de acciones para procesamiento RAG de consultas.
 
-VERSIÓN: 2.0 - Adaptado al patrón improved_base_worker
+VERSIÓN: 4.0 - Adaptado al patrón BaseWorker con procesamiento directo
 """
 
 import logging
@@ -65,20 +65,7 @@ class QueryWorker(BaseWorker):
         if self.initialized:
             return
             
-        await self._initialize_handlers()
-        self.initialized = True
-        logger.info("ImprovedQueryWorker inicializado correctamente")
-    
-    async def start(self):
-        """Extiende el start para asegurar inicialización."""
-        # Asegurar inicialización antes de procesar acciones
-        await self.initialize()
-        
-        # Continuar con el comportamiento normal del BaseWorker
-        await super().start()
-        
-    async def _initialize_handlers(self):
-        """Inicializa todos los handlers necesarios."""
+        # Inicializar servicios y handlers necesarios
         # Context handler
         self.context_handler = await get_query_context_handler(self.redis_client)
         
@@ -95,26 +82,61 @@ class QueryWorker(BaseWorker):
             self.context_handler, self.redis_client
         )
         
-        # Registrar handlers en el queue_manager
-        self.queue_manager.register_handler(
-            "query.generate", 
-            self._handle_query_generate
-        )
-        
-        self.queue_manager.register_handler(
-            "query.search",
-            self._handle_search_docs
-        )
-        
-        # Registrar handler para callbacks de embeddings
-        self.queue_manager.register_handler(
-            "embedding.callback",
-            self.embedding_callback_handler.handle_embedding_callback
-        )
-        
-        logger.info("QueryWorker: Handlers inicializados")
+        self.initialized = True
+        logger.info("QueryWorker inicializado correctamente")
     
-    async def _handle_query_generate(self, action: DomainAction, context: ExecutionContext = None) -> Dict[str, Any]:
+    async def start(self):
+        """Extiende el start para asegurar inicialización."""
+        # Asegurar inicialización antes de procesar acciones
+        await self.initialize()
+        
+        # Continuar con el comportamiento normal del BaseWorker
+        await super().start()
+    
+    async def _handle_action(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
+        """
+        Implementa el método abstracto de BaseWorker para manejar acciones específicas
+        del dominio de query.
+        
+        Args:
+            action: La acción a procesar
+            context: Contexto opcional de ejecución
+            
+        Returns:
+            Diccionario con el resultado del procesamiento
+            
+        Raises:
+            ValueError: Si no hay handler implementado para ese tipo de acción
+        """
+        action_type = action.action_type
+        
+        # Asegurar inicialización
+        if not self.initialized:
+            await self.initialize()
+        
+        try:
+            if action_type == "query.generate":
+                return await self._handle_query_generate(action, context)
+            elif action_type == "query.search":
+                return await self._handle_search_docs(action, context)
+            elif action_type == "embedding.callback":
+                return await self.embedding_callback_handler.handle_embedding_callback(action, context)
+            else:
+                error_msg = f"No hay handler implementado para la acción: {action_type}"
+                logger.warning(error_msg)
+                raise ValueError(error_msg)
+                
+        except Exception as e:
+            logger.error(f"Error procesando acción {action_type}: {str(e)}")
+            return {
+                "success": False,
+                "error": {
+                    "type": type(e).__name__,
+                    "message": str(e)
+                }
+            }
+    
+    async def _handle_query_generate(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
         """
         Handler específico para procesamiento de consultas.
         
@@ -125,35 +147,20 @@ class QueryWorker(BaseWorker):
         Returns:
             Resultado del procesamiento
         """
-        try:
-            # Verificar inicialización
-            if not self.initialized:
-                await self.initialize()
-                
-            # Convertir a tipo específico
-            query_action = QueryGenerateAction.parse_obj(action.dict())
-            
-            # Enriquecer con datos de contexto si está disponible
-            if context:
-                logger.info(f"Procesando consulta con tier: {context.tenant_tier}")
-                query_action.tenant_tier = context.tenant_tier
-            
-            # Procesar consulta
-            result = await self.query_handler.handle_query(query_action)
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error en handle_query: {str(e)}")
-            return {
-                "success": False,
-                "error": {
-                    "type": type(e).__name__,
-                    "message": str(e)
-                }
-            }
-    
-    async def _handle_search_docs(self, action: DomainAction, context: ExecutionContext = None) -> Dict[str, Any]:
+        # Convertir a tipo específico
+        query_action = QueryGenerateAction.parse_obj(action.dict())
+        
+        # Enriquecer con datos de contexto si está disponible
+        if context:
+            logger.info(f"Procesando consulta con tier: {context.tenant_tier}")
+            query_action.tenant_tier = context.tenant_tier
+        
+        # Procesar consulta
+        result = await self.query_handler.handle_query(query_action)
+        
+        return result
+        
+    async def _handle_search_docs(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
         """
         Handler específico para validación de consultas.
         

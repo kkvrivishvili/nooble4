@@ -1,5 +1,9 @@
 # Agent Management Service
 
+> **ACTUALIZACIÓN**: Se ha migrado toda la comunicación entre servicios de HTTP directo al patrón pseudo-síncrono sobre Redis. Todos los clientes y workers ahora implementan el patrón BaseWorker 4.0.
+
+> **OPTIMIZACIÓN PROPUESTA**: Se propone almacenar toda la información de configuración de agentes (incluyendo collection_ids asociados y modelos de embeddings) directamente en la estructura del agente, eliminando así la necesidad de comunicación adicional con el Ingestion Service durante la carga de la configuración del agente.
+
 ## Características y Estado
 
 | Característica | Descripción | Estado |

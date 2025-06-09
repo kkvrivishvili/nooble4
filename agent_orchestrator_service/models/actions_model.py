@@ -106,3 +106,29 @@ class WebSocketBroadcastAction(DomainAction):
     
     def get_action_name(self) -> str:
         return "broadcast"
+
+
+class ChatStatusAction(DomainAction):
+    """Domain Action para consultar estado de chat."""
+    
+    action_type: str = Field("chat.status", description="Tipo de acción")
+    
+    def get_domain(self) -> str:
+        return "chat"
+    
+    def get_action_name(self) -> str:
+        return "status"
+
+
+class ChatCancelAction(DomainAction):
+    """Domain Action para cancelar procesamiento de chat."""
+    
+    action_type: str = Field("chat.cancel", description="Tipo de acción")
+    
+    reason: Optional[str] = Field(None, description="Razón de cancelación")
+    
+    def get_domain(self) -> str:
+        return "chat"
+    
+    def get_action_name(self) -> str:
+        return "cancel"

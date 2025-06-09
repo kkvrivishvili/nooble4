@@ -23,6 +23,7 @@ class AgentExecutionAction(DomainAction):
     message: str = Field(..., description="Mensaje del usuario")
     message_type: str = Field("text", description="Tipo de mensaje")
     user_info: Dict[str, Any] = Field(default_factory=dict, description="Info del usuario")
+    session_id: str = Field(..., description="ID de la sesión")
     
     # NUEVO: Configuración de ejecución específica
     max_iterations: Optional[int] = Field(None, description="Máximo iteraciones del agente")

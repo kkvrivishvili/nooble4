@@ -1,5 +1,10 @@
 """
 Worker especializado para migración Redis -> PostgreSQL.
+
+Implementación con patrón BaseWorker 4.0 que mantiene un ciclo de ejecución
+propio para tareas de migración automática.
+
+VERSIÓN: 4.0 - Adaptado al patrón BaseWorker con handle_action
 """
 
 import asyncio
@@ -20,11 +25,16 @@ settings = get_settings()
 
 class MigrationWorker(BaseWorker):
     """
-    Worker mejorado para migración automática a PostgreSQL.
+    Worker mejorado para migración automática a PostgreSQL con patrón BaseWorker 4.0.
     
-    A diferencia de otros workers basados en Domain Actions, este worker
-    mantiene un ciclo de ejecución propio mientras implementa la interfaz
-    de inicialización asíncrona del BaseWorker.
+    Características:
+    - Implementa completamente el patrón BaseWorker 4.0 con _handle_action
+    - Mantiene un ciclo de migración propio y autónomo
+    - Soporta acciones explícitas de migración vía Domain Actions
+    - Combina procesamiento reactivo (Domain Actions) con proactivo (ciclo de migración)
+    
+    Este worker es un híbrido que cumple con el patrón estándar mientras 
+    mantiene su funcionalidad especializada de migración automática programada.
     """
     
     def __init__(self, redis_client, queue_manager=None, db_client=None):
@@ -100,7 +110,88 @@ class MigrationWorker(BaseWorker):
             
             self.migration_task = None
             
-        logger.info("ImprovedMigrationWorker detenido")
+        logger.info("MigrationWorker detenido")
+    
+    async def _handle_action(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
+        """
+        Maneja Domain Actions para migración explícita y consulta de estado.
+        
+        Este método cumple con la interfaz estándar del BaseWorker 4.0 permitiendo
+        que el worker procese acciones explícitas adicionalmente a su ciclo de migración
+        automática.
+        
+        Args:
+            action: Acción de dominio a procesar
+            context: Contexto de ejecución opcional
+            
+        Returns:
+            Resultado del procesamiento de la acción
+            
+        Raises:
+            ValueError: Si la acción no está soportada
+        """
+        start_time = time.time()
+        action_type = action.action_type
+        
+        try:
+            if action_type == "migration.start":
+                # Solicitud manual para iniciar migración
+                if not self.running:
+                    await self.start()
+                return {
+                    "success": True,
+                    "message": "Migración iniciada exitosamente",
+                    "execution_time": time.time() - start_time
+                }
+                
+            elif action_type == "migration.stop":
+                # Solicitud manual para detener migración
+                if self.running:
+                    await self.stop()
+                return {
+                    "success": True,
+                    "message": "Migración detenida exitosamente",
+                    "execution_time": time.time() - start_time
+                }
+                
+            elif action_type == "migration.migrate_conversation":
+                # Solicitud para migrar una conversación específica
+                conversation_id = action.data.get("conversation_id")
+                if not conversation_id:
+                    raise ValueError("Se requiere conversation_id")
+                    
+                success = await self.persistence.migrate_conversation_to_postgresql(conversation_id)
+                
+                if success and action.data.get("cleanup_memory", True):
+                    self.memory_manager.cleanup_conversation_memory(conversation_id)
+                    
+                return {
+                    "success": success,
+                    "conversation_id": conversation_id,
+                    "message": "Migración completada" if success else "Error en migración",
+                    "execution_time": time.time() - start_time
+                }
+                
+            elif action_type == "migration.get_stats":
+                # Obtener estadísticas de migración
+                stats = await self.get_migration_stats()
+                return {
+                    "success": True,
+                    "stats": stats,
+                    "execution_time": time.time() - start_time
+                }
+            else:
+                error_msg = f"No hay handler implementado para la acción: {action_type}"
+                logger.warning(error_msg)
+                raise ValueError(error_msg)
+                
+        except Exception as e:
+            logger.error(f"Error procesando acción {action_type}: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "execution_time": time.time() - start_time
+            }
     
     async def _migration_loop(self):
         """Bucle principal de migración."""

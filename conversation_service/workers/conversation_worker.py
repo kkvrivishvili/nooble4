@@ -4,18 +4,19 @@ Worker mejorado para Domain Actions en Conversation Service.
 Implementación estandarizada con inicialización asíncrona y
 manejo robusto de acciones relacionadas con conversaciones.
 
-VERSIÓN: 2.0 - Adaptado al patrón improved_base_worker
+VERSIÓN: 4.0 - Adaptado al patrón BaseWorker con procesamiento directo
 """
 
 import logging
-from typing import Dict, Any
+import json
+from typing import Dict, Any, Optional
 
 from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
 from common.models.execution_context import ExecutionContext
 from common.services.domain_queue_manager import DomainQueueManager
 from conversation_service.models.actions_model import (
-    SaveMessageAction, GetContextAction, SessionClosedAction
+    SaveMessageAction, GetContextAction, SessionClosedAction, GetHistoryAction
 )
 from conversation_service.handlers.conversation_handler import ConversationHandler
 from conversation_service.services.conversation_service import ConversationService
@@ -63,9 +64,12 @@ class ConversationWorker(BaseWorker):
         if self.initialized:
             return
             
-        await self._initialize_handlers()
+        # Inicializar servicios requeridos
+        self.conversation_service = ConversationService(self.redis_client, self.db_client)
+        self.conversation_handler = ConversationHandler(self.conversation_service)
+        
         self.initialized = True
-        logger.info("ImprovedConversationWorker inicializado correctamente")
+        logger.info("ConversationWorker inicializado correctamente")
     
     async def start(self):
         """Extiende el start para asegurar inicialización."""
@@ -75,29 +79,39 @@ class ConversationWorker(BaseWorker):
         # Continuar con el comportamiento normal del BaseWorker
         await super().start()
         
-    async def _initialize_handlers(self):
-        """Inicializa todos los handlers y servicios necesarios."""
-        # Inicializar servicios
-        self.conversation_service = ConversationService(self.redis_client, self.db_client)
-        self.conversation_handler = ConversationHandler(self.conversation_service)
+    async def _handle_action(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
+        """
+        Implementa el método abstracto de BaseWorker para manejar acciones específicas
+        del dominio de conversation.
         
-        # Registrar handlers en el queue_manager
-        self.queue_manager.register_handler(
-            "conversation.save_message",
-            self.conversation_handler.handle_save_message
-        )
+        Args:
+            action: La acción a procesar
+            context: Contexto opcional de ejecución
+            
+        Returns:
+            Diccionario con el resultado del procesamiento
+            
+        Raises:
+            ValueError: Si no hay handler implementado para ese tipo de acción
+        """
+        action_type = action.action_type
         
-        self.queue_manager.register_handler(
-            "conversation.get_context", 
-            self.conversation_handler.handle_get_context
-        )
-        
-        self.queue_manager.register_handler(
-            "conversation.session_closed",
-            self.conversation_handler.handle_session_closed
-        )
-        
-        logger.info("ConversationWorker: Handlers inicializados")
+        if action_type == "conversation.save_message":
+            return await self.conversation_handler.handle_save_message(action, context)
+        elif action_type == "conversation.get_context":
+            return await self.conversation_handler.handle_get_context(action, context)
+        elif action_type == "conversation.session_closed":
+            return await self.conversation_handler.handle_session_closed(action, context)
+        elif action_type == "conversation.get_history":
+            result = await self.conversation_handler.handle_get_history(action, context)
+            # Para acciones con correlation_id, enviar la respuesta a una cola específica
+            if hasattr(action, 'correlation_id') and action.correlation_id:
+                await self._send_sync_response(action.correlation_id, result)
+            return result
+        else:
+            error_msg = f"No hay handler implementado para la acción: {action_type}"
+            logger.warning(error_msg)
+            raise ValueError(error_msg)
     
     def create_action_from_data(self, action_data: Dict[str, Any]) -> DomainAction:
         """
@@ -117,6 +131,8 @@ class ConversationWorker(BaseWorker):
             return GetContextAction.parse_obj(action_data)
         elif action_type == "conversation.session_closed":
             return SessionClosedAction.parse_obj(action_data)
+        elif action_type == "conversation.get_history":
+            return GetHistoryAction.parse_obj(action_data)
         else:
             # Fallback a DomainAction genérica
             return DomainAction.parse_obj(action_data)
@@ -138,7 +154,36 @@ class ConversationWorker(BaseWorker):
                 session_id=action.session_id,
                 data=result
             )
-            await self.enqueue_callback(callback_action, action.callback_queue)
+            await self.queue_manager.enqueue_to_specific_queue(
+                callback_action, action.callback_queue
+            )
+            
+    async def _send_sync_response(self, correlation_id: str, result: Dict[str, Any]):
+        """
+        Envía una respuesta síncrona a través de Redis para el patrón pseudo-síncrono.
+        
+        Esta función es clave para implementar el patrón de request-response sobre Redis.
+        El cliente que espera esta respuesta está bloqueando en la cola específica de
+        respuestas con este correlation_id.
+        
+        Args:
+            correlation_id: ID único que correlaciona solicitud y respuesta
+            result: Resultado a enviar como respuesta
+        """
+        try:
+            # Crear clave única para la cola de respuestas
+            response_queue = f"conversation:responses:{correlation_id}"
+            
+            # Serializar resultado
+            serialized_result = json.dumps(result)
+            
+            # Almacenar en Redis con TTL de 60 segundos (por si el cliente no lo recoge)
+            await self.redis_client.lpush(response_queue, serialized_result)
+            await self.redis_client.expire(response_queue, 60)  # TTL de 60 segundos
+            
+            logger.info(f"Respuesta enviada a cola {response_queue} con correlation_id {correlation_id}")
+        except Exception as e:
+            logger.error(f"Error enviando respuesta síncrona: {str(e)}")
     
     async def _send_error_callback(self, action_data: Dict[str, Any], error_message: str):
         """

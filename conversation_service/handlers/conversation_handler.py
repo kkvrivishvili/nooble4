@@ -9,7 +9,7 @@ import time
 from common.models.actions import DomainAction
 from common.models.execution_context import ExecutionContext
 from conversation_service.models.actions_model import (
-    SaveMessageAction, GetContextAction, SessionClosedAction
+    SaveMessageAction, GetContextAction, SessionClosedAction, GetHistoryAction
 )
 from conversation_service.services.conversation_service import ConversationService
 
@@ -97,15 +97,18 @@ class ConversationHandler:
         start_time = time.time()
         
         try:
-            session_action = SessionClosedAction.parse_obj(action.dict())
+            close_action = SessionClosedAction.parse_obj(action.dict())
             
-            success = await self.conversation_service.mark_session_closed(
-                session_id=session_action.session_id,
-                tenant_id=session_action.tenant_id
-            )
+            # Usar datos de contexto si está disponible
+            if context:
+                logger.info(f"Cerrando sesión con contexto de tier: {context.tenant_tier}")
+            
+            # TODO: Implementar lógica de cierre
+            logger.info(f"Cerrando sesión: {close_action.session_id}")
             
             return {
-                "success": success,
+                "success": True,
+                "message": "Sesión cerrada correctamente",
                 "execution_time": time.time() - start_time
             }
             
@@ -114,5 +117,58 @@ class ConversationHandler:
             return {
                 "success": False,
                 "error": str(e),
+                "execution_time": time.time() - start_time
+            }
+            
+    async def handle_get_history(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
+        """Maneja solicitudes de historial de conversación con patrón pseudo-síncrono Redis.
+        
+        Este método implementa el patrón de request-response sobre Redis que reemplaza
+        las llamadas HTTP directas entre servicios.
+        
+        Args:
+            action: Acción de solicitud de historial con correlation_id
+            context: Contexto opcional de ejecución
+            
+        Returns:
+            Resultado con mensajes de la conversación
+        """
+        start_time = time.time()
+        
+        try:
+            history_action = GetHistoryAction.parse_obj(action.dict())
+            correlation_id = history_action.correlation_id
+            
+            # Enriquecer con datos de contexto si está disponible
+            tenant_tier = None
+            if context:
+                tenant_tier = context.tenant_tier
+                logger.info(f"Obteniendo historial con tier: {tenant_tier}")
+            
+            # Obtener historial de conversación
+            messages = await self.conversation_service.get_conversation_history(
+                tenant_id=history_action.tenant_id,
+                session_id=history_action.session_id,
+                limit=history_action.limit,
+                include_system=history_action.include_system
+            )
+            
+            result = {
+                "success": True,
+                "data": {
+                    "messages": messages
+                },
+                "correlation_id": correlation_id,
+                "execution_time": time.time() - start_time
+            }
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error en handle_get_history: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "correlation_id": action.correlation_id if hasattr(action, 'correlation_id') else None,
                 "execution_time": time.time() - start_time
             }

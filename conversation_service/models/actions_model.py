@@ -49,3 +49,23 @@ class SessionClosedAction(DomainAction):
     
     def get_action_name(self) -> str:
         return "session_closed"
+
+class GetHistoryAction(DomainAction):
+    """Domain Action para solicitar historial de conversación.
+    
+    Esta acción es parte del patrón pseudo-síncrono sobre Redis que reemplaza
+    las comunicaciones HTTP directas entre servicios.
+    """
+    
+    action_type: str = Field("conversation.get_history", description="Tipo de acción")
+    
+    # Parámetros de la solicitud
+    limit: int = Field(10, description="Número máximo de mensajes a devolver")
+    include_system: bool = Field(False, description="Si incluir mensajes del sistema")
+    correlation_id: str = Field(..., description="ID de correlación para asociar solicitud y respuesta")
+    
+    def get_domain(self) -> str:
+        return "conversation"
+    
+    def get_action_name(self) -> str:
+        return "get_history"

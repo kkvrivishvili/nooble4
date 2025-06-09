@@ -11,7 +11,7 @@ import json
 import asyncio
 from uuid import uuid4
 
-from agent_orchestrator_service.models.actions import (
+from agent_orchestrator_service.models.actions_model import (
     WebSocketSendAction, WebSocketBroadcastAction,
     ChatProcessAction, ChatStatusAction, ChatCancelAction
 )

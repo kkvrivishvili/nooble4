@@ -19,8 +19,7 @@ from common.models.execution_context import ExecutionContext
 from common.redis_pool import get_redis_client
 from agent_execution_service.config.settings import get_settings
 
-# Importamos los modelos específicos de acciones
-from query_service.models.actions import QueryGenerateAction, SearchDocsAction
+# Los modelos de acciones se crean localmente en el método
 
 logger = logging.getLogger(__name__)
 settings = get_settings()

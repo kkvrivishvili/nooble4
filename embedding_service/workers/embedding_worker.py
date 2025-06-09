@@ -1,14 +1,15 @@
 """
-Worker mejorado para Domain Actions en Embedding Service.
+Worker para Domain Actions en Embedding Service.
 
 Implementación estandarizada con inicialización asíncrona y
-manejo robusto de acciones de generación de embeddings.
+manejo robusto de acciones de generación de embeddings siguiendo
+el patrón BaseWorker 4.0 con procesamiento directo de acciones.
 
-VERSIÓN: 2.0 - Adaptado al patrón improved_base_worker
+VERSIÓN: 4.0 - Actualizado al patrón BaseWorker con _handle_action
 """
 
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
@@ -25,13 +26,15 @@ settings = get_settings()
 
 class EmbeddingWorker(BaseWorker):
     """
-    Worker mejorado para procesar Domain Actions de embeddings.
+    Worker para procesar Domain Actions de embeddings siguiendo el patrón BaseWorker 4.0.
     
     Características:
+    - Implementa completamente el patrón BaseWorker 4.0 con _handle_action
     - Inicialización asíncrona robusta
     - Procesamiento de embeddings por tier
     - Manejo detallado de callbacks
     - Estadísticas avanzadas
+    - Sin registro de handlers obsoleto
     """
     
     def __init__(self, redis_client, queue_manager=None):
@@ -59,9 +62,11 @@ class EmbeddingWorker(BaseWorker):
         if self.initialized:
             return
             
-        await self._initialize_handlers()
+        # Inicializar handlers necesarios sin registrarlos
+        await self._initialize_components()
+        
         self.initialized = True
-        logger.info("ImprovedEmbeddingWorker inicializado correctamente")
+        logger.info("EmbeddingWorker 4.0 inicializado correctamente")
     
     async def start(self):
         """Extiende el start para asegurar inicialización."""
@@ -71,8 +76,8 @@ class EmbeddingWorker(BaseWorker):
         # Continuar con el comportamiento normal del BaseWorker
         await super().start()
         
-    async def _initialize_handlers(self):
-        """Inicializa todos los handlers necesarios."""
+    async def _initialize_components(self):
+        """Inicializa todos los componentes necesarios sin registrar handlers."""
         # Context handler
         self.context_handler = await get_embedding_context_handler(self.redis_client)
         
@@ -86,18 +91,53 @@ class EmbeddingWorker(BaseWorker):
             self.context_handler, self.redis_client
         )
         
-        # Registrar handlers en el queue_manager
-        self.queue_manager.register_handler(
-            "embedding.generate",
-            self._handle_embedding_generate
-        )
+        # Ya no registramos handlers en el queue_manager - todo se procesa vía _handle_action
         
-        self.queue_manager.register_handler(
-            "embedding.validate",
-            self._handle_embedding_validate
-        )
+        logger.info("EmbeddingWorker: Componentes inicializados")
+    
+    async def _handle_action(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
+        """
+        Procesa acciones de dominio centralizadamente siguiendo el patrón BaseWorker 4.0.
         
-        logger.info("EmbeddingWorker: Handlers inicializados")
+        Este método reemplaza el registro de handlers y centraliza todo el procesamiento
+        de acciones, mejorando la coherencia arquitectónica.
+        
+        Args:
+            action: Acción de dominio a procesar
+            context: Contexto de ejecución opcional
+            
+        Returns:
+            Resultado del procesamiento de la acción
+            
+        Raises:
+            ValueError: Si la acción no está soportada
+        """
+        if not self.initialized:
+            await self.initialize()
+            
+        action_type = action.action_type
+        
+        try:
+            if action_type == "embedding.generate":
+                return await self._handle_embedding_generate(action, context)
+                
+            elif action_type == "embedding.validate":
+                return await self._handle_embedding_validate(action, context)
+                
+            elif action_type == "embedding.callback":
+                return await self._handle_embedding_callback(action, context)
+                
+            else:
+                error_msg = f"No hay handler implementado para la acción: {action_type}"
+                logger.warning(error_msg)
+                raise ValueError(error_msg)
+                
+        except Exception as e:
+            logger.error(f"Error procesando acción {action_type}: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
     
     async def _handle_embedding_generate(self, action: DomainAction, context: ExecutionContext = None) -> Dict[str, Any]:
         """

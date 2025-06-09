@@ -4,7 +4,7 @@ Worker mejorado para Domain Actions en Agent Execution Service.
 Implementación estandarizada con inicialización asíncrona y
 manejo robusto de callbacks y acciones de ejecución.
 
-VERSIÓN: 2.0 - Adaptado al patrón improved_base_worker
+VERSIÓN: 4.0 - Adaptado al patrón BaseWorker con procesamiento directo
 """
 
 import logging
@@ -16,8 +16,8 @@ from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
 from common.services.domain_queue_manager import DomainQueueManager
 from common.models.execution_context import ExecutionContext
-from agent_execution_service.models.actions import (
-    AgentRunAction, ExecutionCallbackAction
+from agent_execution_service.models.actions_model import (
+    AgentExecutionAction, ExecutionCallbackAction
 )
 from agent_execution_service.handlers.execution_handler import AgentExecutionHandler
 from agent_execution_service.handlers.context_handler import get_context_handler
@@ -67,70 +67,7 @@ class ExecutionWorker(BaseWorker):
         if self.initialized:
             return
             
-        await self._initialize_handlers()
-        self.initialized = True
-        logger.info("ImprovedExecutionWorker inicializado correctamente")
-    
-    async def start(self):
-        """Procesa acciones de ejecución y callbacks de forma directa."""
-        # Asegurar inicialización antes de procesar acciones
-        await self.initialize()
-        self.running = True
-        
-        # Definir las colas que monitorearemos
-        action_queues = [
-            f"{self.domain}:{tenant_id}:actions" 
-            for tenant_id in settings.supported_tenants
-        ]
-        callback_queues = [
-            "embedding:callbacks",
-            "query:callbacks"
-        ]
-        all_queues = action_queues + callback_queues
-        
-        logger.info(f"Escuchando en colas: {all_queues}")
-        
-        while self.running:
-            try:
-                # Escuchar con timeout en todas las colas
-                result = await self.redis_client.brpop(all_queues, timeout=5)
-                
-                if result:
-                    queue_name, action_data = result
-                    action_dict = json.loads(action_data)
-                    action_type = action_dict.get("action_type")
-                    
-                    # Convertir a objeto de acción adecuado
-                    action = self.create_action_from_data(action_dict)
-                    
-                    # Extraer contexto si existe
-                    context = None
-                    if hasattr(action, 'execution_context') and action.execution_context:
-                        context = ExecutionContext(
-                            tenant_id=action.tenant_id,
-                            tenant_tier=action.tenant_tier if hasattr(action, 'tenant_tier') else "standard",
-                            session_id=action.session_id if hasattr(action, 'session_id') else None
-                        )
-                    
-                    # Procesar según tipo de acción
-                    if action_type == "execution.agent_run":
-                        logger.info(f"Procesando ejecución de agente: {action.task_id}")
-                        await self._handle_agent_execution(action, context)
-                    elif action_type == "embedding.callback":
-                        logger.info(f"Procesando callback de embedding: {action.task_id}")
-                        await self.embedding_callback_handler.handle_embedding_callback(action, context)
-                    elif action_type == "query.callback":
-                        logger.info(f"Procesando callback de query: {action.task_id}")
-                        await self.query_callback_handler.handle_query_callback(action, context)
-                    else:
-                        logger.warning(f"Acción no soportada: {action_type}")
-            
-            except Exception as e:
-                logger.error(f"Error en execution worker: {str(e)}")
-                await asyncio.sleep(1)
-    
-    async def _initialize_handlers(self):
-        """Inicializa todos los handlers necesarios."""
+        # Inicializar servicios y handlers necesarios
         # Context handler
         self.context_handler = await get_context_handler(self.redis_client)
         
@@ -148,10 +85,113 @@ class ExecutionWorker(BaseWorker):
         self.embedding_callback_handler = EmbeddingCallbackHandler()
         self.query_callback_handler = QueryCallbackHandler()
         
-        # El worker ya no registra handlers con queue_manager
-        # Las acciones se procesanán directamente en el método start()
+        # Definir las colas adicionales para callbacks
+        self.callback_queues = [
+            "embedding:callbacks",
+            "query:callbacks"
+        ]
+        
+        self.initialized = True
+        logger.info("ExecutionWorker inicializado correctamente")
+    
+    async def start(self):
+        """Extiende el método start para monitorear colas adicionales."""
+        # Asegurar inicialización antes de procesar acciones
+        await self.initialize()
+        
+        # Iniciar procesamiento estándar
+        await super().start()
+    
+    async def _process_action_loop(self):
+        """Sobrescribe el loop de procesamiento para incluir colas adicionales."""
+        self.running = True
+        
+        # Combinar colas estándar con colas de callback
+        action_queues = [
+            f"{self.domain}:{tenant_id}:actions" 
+            for tenant_id in settings.supported_tenants
+        ]
+        all_queues = action_queues + self.callback_queues
+        
+        logger.info(f"Escuchando en colas: {all_queues}")
+        
+        while self.running:
+            try:
+                # Escuchar con timeout en todas las colas
+                result = await self.redis_client.brpop(all_queues, timeout=5)
+                
+                if result:
+                    queue_name, action_data = result
+                    action_dict = json.loads(action_data)
+                    
+                    # Convertir a objeto de acción
+                    action = self.create_action_from_data(action_dict)
+                    
+                    # Extraer contexto si existe
+                    context = None
+                    if hasattr(action, 'execution_context') and action.execution_context:
+                        context = ExecutionContext(
+                            tenant_id=action.tenant_id,
+                            tenant_tier=action.tenant_tier if hasattr(action, 'tenant_tier') else "standard",
+                            session_id=action.session_id if hasattr(action, 'session_id') else None
+                        )
+                    
+                    # Procesar la acción con el método centralizado
+                    await self._handle_action(action, context)
+            
+            except asyncio.CancelledError:
+                logger.info("Procesamiento de acciones cancelado")
+                self.running = False
+                break
+            except Exception as e:
+                logger.error(f"Error en execution worker: {str(e)}")
+                await asyncio.sleep(1)
         
         logger.info("ExecutionWorker: Handlers inicializados")
+    
+    async def _handle_action(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
+        """
+        Implementa el método abstracto de BaseWorker para manejar acciones específicas
+        del dominio de execution.
+        
+        Args:
+            action: La acción a procesar
+            context: Contexto opcional de ejecución
+            
+        Returns:
+            Diccionario con el resultado del procesamiento
+            
+        Raises:
+            ValueError: Si no hay handler implementado para ese tipo de acción
+        """
+        if not self.initialized:
+            await self.initialize()
+            
+        action_type = action.action_type
+        
+        try:
+            if action_type == "execution.agent_run":
+                logger.info(f"Procesando ejecución de agente: {action.task_id}")
+                return await self._handle_agent_execution(action, context)
+            elif action_type == "embedding.callback":
+                logger.info(f"Procesando callback de embedding: {action.task_id}")
+                return await self.embedding_callback_handler.handle_embedding_callback(action, context)
+            elif action_type == "query.callback":
+                logger.info(f"Procesando callback de query: {action.task_id}")
+                return await self.query_callback_handler.handle_query_callback(action, context)
+            else:
+                error_msg = f"No hay handler implementado para la acción: {action_type}"
+                logger.warning(error_msg)
+                raise ValueError(error_msg)
+        except Exception as e:
+            logger.error(f"Error procesando acción {action_type}: {str(e)}")
+            return {
+                "success": False,
+                "error": {
+                    "type": type(e).__name__,
+                    "message": str(e)
+                }
+            }
     
     async def _handle_agent_execution(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
         """
@@ -170,7 +210,7 @@ class ExecutionWorker(BaseWorker):
                 await self.initialize()
             
             # Convertir a tipo específico
-            agent_action = AgentRunAction.parse_obj(action.dict())
+            agent_action = AgentExecutionAction.parse_obj(action.dict())
             
             # Enriquecer acción con contexto si está disponible
             if context:

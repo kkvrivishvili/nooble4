@@ -130,7 +130,7 @@ async def send_message(
         task_id = str(uuid4())
         
         # 3. Crear callback queue específico para este tenant
-        callback_queue = f"{settings.callback_queue_prefix}:{headers['tenant_id']}:callbacks"
+        callback_queue = f"orchestrator:{headers['tenant_id']}:callbacks"
         
         # 4. Crear acción de procesamiento
         process_action = ChatProcessAction(

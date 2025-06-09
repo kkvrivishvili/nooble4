@@ -101,8 +101,9 @@ class OrchestratorWorker(BaseWorker):
         """Procesa callbacks directamente de las colas specificas."""
         while self.running:
             try:
-                # Buscar todas las colas de callback activas
-                callback_queues = await self.redis_client.keys("orchestrator:*:callbacks")
+                # Obtener lista de tenants activos de configuración
+                tenant_ids = settings.get("active_tenants", ["*"])
+                callback_queues = [f"orchestrator:{tenant_id}:callbacks" for tenant_id in tenant_ids]
                 
                 if callback_queues:
                     # Escuchar con timeout en todas las colas

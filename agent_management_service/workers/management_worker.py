@@ -4,7 +4,7 @@ Worker mejorado para Agent Management Service.
 Implementación estandarizada con inicialización asíncrona y
 manejo de validación de agentes y cache.
 
-VERSIÓN: 2.0 - Adaptado al patrón improved_base_worker
+VERSIÓN: 4.0 - Adaptado al patrón BaseWorker con procesamiento directo
 """
 
 import logging

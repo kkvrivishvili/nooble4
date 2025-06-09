@@ -1,5 +1,7 @@
 # Conversation Service - Implementación Completa
 
+> **ACTUALIZACIÓN**: Se ha migrado toda la comunicación entre servicios de HTTP directo al patrón pseudo-síncrono sobre Redis. Todos los clientes y workers ahora implementan el patrón BaseWorker 4.0.
+
 ## 🎯 Visión General
 
 El Conversation Service es el núcleo de memoria conversacional del sistema Nooble, diseñado para manejar conversaciones activas con integración LangChain y persistencia híbrida Redis + PostgreSQL.
