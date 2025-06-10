@@ -1,7 +1,9 @@
 """
 Agent Executor - Orquestador principal de ejecución de agentes.
 
-Coordina la ejecución de agentes usando LangChain y servicios externos.
+Este módulo estaba originalmente diseñado para coordinar la ejecución de agentes 
+usando LangChain. Actualmente, la integración con LangChain ha sido eliminada.
+Se requiere una nueva implementación si se desea funcionalidad de ejecución de agentes.
 """
 
 import logging
@@ -11,7 +13,7 @@ from datetime import datetime
 
 from common.models.execution_context import ExecutionContext
 from agent_execution_service.models.execution_model import ExecutionResult, ExecutionStatus
-from agent_execution_service.services.langchain_integrator import LangChainIntegrator
+
 from agent_execution_service.handlers.context_handler import ExecutionContextHandler
 from agent_execution_service.config.settings import get_settings
 
@@ -23,8 +25,9 @@ class AgentExecutor:
     """
     Ejecutor principal de agentes.
     
-    Coordina la ejecución usando LangChain y maneja la integración
-    con servicios externos como embeddings y query.
+    Originalmente coordinaba la ejecución usando LangChain.
+    Tras la eliminación de LangChain, este ejecutor necesita ser reimplementado
+    o su funcionalidad redefinida.
     """
     
     def __init__(self, context_handler: ExecutionContextHandler, redis_client=None):
@@ -38,8 +41,7 @@ class AgentExecutor:
         self.context_handler = context_handler
         self.redis = redis_client
         
-        # Inicializar integrador de LangChain
-        self.langchain_integrator = LangChainIntegrator(redis_client)
+        # La integración con LangChain ha sido eliminada.
     
     async def execute_agent(
         self,
@@ -89,40 +91,20 @@ class AgentExecutor:
                 context, agent_config, max_iterations
             )
             
-            # Ejecutar con LangChain
-            langchain_result = await self.langchain_integrator.execute_agent(
-                agent_config=agent_config,
-                message=message,
-                conversation_history=conversation_history or [],
-                user_info=user_info or {},
-                execution_context=context,
-                **execution_params
+            logger.error(
+                f"Intento de ejecutar agente {context.primary_agent_id} sin una implementación de LangChainIntegrator. "
+                "La ejecución de agentes basada en Langchain ha sido eliminada o no está configurada."
             )
             
-            # Procesar resultado
-            execution_result.status = ExecutionStatus.COMPLETED
-            execution_result.response = langchain_result.get("response", "")
-            execution_result.tool_calls = langchain_result.get("tool_calls", [])
-            execution_result.sources = langchain_result.get("sources", [])
-            execution_result.iterations_used = langchain_result.get("iterations_used", 1)
-            execution_result.tokens_used = langchain_result.get("tokens_used")
+            execution_result.status = ExecutionStatus.FAILED
+            execution_result.error = {
+                "type": "NotImplementedError",
+                "message": "La funcionalidad de ejecución de agentes (previamente basada en Langchain) no está implementada."
+            }
             execution_result.completed_at = datetime.utcnow()
             execution_result.execution_time = (
                 execution_result.completed_at - start_time
             ).total_seconds()
-            
-            # Actualizar información del agente con métricas
-            execution_result.agent_info.update({
-                "model_used": langchain_result.get("model_used"),
-                "input_tokens": langchain_result.get("input_tokens", 0),
-                "output_tokens": langchain_result.get("output_tokens", 0),
-                "total_tokens": langchain_result.get("total_tokens", 0)
-            })
-            
-            logger.info(
-                f"Agente ejecutado exitosamente: {context.primary_agent_id}, "
-                f"tiempo={execution_result.execution_time:.2f}s"
-            )
             
             return execution_result
             
