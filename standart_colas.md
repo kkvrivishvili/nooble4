@@ -66,11 +66,30 @@ Se propone la siguiente estructura de nomenclatura, que expande y formaliza las 
 ### 4.1. Patrón Pseudo-Síncrono
 
 *   **Flujo**:
-    1.  El Cliente (ej. en AES) envía `DomainAction` (con `correlation_id` generado) a la cola `{prefijo}:{tipo_servicio_destino}:actions`.
-    2.  El Cliente (ej. en AES) realiza `BLPOP` en la cola `{prefijo}:{tipo_servicio_destino}:responses:{action_name}:{correlation_id}`.
-    3.  El Worker del servicio destino procesa la acción y envía la `DomainActionResponse` a la cola de respuesta específica.
-*   **Ventajas**: Simple de implementar para el cliente.
-*   **Consideraciones**: El cliente se bloquea. Usar timeouts en `BLPOP`.
+    1.  El **Cliente** (ej. `ServiceA` llamando a `ServiceB`):
+        *   Genera un `action_id` (nuevo UUID), `correlation_id` (nuevo UUID para este request-response), y `trace_id` (propagar si existe, o nuevo UUID).
+        *   Define su propia cola de respuesta única: `client_response_queue = "nooble4:dev:serviceA:responses:{action_type_short}:{correlation_id}"`.
+        *   Construye `DomainAction` con:
+            *   `action_id`, `action_type` (ej. `serviceB.entity.verb`)
+            *   `correlation_id`, `trace_id`
+            *   `origin_service` (nombre de `ServiceA`)
+            *   `callback_queue_name = client_response_queue` (para que `ServiceB` sepa dónde responder)
+            *   `data` (payload de la solicitud)
+        *   Envía esta `DomainAction` a la cola de acciones de `ServiceB` (ej. `nooble4:dev:serviceB:actions`).
+    2.  El **Cliente** (`ServiceA`) inmediatamente realiza `BLPOP` en su `client_response_queue` (con un timeout).
+    3.  El **Worker de `ServiceB`**:
+        *   Recibe la `DomainAction`.
+        *   Procesa la acción.
+        *   Construye `DomainActionResponse` con:
+            *   `success` (True/False)
+            *   `correlation_id` (copiado del `DomainAction` original)
+            *   `trace_id` (copiado del `DomainAction` original)
+            *   `action_type_response_to` (el `action_type` del `DomainAction` original)
+            *   `data` (payload de la respuesta) o `error` (modelo `ErrorDetail`).
+        *   Envía esta `DomainActionResponse` a la cola especificada en `original_action.callback_queue_name`.
+    4.  El **Cliente** (`ServiceA`) recibe la `DomainActionResponse` de su `BLPOP`.
+*   **Ventajas**: Comportamiento similar a una llamada de función síncrona para el cliente.
+*   **Consideraciones**: El cliente se bloquea. Es crucial usar timeouts en `BLPOP`.
 
 ### 4.2. Patrón Asíncrono Fire-and-Forget
 
@@ -82,34 +101,59 @@ Se propone la siguiente estructura de nomenclatura, que expande y formaliza las 
 
 ### 4.3. Patrón Asíncrono con Callbacks (Reemplazando HTTP y Estandarizando)
 
-Este patrón es crucial para tareas de larga duración donde el bloqueo no es viable (ej. ingesta y embedding de documentos), como se evidencia en `ingestion_embedding_communication.md` y flujos complejos en `inter_service_flow_communications.md`.
+Este patrón es crucial para tareas de larga duración donde el bloqueo no es viable (ej. ingesta y embedding de documentos).
 
-*   **Flujo (Ej. Ingestion -> Embedding -> Ingestion)**:
-    1.  **IngestionService (Cliente de EmbeddingService)**:
-        *   Genera un `correlation_id` (o `task_id` si se prefiere ese término internamente para la tarea) único para la operación de embedding completa.
-        *   Define el nombre de la cola donde esperará el callback: `nooble4:dev:ingestion_service:callbacks:embedding:{correlation_id_o_task_id}`. (Ver sección de nomenclatura).
-        *   Envía una `DomainAction` (ej. `embedding.generate_batch`) a la cola de acciones de EmbeddingService (ej. `nooble4:dev:embedding:actions`). 
-        *   El payload (`DomainAction.data`) de esta acción **DEBE** incluir:
-            *   `callback_queue_name`: El nombre de la cola donde IngestionService espera la respuesta.
-            *   El `correlation_id` (o `task_id`) original para que EmbeddingService lo incluya en su respuesta de callback, permitiendo a IngestionService correlacionar el callback con la solicitud original.
-            *   Los datos necesarios para la tarea de embedding (textos, etc.).
-    2.  **EmbeddingService (Worker)**:
-        *   Recibe y procesa la solicitud `embedding.generate_batch`.
-        *   Una vez completada la generación de embeddings (o si ocurre un error), construye un nuevo `DomainAction` (que actúa como mensaje de callback).
-        *   Este `DomainAction` de callback **DEBE** incluir en su payload (`DomainAction.data`):
-            *   El `correlation_id` (o `task_id`) original que recibió de IngestionService.
-            *   Los resultados del embedding o los detalles del error.
-        *   Envía este `DomainAction` de callback a la `callback_queue_name` que fue proporcionada en la solicitud original.
-    3.  **IngestionService (Worker que escucha en su cola de callbacks)**:
-        *   Recibe el mensaje de callback en `nooble4:dev:ingestion_service:callbacks:embedding:{correlation_id_o_task_id}`.
-        *   Utiliza el `correlation_id` (o `task_id`) del payload del callback para asociarlo con la tarea de ingesta original.
-        *   Procesa el resultado (embeddings o error).
-*   **Ventajas**: No bloqueante, adecuado para operaciones largas, desacoplado, permite seguimiento claro de la operación extremo a extremo mediante el `correlation_id`.
+*   **Flujo (Ej. `ServiceA` solicita una tarea a `ServiceB` y espera un callback)**:
+    1.  **`ServiceA` (Cliente de `ServiceB`)**:
+        *   Genera `action_id` (nuevo UUID para la solicitud), `correlation_id` (nuevo UUID para correlacionar esta solicitud con su futuro callback), y `trace_id` (propagar o nuevo).
+        *   Define la cola donde esperará el callback: `client_callback_queue = "nooble4:dev:serviceA:callbacks:serviceB_task_result:{correlation_id}"`.
+        *   Define el tipo de acción que espera en el callback: `expected_callback_action_type = "serviceB.task.completed"`.
+        *   Construye la `DomainAction` de solicitud con:
+            *   `action_id`, `action_type` (ej. `serviceB.task.start`)
+            *   `correlation_id` (el generado arriba)
+            *   `trace_id`
+            *   `origin_service` (nombre de `ServiceA`)
+            *   `callback_queue_name = client_callback_queue`
+            *   `callback_action_type = expected_callback_action_type`
+            *   `data` (payload para la tarea de `ServiceB`)
+        *   Envía esta `DomainAction` a la cola de acciones de `ServiceB` (ej. `nooble4:dev:serviceB:actions`).
+        *   `ServiceA` guarda el `correlation_id` para poder identificar el callback cuando llegue.
+    2.  **`ServiceB` (Worker)**:
+        *   Recibe y procesa la solicitud `serviceB.task.start`.
+        *   Realiza la tarea de larga duración.
+    3.  **`ServiceB` (Handler, una vez completada la tarea)**:
+        *   Construye un *nuevo* `DomainAction` (el mensaje de callback) con:
+            *   `action_id` (nuevo UUID para este mensaje de callback)
+            *   `action_type` (el `callback_action_type` recibido en la solicitud original, ej. `serviceB.task.completed`)
+            *   `correlation_id` (el `correlation_id` de la solicitud original, **crucial para la correlación por `ServiceA`**)
+            *   `trace_id` (propagado de la solicitud original)
+            *   `origin_service` (nombre de `ServiceB`, ya que es el origen de *este* mensaje de callback)
+            *   `data` (los resultados de la tarea o detalles del error, como un modelo Pydantic serializado).
+            *   `callback_queue_name` y `callback_action_type` son `None` en este mensaje de callback, a menos que este callback a su vez espere otro callback (encadenamiento).
+        *   Envía este `DomainAction` de callback a la `callback_queue_name` que fue proporcionada en la solicitud original (ej. `nooble4:dev:serviceA:callbacks:serviceB_task_result:{original_correlation_id}`).
+    4.  **`ServiceA` (Worker que escucha en su `client_callback_queue`)**:
+        *   Recibe el `DomainAction` de callback.
+        *   Extrae el `correlation_id` del mensaje de callback.
+        *   Usa este `correlation_id` para asociar el callback con la solicitud original que `ServiceA` envió.
+        *   Procesa los resultados o el error del `data` del callback.
+*   **Ventajas**: No bloqueante, adecuado para operaciones largas, desacoplado, permite seguimiento claro.
 *   **Reemplazo de HTTP (Caso `IngestionService -> EmbeddingService`)**:
     *   La comunicación actual (HTTP POST para solicitud, Redis para callback) se unifica completamente a Redis.
-    *   **Solicitud**: `IngestionService` (cliente) envía `DomainAction` a `nooble4:dev:embedding:actions`. El `DomainAction.data` incluye `callback_queue_name` (ej. `nooble4:dev:ingestion_service:callbacks:embedding:corr123`) y `correlation_id: "corr123"`.
-    *   **Respuesta (Callback)**: `EmbeddingService` envía un `DomainAction` (tipo `embedding.batch_completed` o similar) a la `callback_queue_name` especificada. El `DomainAction.data` de este callback incluye `correlation_id: "corr123"` y los resultados.
-    *   Esto elimina la necesidad del endpoint HTTP `POST /api/v1/embeddings/generate` para esta comunicación interna, haciendo el flujo más homogéneo y observable dentro del ecosistema Redis.
+    *   **Solicitud (`IngestionService` a `EmbeddingService`)**: `IngestionService` envía `DomainAction` a `nooble4:dev:embedding:actions`.
+        *   `action_type`: `embedding.generate_batch`
+        *   `correlation_id`: `corr123` (generado por Ingestion)
+        *   `trace_id`: `trace789`
+        *   `origin_service`: `IngestionService`
+        *   `callback_queue_name`: `nooble4:dev:ingestion_service:callbacks:embedding_result:corr123`
+        *   `callback_action_type`: `embedding.batch.generated` (o `embedding.batch.completed`)
+        *   `data`: `{ "texts": [...], ... }`
+    *   **Respuesta (Callback de `EmbeddingService` a `IngestionService`)**: `EmbeddingService` envía un *nuevo* `DomainAction` a la `callback_queue_name` (`nooble4:dev:ingestion_service:callbacks:embedding_result:corr123`).
+        *   `action_type`: `embedding.batch.generated` (el `callback_action_type` de la solicitud)
+        *   `correlation_id`: `corr123` (el `correlation_id` de la solicitud original)
+        *   `trace_id`: `trace789` (propagado)
+        *   `origin_service`: `EmbeddingService`
+        *   `data`: `{ "results": [...], "status": "success" }` o `{ "error": {...}, "status": "failure" }`
+    *   Esto elimina la necesidad del endpoint HTTP `POST /api/v1/embeddings/generate` para esta comunicación interna.
 
 ## 5. Gestión de Colas y Workers
 
