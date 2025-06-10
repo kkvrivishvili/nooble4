@@ -19,7 +19,7 @@ Las recomendaciones se basan en el análisis de la documentación existente (`in
 *   **Propuesta**: Crear una clase `BaseRedisClient` en un módulo común (ej. `nooble4.common.clients.base_redis_client`).
 *   **Responsabilidades de `BaseRedisClient`**:
     *   Gestión de la conexión a Redis (reutilizando instancias si es posible).
-    *   Serialización y deserialización de objetos `DomainAction` (preferiblemente usando Pydantic models para la validación y estructura de `data`).
+    *   Serialización y deserialización de objetos `DomainAction` usando Pydantic models para la validación y estructura de `data`).
     *   Lógica para publicar `DomainAction` a colas de solicitud específicas.
     *   Implementación del **patrón pseudo-síncrono**:
         *   Generación automática de `correlation_id` (UUID).
