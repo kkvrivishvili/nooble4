@@ -7,11 +7,6 @@ pydantic==2.10.6
 redis==5.0.0
 python-dotenv==1.0.1
 
-# LangChain para memoria conversacional
-langchain==0.1.0
-langchain-community==0.0.10
-langchain-core==0.1.0
-
 # Supabase (preparado para cuando esté auth)
 supabase==2.3.0
 
