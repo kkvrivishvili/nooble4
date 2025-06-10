@@ -19,7 +19,7 @@ from common.models.execution_context import ExecutionContext
 from agent_execution_service.models.actions_model import (
     AgentExecutionAction, ExecutionCallbackAction
 )
-from agent_execution_service.handlers.execution_handler import AgentExecutionHandler
+from agent_execution_service.handlers.agent_execution_handler import AgentExecutionHandler
 from agent_execution_service.handlers.context_handler import get_context_handler
 from agent_execution_service.handlers.execution_callback_handler import ExecutionCallbackHandler
 from agent_execution_service.handlers.embedding_callback_handler import EmbeddingCallbackHandler
@@ -267,7 +267,7 @@ class ExecutionWorker(BaseWorker):
         action_type = action_data.get("action_type")
         
         if action_type == "execution.agent_run":
-            return AgentRunAction.parse_obj(action_data)
+            return AgentExecutionAction.parse_obj(action_data)
         elif action_type == "execution.callback":
             return ExecutionCallbackAction.parse_obj(action_data)
         else:

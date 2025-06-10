@@ -16,7 +16,8 @@ from typing import Dict, Any, Optional
 from common.models.execution_context import ExecutionContext
 
 from common.models.actions import DomainAction
-from query_service.models.actions import QueryCallbackAction
+# Usando DomainAction genérico en lugar de modelo especializado
+# from query_service.models.actions import QueryCallbackAction
 from agent_execution_service.config.settings import get_settings
 
 logger = logging.getLogger(__name__)

@@ -65,7 +65,7 @@ class QueryClient:
         Este método debe llamarse antes de usar cualquier otra función del cliente.
         """
         if not self.initialized:
-            self.redis_client = get_redis_client(settings.redis_url)
+            self.redis_client = await get_redis_client(settings.redis_url)
             if not self.queue_manager:
                 self.queue_manager = DomainQueueManager(self.redis_client)
             

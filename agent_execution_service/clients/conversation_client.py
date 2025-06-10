@@ -16,7 +16,7 @@ import asyncio
 from typing import List, Dict, Any, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from config.settings import get_settings
+from agent_execution_service.config.settings import get_settings
 from common.models.actions import DomainAction
 from common.services.redis_client import get_redis_client
 from common.services.domain_queue_manager import DomainQueueManager

@@ -35,6 +35,7 @@ class ExecutionContext:
     context_type: str  # "agent", "workflow", "collection"
     tenant_id: str
     tenant_tier: str   # "free", "advance", "professional", "enterprise"
+    session_id: Optional[str] = None
     primary_agent_id: str
     agents: List[str]
     collections: List[str]
