@@ -32,7 +32,6 @@ Este es el objeto enviado por un cliente a un servicio o por un servicio a una c
         # --- Contexto de Negocio y Enrutamiento ---
         # Estos campos son cruciales y deben ser propagados consistentemente.
         tenant_id: Optional[str] = Field(None, description="Identificador del tenant al que pertenece esta acción.")
-        user_id: Optional[str] = Field(None, description="Identificador del usuario que originó la acción, si aplica.")
         session_id: Optional[str] = Field(None, description="Identificador de la sesión de conversación, si la acción es parte de una.")
         
         # --- Información de Origen y Seguimiento ---
@@ -86,10 +85,11 @@ Este es el objeto enviado por un servicio de vuelta al cliente en la cola de res
         # upstream_error: Optional[Dict[str, Any]] = Field(None, description="Si el error se originó en un servicio externo, aquí se pueden incluir detalles de ese error.")
 
     class DomainActionResponse(BaseModel):
-        action_id: uuid.UUID = Field(..., description="ID de la DomainAction original a la que esta respuesta corresponde.")
-        correlation_id: uuid.UUID = Field(..., description="DEBE coincidir con el correlation_id de la DomainAction original.")
-        trace_id: uuid.UUID = Field(..., description="DEBE coincidir con el trace_id de la DomainAction original.")
-        
+        action_id: uuid.UUID = Field(default_factory=uuid.uuid4, description="Identificador único de este mensaje de respuesta.")
+        correlation_id: uuid.UUID = Field(..., description="ID de correlación de la DomainAction original para que el cliente pueda emparejar la respuesta.")
+        trace_id: uuid.UUID = Field(..., description="ID de rastreo de la DomainAction original para mantener la observabilidad end-to-end.")
+        action_type_response_to: str = Field(..., description="El 'action_type' de la solicitud original, para claridad del cliente.")
+
         success: bool = Field(..., description="Indica si la acción fue procesada exitosamente.")
         timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Timestamp UTC de creación de la respuesta.")
         
@@ -115,7 +115,8 @@ Este es el objeto enviado por un servicio de vuelta al cliente en la cola de res
         class Config:
             validate_assignment = True
     ```
-*   **`action_id`, `correlation_id`, `trace_id`**: Esenciales para que el cliente pueda emparejar la respuesta con su solicitud original y mantener el contexto de seguimiento.
+*   **`action_id`**: Identificador único del propio mensaje de respuesta.
+*   **`correlation_id`, `trace_id`, `action_type_response_to`**: Esenciales para que el cliente pueda emparejar la respuesta con su solicitud original, mantener el contexto de seguimiento y saber a qué tipo de acción responde.
 *   **`data`**: Si `success` es `True`, este campo contiene el resultado. Su estructura también **DEBE** ser validada por un modelo Pydantic específico.
 *   **`error`**: Si `success` es `False`, este campo proporciona detalles estructurados del error. El modelo `ErrorDetail` se ha expandido para ser más informativo.
 

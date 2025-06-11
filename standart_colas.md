@@ -155,6 +155,47 @@ Este patrón es crucial para tareas de larga duración donde el bloqueo no es vi
         *   `data`: `{ "results": [...], "status": "success" }` o `{ "error": {...}, "status": "failure" }`
     *   Esto elimina la necesidad del endpoint HTTP `POST /api/v1/embeddings/generate` para esta comunicación interna.
 
+### 4.4. Patrón de Orquestación Avanzada: Ciclo de Agente Iterativo
+
+Un caso de uso avanzado y crítico en Nooble4 es el del `AgentExecutionService` (AES) orquestando un ciclo de "razonamiento y uso de herramientas" (similar a ReAct) para responder a una única solicitud de usuario. Este escenario demuestra cómo los diferentes identificadores trabajan en conjunto para mantener la trazabilidad en flujos complejos.
+
+*   **Escenario**: Un usuario le pide al agente: "Resume el último documento sobre 'Proyecto X' y compáralo con las notas de la reunión de ayer".
+
+*   **Identificadores de Alto Nivel (Constantes durante todo el ciclo)**:
+    *   `task_id`: Representa la solicitud completa del usuario. Permanece igual en todos los pasos.
+    *   `trace_id`: Se genera al inicio y se propaga a todas las acciones para la observabilidad de la traza completa.
+    *   `session_id`, `tenant_id`: Mantienen el contexto de la conversación y del tenant.
+
+*   **Flujo Iterativo con Múltiples `correlation_id`**:
+    1.  **AES -> QueryService (Paso 1: Búsqueda de 'Proyecto X')**: AES necesita encontrar el documento. Inicia una llamada pseudo-síncrona.
+        *   `action_type`: `query.rag.execute`
+        *   `task_id`: `task_123`
+        *   `correlation_id`: `corr_A` (para esta búsqueda específica)
+        *   `action_id`: `uuid_1`
+    2.  **QueryService -> AES (Respuesta)**: Devuelve el documento encontrado.
+        *   `correlation_id`: `corr_A`
+    3.  **AES -> QueryService (Paso 2: Búsqueda de 'notas de la reunión')**: AES ahora busca el segundo documento. Inicia otra llamada pseudo-síncrona.
+        *   `action_type`: `query.rag.execute`
+        *   `task_id`: `task_123`
+        *   `correlation_id`: `corr_B` (un nuevo ID para esta segunda búsqueda)
+        *   `action_id`: `uuid_2`
+    4.  **QueryService -> AES (Respuesta)**: Devuelve las notas.
+        *   `correlation_id`: `corr_B`
+    5.  **AES -> Groq (Paso 3: Generación del resumen y comparación)**: AES tiene toda la información. Llama al LLM a través de un servicio (ej. `LLMService`) para generar la respuesta final.
+        *   `action_type`: `llm.generate.text`
+        *   `task_id`: `task_123`
+        *   `correlation_id`: `corr_C` (un nuevo ID para la llamada al LLM)
+        *   `action_id`: `uuid_3`
+    6.  **Groq -> AES (Respuesta)**: Devuelve el texto final.
+        *   `correlation_id`: `corr_C`
+
+*   **Conclusión del Patrón**:
+    *   Un único `task_id` agrupa toda la operación de alto nivel.
+    *   Múltiples `correlation_id` se utilizan para gestionar cada "diálogo" o transacción pseudo-síncrona individual que el orquestador (AES) realiza con otros servicios.
+    *   Cada mensaje individual (solicitud o respuesta) tiene su propio `action_id` único para logging y depuración a nivel de mensaje.
+
+Este modelo permite al orquestador mantener el estado de la tarea principal (`task_id`) mientras gestiona de forma atómica y rastreable cada una de las sub-tareas necesarias para completarla.
+
 ## 5. Gestión de Colas y Workers
 
 *   **`DomainQueueManager`**: Esta clase (o una similar) debería ser la responsable de construir los nombres de las colas de manera consistente, basándose en la configuración del servicio y los parámetros de la acción.
