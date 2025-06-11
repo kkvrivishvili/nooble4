@@ -19,6 +19,7 @@ class DocumentProcessAction(DomainAction):
     document_id: str
     collection_id: str
     tenant_id: str
+    session_id: Optional[str] = None
     
     # Fuentes (solo una debe estar presente)
     file_key: Optional[str] = None  # Para documentos en storage
@@ -63,6 +64,7 @@ class DocumentChunkAction(DomainAction):
     document_id: str
     collection_id: str
     tenant_id: str
+    session_id: Optional[str] = None
     text_content: str
     
     # Metadatos
@@ -93,6 +95,7 @@ class EmbeddingRequestAction(DomainAction):
     document_id: str
     collection_id: str
     tenant_id: str
+    session_id: Optional[str] = None
     chunks: List[Dict[str, Any]]  # Lista de chunks con texto y metadatos
     
     # Configuración

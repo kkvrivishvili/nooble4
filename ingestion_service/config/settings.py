@@ -40,6 +40,7 @@ class IngestionServiceSettings(BaseSettings):
     chunking_queue: str = Field(default="document:chunking", description="Cola de fragmentación")
     embedding_callback_queue: str = Field(default="embedding:callback", description="Cola de callbacks de embeddings")
     task_status_queue: str = Field(default="task:status", description="Cola de estado de tareas")
+    ingestion_actions_queue: str = Field(default="ingestion:actions", description="Cola para acciones de dominio entrantes")
     
     # Workers y procesamiento
     worker_count: int = Field(default=2, description="Número de workers")

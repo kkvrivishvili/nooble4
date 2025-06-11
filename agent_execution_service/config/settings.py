@@ -31,7 +31,7 @@ class ExecutionSettings(BaseSettings):
         description="URL del Agent Management Service"
     )
     
-    # LangChain configuración
+
     default_agent_type: str = Field(
         "conversational",
         description="Tipo de agente por defecto"

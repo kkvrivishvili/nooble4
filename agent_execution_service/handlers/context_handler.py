@@ -4,7 +4,7 @@ Context Handler - Manejo y validación de contextos de ejecución en Agent Execu
 Este módulo se encarga de:
 - Resolver ExecutionContext desde DomainActions
 - Validar permisos de ejecución
-- Preparar contexto para LangChain
+- Preparar contexto para el agente
 - Cache de configuraciones de agentes
 """
 
@@ -168,6 +168,40 @@ class ExecutionContextHandler:
         
         logger.info(f"Configuración de agente obtenida: {agent_id}")
         return agent_config
+    
+    async def invalidate_agent_config_cache(self, agent_id: str, tenant_id: str):
+        """
+        Invalida la caché para una configuración de agente específica.
+
+        Elimina tanto la entrada de caché global como todas las entradas de caché
+        específicas de la sesión para el agente.
+
+        Args:
+            agent_id: ID del agente a invalidar.
+            tenant_id: ID del tenant al que pertenece el agente.
+        """
+        if not self.redis:
+            logger.warning("No se puede invalidar la caché de agente: cliente Redis no disponible.")
+            return
+
+        global_cache_key = f"agent_config:{tenant_id}:{agent_id}"
+        session_key_pattern = f"agent_config:{tenant_id}:{agent_id}:*"
+
+        try:
+            # Eliminar la caché global
+            deleted_global = await self.redis.delete(global_cache_key)
+            if deleted_global > 0:
+                logger.info(f"Caché global para el agente {agent_id} (tenant: {tenant_id}) invalidada.")
+
+            # Buscar y eliminar cachés de sesión
+            session_keys = await self.redis.keys(session_key_pattern)
+            if session_keys:
+                deleted_sessions = await self.redis.delete(*session_keys)
+                if deleted_sessions > 0:
+                    logger.info(f"{deleted_sessions} cachés de sesión para el agente {agent_id} (tenant: {tenant_id}) invalidadas.")
+            
+        except Exception as e:
+            logger.error(f"Error al invalidar la caché para el agente {agent_id}: {str(e)}")
     
     async def get_conversation_history(
         self,

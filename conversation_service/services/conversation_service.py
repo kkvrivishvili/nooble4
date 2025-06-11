@@ -18,7 +18,7 @@ settings = get_settings()
 
 class ConversationService:
     """
-    Servicio principal de conversaciones con integración LangChain.
+    Servicio principal para la gestión de conversaciones.
     """
     
     def __init__(self, redis_client, db_client=None):
@@ -40,7 +40,7 @@ class ConversationService:
         metadata: Dict[str, Any] = None
     ) -> Dict[str, Any]:
         """
-        Guarda mensaje y actualiza memoria LangChain.
+        Guarda un nuevo mensaje en una conversación.
         """
         try:
             # Buscar o crear conversación
@@ -72,14 +72,8 @@ class ConversationService:
             # Guardar en Redis
             await self.persistence.save_message_to_redis(message)
             
-            # Actualizar memoria LangChain
-            tenant_tier = self._extract_tier_from_metadata(metadata)
-            self.memory_manager.add_message_to_memory(
-                conversation.id,
-                message,
-                model_name,
-                tenant_tier
-            )
+            # La gestión de memoria ahora es más simple y no requiere una actualización explícita aquí.
+            # El contexto se construye directamente desde los mensajes guardados cuando se solicita.
             
             logger.info(f"Mensaje guardado: {message.id} en conversación {conversation.id}")
             
@@ -120,7 +114,7 @@ class ConversationService:
                     truncation_applied=False
                 )
             
-            # Obtener contexto desde LangChain memory
+            # Obtener contexto desde el gestor de memoria
             context_data = self.memory_manager.get_context_for_query(
                 conversation.id,
                 model_name,

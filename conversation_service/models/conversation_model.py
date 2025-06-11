@@ -1,5 +1,5 @@
 """
-Modelos optimizados para conversaciones con LangChain.
+Modelos de datos para el servicio de conversaciones.
 """
 
 from typing import List, Optional, Dict, Any
@@ -31,7 +31,7 @@ class Message(BaseModel):
     content: str
     
     # Metadatos esenciales
-    tokens_estimate: Optional[int] = None  # Para LangChain memory
+    tokens_estimate: Optional[int] = None  # Estimación de tokens para el mensaje
     processing_time_ms: Optional[int] = None
     agent_id: Optional[str] = None
     model_used: Optional[str] = None
@@ -53,7 +53,7 @@ class Conversation(BaseModel):
     
     # Estado y configuración
     status: ConversationStatus = ConversationStatus.ACTIVE
-    model_name: str = "llama3-8b-8192"  # Para LangChain memory
+    model_name: str = "llama3-8b-8192"  # Modelo de IA utilizado en la conversación
     
     # Métricas en tiempo real
     message_count: int = 0
@@ -73,7 +73,7 @@ class ConversationContext(BaseModel):
     """Contexto optimizado para Query Service."""
     
     conversation_id: str
-    messages: List[Dict[str, Any]]  # Formato LangChain
+    messages: List[Dict[str, Any]]  # Lista de mensajes en formato de diccionario
     total_tokens: int
     model_name: str
     truncation_applied: bool = False

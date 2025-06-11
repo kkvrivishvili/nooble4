@@ -1,8 +1,8 @@
 """
 Agent Executor - Orquestador principal de ejecución de agentes.
 
-Este módulo estaba originalmente diseñado para coordinar la ejecución de agentes 
-usando LangChain. Actualmente, la integración con LangChain ha sido eliminada.
+Este módulo contiene la lógica para ejecutar un agente de IA.
+Actualmente, la lógica de ejecución principal está pendiente de ser reimplementada sin dependencias externas.
 Se requiere una nueva implementación si se desea funcionalidad de ejecución de agentes.
 """
 
@@ -24,10 +24,8 @@ settings = get_settings()
 class AgentExecutor:
     """
     Ejecutor principal de agentes.
-    
-    Originalmente coordinaba la ejecución usando LangChain.
-    Tras la eliminación de LangChain, este ejecutor necesita ser reimplementado
-    o su funcionalidad redefinida.
+    Orquesta la ejecución de un agente. 
+    La lógica está pendiente de ser reimplementada después de la eliminación de dependencias externas.
     """
     
     def __init__(self, context_handler: ExecutionContextHandler, redis_client=None):
@@ -41,7 +39,7 @@ class AgentExecutor:
         self.context_handler = context_handler
         self.redis = redis_client
         
-        # La integración con LangChain ha sido eliminada.
+        # La lógica de ejecución directa del agente debe ser implementada aquí.
     
     async def execute_agent(
         self,
@@ -92,14 +90,14 @@ class AgentExecutor:
             )
             
             logger.error(
-                f"Intento de ejecutar agente {context.primary_agent_id} sin una implementación de LangChainIntegrator. "
-                "La ejecución de agentes basada en Langchain ha sido eliminada o no está configurada."
+                f"Intento de ejecutar agente {context.primary_agent_id} sin una implementación de lógica de ejecución. "
+                "La ejecución de agentes no está configurada."
             )
             
             execution_result.status = ExecutionStatus.FAILED
             execution_result.error = {
                 "type": "NotImplementedError",
-                "message": "La funcionalidad de ejecución de agentes (previamente basada en Langchain) no está implementada."
+                "message": "La funcionalidad de ejecución de agentes no está implementada."
             }
             execution_result.completed_at = datetime.utcnow()
             execution_result.execution_time = (

@@ -77,7 +77,7 @@ async def lifespan(app: FastAPI):
 # Crear aplicación
 app = FastAPI(
     title="Agent Execution Service",
-    description="Servicio de ejecución de agentes con LangChain y colas por tier",
+    description="Servicio de ejecución de agentes con colas por tier",
     version=settings.service_version,
     lifespan=lifespan
 )

@@ -3,7 +3,7 @@ Agent Execution Handler - Lógica principal de ejecución de agentes.
 
 Este módulo maneja:
 - Orquestación de ejecución de agentes
-- Gestión de herramientas y memoria (Nota: la integración previa con LangChain ha sido eliminada)
+- Gestión de herramientas y memoria
 - Timeouts y límites por tier
 """
 

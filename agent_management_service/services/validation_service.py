@@ -15,9 +15,9 @@ logger = logging.getLogger(__name__)
 class ValidationService:
     """Servicio para validaciones de agentes."""
     
-    def __init__(self):
+    def __init__(self, redis_client=None):
         """Inicializa el servicio de validación."""
-        self.ingestion_client = IngestionClient()
+        self.ingestion_client = IngestionClient(redis_client)
     
     async def validate_tenant_limits(self, tenant_id: str, tenant_tier: str):
         """Valida límites del tenant."""

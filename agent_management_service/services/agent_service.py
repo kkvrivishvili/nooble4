@@ -23,9 +23,9 @@ class AgentService:
     def __init__(self, redis_client=None):
         """Inicializa el servicio."""
         self.redis = redis_client
-        self.validation_service = ValidationService()
-        self.ingestion_client = IngestionClient()
-        self.execution_client = ExecutionClient()
+        self.validation_service = ValidationService(redis_client)
+        self.ingestion_client = IngestionClient(redis_client)
+        self.execution_client = ExecutionClient(redis_client)
         
         # Cache TTL
         self.cache_ttl = settings.agent_config_cache_ttl
@@ -127,6 +127,38 @@ class AgentService:
         logger.info(f"Agente {agent_id} actualizado exitosamente")
         return agent
     
+    async def update_agent_config(self, agent_id: str, tenant_id: str, update_data: Dict[str, Any]) -> Optional[Agent]:
+        """Actualiza la configuración de un agente desde una acción de worker."""
+        agent = await self.get_agent(agent_id, tenant_id)
+        if not agent:
+            return None
+
+        # Validar nuevas collections si se especifican
+        if 'collections' in update_data and update_data['collections']:
+            await self.validation_service.validate_collections(
+                update_data['collections'], tenant_id
+            )
+
+        # Aplicar actualizaciones
+        update_request = UpdateAgentRequest(**update_data)
+        for field, value in update_request.dict(exclude_unset=True).items():
+            setattr(agent, field, value)
+
+        agent.updated_at = datetime.utcnow()
+
+        # Guardar cambios
+        await self._save_agent_to_cache(agent)
+
+        # Invalidar cache en Execution Service
+        await self.execution_client.invalidate_agent_cache(agent_id, tenant_id)
+
+        logger.info(f"Agente {agent_id} actualizado exitosamente desde worker")
+        return agent
+
+    async def delete_agent_config(self, agent_id: str, tenant_id: str) -> bool:
+        """Elimina la configuración de un agente desde una acción de worker."""
+        return await self.delete_agent(agent_id, tenant_id)
+
     async def delete_agent(self, agent_id: str, tenant_id: str) -> bool:
         """Elimina un agente (soft delete)."""
         agent = await self.get_agent(agent_id, tenant_id)
@@ -157,6 +189,39 @@ class AgentService:
         # TODO: Implementar con base de datos real
         # Por ahora retornamos lista vacía
         return []
+
+    async def update_collection_status(
+        self,
+        collection_id: str,
+        tenant_id: str,
+        status: str,
+        message: Optional[str] = None
+    ):
+        """
+        Updates the status of a document collection based on ingestion notifications.
+        
+        This is a 'fire-and-forget' operation from the perspective of the caller.
+        """
+        logger.info(
+            f"Updating status for collection {collection_id} of tenant {tenant_id} "
+            f"to '{status}' with message: '{message}'"
+        )
+        
+        # TODO: This should eventually update a persistent database record for the collection.
+        # For now, we'll use Redis to store the status, simulating the update.
+        if self.redis:
+            collection_key = f"collection_status:{tenant_id}:{collection_id}"
+            await self.redis.hset(
+                collection_key,
+                mapping={
+                    "status": status,
+                    "message": message or "",
+                    "updated_at": datetime.utcnow().isoformat(),
+                }
+            )
+            logger.info(f"Stored/Updated status for collection {collection_id} in Redis.")
+
+        return
     
     async def increment_usage(self, agent_id: str, tenant_id: str):
         """Incrementa contador de uso del agente."""

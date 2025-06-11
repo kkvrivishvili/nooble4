@@ -1,5 +1,5 @@
 """
-Configuración del Conversation Service con integración LangChain.
+Configuración del Conversation Service.
 """
 
 from typing import Dict, Any
@@ -39,11 +39,7 @@ class ConversationSettings(BaseSettings):
         description="Segundos de gracia después de cerrar WebSocket"
     )
     
-    # LangChain Memory Configuration
-    langchain_memory_type: str = Field(
-        "token_buffer",
-        description="Tipo de memoria: token_buffer, summary_buffer, window"
-    )
+
     
     # Token limits por modelo
     model_token_limits: Dict[str, int] = Field(
