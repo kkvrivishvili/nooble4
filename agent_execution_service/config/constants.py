@@ -12,12 +12,8 @@ VERSION = "1.0.0"
 
 # Constantes de LangChain
 DEFAULT_CONVERSATION_MEMORY_KEY = None
-DEFAULT_MAX_ITERATIONS = 15
-DEFAULT_MAX_EXECUTION_TIME = 300  # 5 minutos
 
 # Constantes de Colas y Processing
-CALLBACK_QUEUE_PREFIX = "agent-execution"
-DEFAULT_WORKER_SLEEP_SECONDS = 1.0
 
 # Constantes para LLM
 class LLMProviders:
@@ -59,34 +55,14 @@ DEFAULT_CHUNK_OVERLAP = 200
 STREAM_CHUNK_SIZE = 10  # tokens
 
 # Constantes para cache
-MEMORY_CACHE_TTL_SECONDS = 3600  # 1 hora
-EXECUTION_CACHE_TTL_SECONDS = 600  # 10 minutos
 
 # Constantes para uso de bases de conocimiento y RAG
 MAX_KNOWLEDGE_BASE_RESULTS = 5
 DEFAULT_SIMILARITY_THRESHOLD = 0.75
 
 # Constantes para validación por tier
-MAX_TOOLS_BY_TIER = {
-    "free": 3,
-    "advance": 5,
-    "professional": 8,
-    "enterprise": 15
-}
 
-MAX_TOKENS_BY_TIER = {
-    "free": 4000,
-    "advance": 8000, 
-    "professional": 16000,
-    "enterprise": 32000
-}
 
-MAX_MESSAGES_BY_TIER = {
-    "free": 10,
-    "advance": 25,
-    "professional": 50,
-    "enterprise": 100
-}
 
 # Constantes para Endpoints
 class EndpointPaths:

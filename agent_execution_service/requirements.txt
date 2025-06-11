@@ -5,12 +5,7 @@ pydantic==2.10.6
 redis==5.0.0
 httpx==0.28.1
 python-dotenv==1.0.1
-python-multipart==0.0.20
 
-# LangChain (no vamos a usar)
-
-# NUEVO: Dependencias para el sistema de colas
-asyncio==3.4.3
 
 # Utilities
 tenacity==9.0.0

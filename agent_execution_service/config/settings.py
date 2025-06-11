@@ -3,9 +3,11 @@ Configuración del Agent Execution Service.
 MODIFICADO: Integración con sistema de colas por tier.
 """
 
-from pydantic import Field
+from typing import Optional
+from pydantic import Field, model_validator
 from common.config import Settings as BaseSettings
 from common.config import get_service_settings as get_base_settings
+from agent_execution_service.config.constants import LLMProviders, DEFAULT_MODELS
 
 class ExecutionSettings(BaseSettings):
     """Configuración específica para Agent Execution Service."""
@@ -31,6 +33,15 @@ class ExecutionSettings(BaseSettings):
         description="URL del Agent Management Service"
     )
     
+
+    default_llm_provider: str = Field(
+        default=LLMProviders.OPENAI,
+        description="Default LLM provider if not specified in agent config"
+    )
+    default_model_name: Optional[str] = Field(
+        default=None,
+        description="Default model name. If not set, derived from default_llm_provider and DEFAULT_MODELS."
+    )
 
     default_agent_type: str = Field(
         "conversational",
@@ -120,6 +131,16 @@ class ExecutionSettings(BaseSettings):
         description="Habilitar tracking de métricas de ejecución"
     )
     
+    @model_validator(mode='after')
+    def set_default_model_name_if_none(self) -> 'ExecutionSettings':
+        if self.default_model_name is None:
+            provider = self.default_llm_provider
+            if provider in DEFAULT_MODELS:
+                self.default_model_name = DEFAULT_MODELS[provider]
+            # If provider not in DEFAULT_MODELS or no model for provider, it remains None
+            # AgentExecutionHandler must handle the case where default_model_name is still None.
+        return self
+
     class Config:
         env_prefix = "EXECUTION_"
 

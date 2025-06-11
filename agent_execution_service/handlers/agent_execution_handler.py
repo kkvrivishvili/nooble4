@@ -17,7 +17,6 @@ from common.models.execution_context import ExecutionContext
 from agent_execution_service.models.actions_model import AgentExecutionAction
 from agent_execution_service.models.execution_model import ExecutionResult, ExecutionStatus
 from agent_execution_service.handlers.context_handler import ExecutionContextHandler
-from agent_execution_service.services.agent_executor import AgentExecutor
 from agent_execution_service.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -41,8 +40,7 @@ class AgentExecutionHandler:
         self.redis = redis_client
         self.settings = settings  # Guardar referencia a configuraciones
         
-        # Inicializar executor de agentes
-        self.agent_executor = AgentExecutor(context_handler, redis_client)
+        # AgentExecutor ha sido eliminado ya que su funcionalidad principal no estaba implementada.
     
     async def handle_agent_execution(self, action: AgentExecutionAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
         """
@@ -92,22 +90,39 @@ class AgentExecutionHandler:
                 tenant_tier=context.tenant_tier
             )
             
-            # 5. Configurar timeout según tier
-            execution_timeout = self._get_execution_timeout(context.tenant_tier, action.timeout)
-            
-            # 6. Ejecutar agente con timeout
-            execution_result = await asyncio.wait_for(
-                self.agent_executor.execute_agent(
-                    context=context,
-                    agent_config=agent_config,
-                    message=action.message,
-                    message_type=action.message_type,
-                    conversation_history=conversation_history,
-                    user_info=action.user_info,
-                    max_iterations=action.max_iterations
-                ),
-                timeout=execution_timeout
+            # 5. Configurar timeout según tier (esta lógica puede permanecer si se considera útil para un futuro)
+            # execution_timeout = self._get_execution_timeout(context.tenant_tier, action.timeout) # Timeout no es aplicable si no hay ejecución real
+
+            # 6. Simular fallo de ejecución del agente ya que no está implementado
+            logger.error(
+                f"Intento de ejecutar agente {context.primary_agent_id} para tenant {context.tenant_id} sin una implementación de lógica de ejecución. "
+                f"La ejecución de agentes no está configurada."
             )
+            
+            start_time_exec_result = datetime.utcnow()
+            execution_result = ExecutionResult(
+                task_id=action.task_id, # Usamos action.task_id que está disponible directamente
+                status=ExecutionStatus.FAILED,
+                started_at=start_time_exec_result,
+                agent_info={
+                    "agent_id": context.primary_agent_id,
+                    "agent_name": agent_config.get("name", "Unknown Agent"),
+                    "agent_type": agent_config.get("type", "conversational"),
+                    "model": agent_config.get("model") or self.settings.default_model_name or "unknown_model_fallback" # Asegúrate que settings.default_agent_model exista o usa un string
+                },
+                error={
+                    "type": "NotImplementedError",
+                    "message": "La funcionalidad de ejecución de agentes no está implementada."
+                },
+                completed_at=datetime.utcnow()
+            )
+            execution_result.execution_time = (
+                execution_result.completed_at - start_time_exec_result
+            ).total_seconds()
+
+            # El bloque asyncio.wait_for ya no es necesario aquí.
+            # La lógica de _prepare_execution_params que estaba en AgentExecutor no se llama aquí.
+            # Si se quisiera mantener, se podría mover a este handler o a ExecutionContextHandler.
             
             # 7. Guardar mensaje en conversación
             await self._save_conversation_messages(
