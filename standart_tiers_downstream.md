@@ -1,95 +1,89 @@
-# Estándar de Gestión de Tiers - Interacción Downstream y Worker (`standart_tiers_downstream.md`)
+# Estándar de Gestión de Tiers - Contabilización Downstream (`standart_tiers_downstream.md`)
 
-Este documento describe cómo los servicios downstream (Agent Execution Service, Query Service, Embedding Service, Ingestion Service, Conversation Service) y un worker dedicado (`UsageUpdateWorker`) interactúan con el sistema de gestión de tiers. El enfoque principal de los servicios downstream es reportar el uso de recursos, mientras que el worker se encarga de actualizar los contadores persistentes.
+Este documento describe cómo los servicios downstream (Agent Execution Service, Query Service, etc.) reportan el consumo de recursos al sistema de gestión de tiers. Este proceso es fundamental para la contabilización precisa del uso.
 
-## 1. Objetivos de la Interacción Downstream
+## 1. Objetivos de la Contabilización Downstream
 
-*   **Contabilización Precisa:** Asegurar que el consumo de recursos por parte de los tenants se registre de manera fiable y oportuna.
-*   **Desacoplamiento:** Permitir que los servicios downstream se centren en su lógica de negocio principal, delegando la actualización de contadores a un sistema asíncrono.
-*   **Resiliencia:** La publicación asíncrona de actualizaciones de uso minimiza el impacto de fallos temporales en el sistema de contabilización sobre la funcionalidad principal del servicio.
+*   **Contabilización en Origen:** Asegurar que el consumo de un recurso se registre en el momento y lugar exacto donde ocurre la acción, garantizando la máxima precisión.
+*   **Responsabilidad Única:** Los servicios downstream son responsables de reportar el uso; no realizan validaciones. Asumen que la solicitud ya fue validada por AOS.
+*   **Robustez:** La interacción para reportar el uso debe ser directa y fiable, minimizando puntos de fallo.
 
-## 2. Integración de Componentes Comunes en Servicios Downstream
+## 2. Abandono del Patrón de Cola y Worker
 
-Los servicios downstream que consumen recursos limitados por tier integrarán:
+La arquitectura anterior se basaba en publicar mensajes en una cola de Redis para que un `UsageUpdateWorker` los procesara de forma asíncrona. Este patrón se **ABANDONA** por las siguientes razones:
 
-*   De `common.tiers.tiers_constants`:
-    *   `TierResourceKey` (Enum) - para identificar qué recurso se está consumiendo.
-*   De `common.tiers.usage_service`:
-    *   `publish_usage_update(tenant_id: str, resource_key: TierResourceKey, amount: int = 1)`
+*   **Complejidad:** Introduce un componente adicional (el worker) y una dependencia (la cola) que deben ser mantenidos y monitorizados.
+*   **Punto de Fallo:** La cola puede convertirse en un punto de fallo. Si el worker se detiene, el uso no se contabiliza. Los mensajes podrían perderse si no hay una estrategia de DLQ (Dead Letter Queue).
+*   **Falta de Inmediatez:** La contabilización no es en tiempo real, lo que podría llevar a condiciones de carrera donde un tenant consume más de su límite antes de que el contador se actualice.
 
-Los servicios recibirán el `tenant_id` a través de la `DomainAction` entrante y/o el `ExecutionContext` asociado.
+## 3. Nuevo Estándar: Interacción Directa con `TierUsageService`
 
-## 3. Lógica de Reporte de Uso en Servicios Downstream
+Los servicios downstream ahora interactuarán directamente con el `TierUsageService` definido en `standart_tiers_common.md`.
 
-1.  **Identificación del Punto de Consumo:** Cada servicio debe identificar los puntos en su código donde un recurso limitado por tier es efectivamente consumido. Esto ocurre típicamente *después* de que la operación principal del servicio se ha completado con éxito.
+### 3.1. Integración de Componentes
 
-2.  **Llamada a `publish_usage_update`:**
-    *   Una vez que el recurso ha sido consumido, el servicio llamará a:
-        `await publish_usage_update(tenant_id, relevant_TierResourceKey, amount_consumed)`
-    *   `tenant_id`: Obtenido de la `DomainAction` o `ExecutionContext`.
-    *   `relevant_TierResourceKey`: El `TierResourceKey` específico que corresponde al recurso consumido.
-    *   `amount_consumed`: Generalmente `1`, pero puede ser mayor si la acción consume múltiples unidades de un recurso (ej. `EMBEDDINGS_BATCH_SIZE` podría ser el número de textos procesados).
+Los servicios downstream que consumen recursos integrarán:
 
-3.  **Manejo de Errores en la Publicación:**
-    *   La función `publish_usage_update` (según `standart_tiers_common.md`) ya maneja internamente los errores de publicación (ej. problemas de conexión con Redis para la cola) y los loguea, pero no relanza la excepción para no interrumpir el flujo principal del servicio. Esto es una decisión de diseño para priorizar la finalización de la tarea del servicio.
+*   **`common.tiers.services.TierUsageService`**: El servicio que centraliza la lógica de actualización de contadores de uso.
+*   **`common.tiers.models.TierResourceKey`**: La enumeración para identificar el recurso consumido.
 
-**Ejemplos de Reporte de Uso:**
+### 3.2. Lógica de Reporte de Uso
 
-*   **Query Service (QS):** Después de generar y retornar exitosamente una respuesta a una query.
+1.  **Identificar Punto de Consumo:** Cada servicio identifica el punto en su código donde un recurso es efectivamente consumido (ej. después de una operación de base de datos exitosa, después de una llamada a una API externa, etc.).
+
+2.  **Llamada a `increment_usage`:**
+    *   Una vez consumido el recurso, el servicio realizará una llamada `await` directa al servicio de uso.
+    *   El `TierUsageService` será inyectado en el handler o componente correspondiente del servicio downstream.
+
     ```python
-    # En el handler de Query Service, tras una query exitosa
+    # Firma del método en TierUsageService
+    async def increment_usage(
+        self,
+        tenant_id: str,
+        resource: TierResourceKey,
+        amount: int = 1
+    ) -> None:
+        # ... lógica interna para actualizar el repositorio (PostgreSQL/Redis) ...
+    ```
+
+3.  **Manejo de Errores:**
+    *   Dado que la llamada es directa, si `increment_usage` falla (ej. por un problema de base de datos), la excepción se propagará. El servicio downstream debe decidir cómo manejarla. Generalmente, el error debe ser logueado, pero **NO** debe interrumpir la respuesta al usuario, ya que la tarea principal (ej. responder una query) ya se completó. Se recomienda un bloque `try...except` alrededor de la llamada a `increment_usage`.
+
+## 4. Ejemplos de Reporte de Uso (Nueva Arquitectura)
+
+*   **Query Service (QS):** Después de generar y retornar exitosamente una respuesta.
+    ```python
+    # En el handler de Query Service
     # ... lógica de la query ...
-    await publish_usage_update(tenant_id, TierResourceKey.QUERIES_PER_HOUR, 1) 
+    try:
+        await self.tier_usage_service.increment_usage(
+            tenant_id=action.tenant_id,
+            resource=TierResourceKey.QUERIES_PER_HOUR,
+            amount=1
+        )
+    except Exception as e:
+        logger.error(f"Fallo al contabilizar el uso de la query para el tenant {action.tenant_id}: {e}", exc_info=True)
+    
+    return QueryResponse(...)
     ```
-*   **Embedding Service (ES):** Después de generar embeddings para un lote de textos.
+
+*   **Embedding Service (ES):** Después de generar N embeddings.
     ```python
-    # En el handler de Embedding Service, tras generar N embeddings
+    # En el handler de Embedding Service
     # ... lógica de embeddings ...
-    num_texts = len(request_data.texts) # Ejemplo
-    await publish_usage_update(tenant_id, TierResourceKey.EMBEDDINGS_BATCH_SIZE, num_texts) # O una clave más específica si es necesario
+    num_texts = len(request_data.texts)
+    try:
+        await self.tier_usage_service.increment_usage(
+            tenant_id=action.tenant_id,
+            resource=TierResourceKey.EMBEDDINGS_TOKENS, # Usar una clave más granular como tokens
+            amount=total_tokens_consumed # Calcular el total de tokens
+        )
+    except Exception as e:
+        logger.error(f"Fallo al contabilizar el uso de embeddings para el tenant {action.tenant_id}: {e}", exc_info=True)
+
+    return EmbeddingResponse(...)
     ```
-*   **Agent Execution Service (AES):** Si una ejecución de agente cuenta como una "unidad de trabajo" específica o consume un recurso particular.
-    ```python
-    # En AES, si una ejecución completa cuenta como una "acción de agente"
-    # ... lógica de ejecución de agente ...
-    # await publish_usage_update(tenant_id, TierResourceKey.AGENT_ACTIONS_PER_DAY, 1) # Si existiera tal TierResourceKey
-    ```
-    La granularidad exacta de qué constituye un "uso" a reportar por AES dependerá de la definición de los `TierResourceKey`.
-
-**Importante:** Los servicios downstream **NO realizan validación de tiers**. Asumen que la solicitud ya ha sido validada por AOS. Su única responsabilidad relacionada con tiers es reportar el uso.
-
-## 4. `UsageUpdateWorker`
-
-Se creará un nuevo worker (`UsageUpdateWorker`) cuya única responsabilidad es procesar los mensajes de actualización de uso.
-
-*   **Consumo de la Cola:**
-    *   El worker escuchará la cola definida en `settings.TIER_USAGE_UPDATE_QUEUE_NAME` (ej. `"nooble4:dev:common:queues:usage_updates"`) utilizando `BRPOP` (o una variante asíncrona).
-
-*   **Procesamiento de Mensajes:**
-    1.  Al recibir un mensaje, lo deserializará de JSON al modelo Pydantic `UsageUpdateMessage` (definido en `common.tiers.usage_service`).
-    2.  Obtendrá una conexión a Redis usando `await common.redis_pool.get_redis_pool()`.
-    3.  Construirá la clave Redis para el contador usando la función `_build_redis_key(tenant_id, resource_key, time_window_dt)` (esta función puede ser importada de `common.tiers.usage_service` o replicada si es necesario para el worker).
-        *   `tenant_id` y `resource_key` vienen del `UsageUpdateMessage`.
-        *   `time_window_dt` (del `UsageUpdateMessage.timestamp_utc`) es crucial para recursos con ventana de tiempo (ej. `QUERIES_PER_HOUR`).
-    4.  Incrementará el contador en Redis: `await redis_client.incrby(key, message.amount)`.
-    5.  **Gestión de Expiración (TTL):** Si el `resource_key` corresponde a un límite con ventana de tiempo, el worker debe establecer o actualizar el `EXPIRE` de la clave Redis.
-        *   Ejemplo para `QUERIES_PER_HOUR`: El TTL podría ser `3600 segundos` (1 hora) más un pequeño buffer (ej. 5-10 minutos) para asegurar que la clave no expire prematuramente justo antes del final de la hora. El TTL se calcula desde el inicio de la ventana horaria.
-        *   La lógica para determinar el TTL correcto basado en `resource_key` y `timestamp_utc` residirá en el worker.
-    6.  Registrará la operación (éxito o error).
-
-*   **Estructura del Worker:**
-    *   Puede seguir un patrón similar a otros workers del sistema (un bucle principal, manejo de señales para cierre, etc.), pero no necesariamente heredará de `BaseWorker` si este está muy acoplado al procesamiento de `DomainAction`.
-    *   Será un proceso independiente.
-
-*   **Manejo de Errores en el Worker:**
-    *   Errores de deserialización, conexión a Redis, etc., deben ser logueados.
-    *   Considerar una estrategia para mensajes que fallan repetidamente (ej. mover a una Dead Letter Queue después de N intentos), aunque para la contabilización de uso, si un mensaje no se puede procesar, podría ser aceptable perder esa actualización específica si la alternativa es bloquear la cola.
-
-*   **Idempotencia:**
-    *   `INCRBY` es atómico. Si el worker se reinicia y reprocesa un mensaje de la cola (si `BRPOP` no fue seguido de un `LREM` o similar, o si el mensaje no fue eliminado antes del crash), podría haber doble contabilización.
-    *   Para una primera implementación, se puede asumir que la probabilidad de esto es baja y el impacto aceptable. Mejoras futuras podrían incluir mecanismos de deduplicación si se observa como un problema.
 
 ## 5. Configuración
 
-*   `settings.TIER_USAGE_TRACKING_ENABLED`: Controla si `publish_usage_update` realmente publica en la cola. El `UsageUpdateWorker` solo se ejecutará si esta variable está a `True` o se desplegará condicionalmente.
-*   `settings.TIER_USAGE_UPDATE_QUEUE_NAME`: Define la cola Redis que el worker consume y a la que los servicios publican.
+*   `settings.TIER_USAGE_TRACKING_ENABLED`: Esta variable de entorno sigue siendo relevante. El `TierUsageService` la usará internamente para decidir si ejecuta la lógica de actualización o la omite (retornando inmediatamente), lo cual es útil para entornos de desarrollo y pruebas.

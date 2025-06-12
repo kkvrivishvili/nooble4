@@ -1,275 +1,231 @@
-# Estándar de Gestión de Tiers - Componentes Comunes (`standart_tiers_common.md`)
+# Propuesta de Módulo Común de Tiers: `common/tiers`
 
-Este documento describe los componentes comunes del sistema de gestión de tiers de Nooble4. Estos componentes residirán en el paquete `common/tiers` y proporcionarán la base para la validación de límites en el Agent Orchestrator Service (AOS) y la contabilización de uso en los servicios downstream.
+## 1. Introducción y Objetivos
 
-## 1. Objetivos de los Componentes Comunes
+Este documento describe la arquitectura y componentes de un nuevo módulo común, `common/tiers`, destinado a centralizar, estandarizar y gestionar toda la lógica de **límites, permisos y contabilidad de uso** relacionados con los tiers de los tenants en la plataforma Nooble4.
 
-*   **Definición Centralizada:** Proveer una única fuente de verdad para los nombres de los tiers y sus límites estáticos.
-*   **Abstracción de Contabilización:** Ofrecer una interfaz simple para que los servicios interactúen con el sistema de contabilización de uso, independientemente de su implementación subyacente (ej. Redis).
-*   **Reusabilidad:** Crear módulos que puedan ser importados y utilizados por múltiples servicios (AOS y servicios downstream) sin duplicación de código.
-*   **Testabilidad:** Facilitar las pruebas unitarias de la lógica de tiers.
+El objetivo principal es eliminar la lógica de tiers duplicada y dispersa en los diferentes microservicios, reemplazándola por un único punto de verdad (`Single Source of Truth`) que sea robusto, extensible y fácil de mantener.
 
-## 2. Componentes del Módulo `common/tiers`
+**Principales responsabilidades del módulo:**
 
-### 2.1. Constantes de Tiers (`common/tiers/tiers_constants.py`)
+1.  **Definición Centralizada:** Proveer un esquema único y validado para la configuración de los límites de cada tier.
+2.  **Validación Unificada:** Ofrecer herramientas (decoradores, funciones) para validar si una acción solicitada por un tenant cumple con los límites de su tier.
+3.  **Contabilidad de Uso:** Proporcionar un mecanismo para registrar el consumo de recursos y validar contra cuotas (ej. tokens usados, documentos procesados).
+4.  **Acceso Simplificado:** Facilitar a cualquier servicio el acceso a la configuración y al estado de uso actual de un tenant.
 
-Este archivo define la estructura y los valores estáticos de los tiers y sus límites.
+## 2. Estructura del Módulo `common/tiers`
 
-*   **`TierName(str, Enum)`**: Enumeración para los nombres de los tiers.
-    ```python
-    # common/tiers/tiers_constants.py
-    from enum import Enum
+El módulo se organizará de la siguiente manera dentro de la carpeta `common`:
 
-    class TierName(str, Enum):
-        FREE = "free"
-        ADVANCE = "advance"
-        PROFESSIONAL = "professional"
-        AGENCY = "agency"
-        ENTERPRISE = "enterprise"
-    ```
+```
+common/
+└── tiers/
+    ├── __init__.py
+    ├── models/
+    │   ├── __init__.py
+    │   ├── tier_config.py      # Modelos Pydantic para la configuración de tiers
+    │   └── usage_models.py     # Modelos Pydantic para la contabilidad de uso
+    ├── clients/
+    │   ├── __init__.py
+    │   └── tier_client.py      # Cliente para interactuar con el repositorio de tiers
+    ├── services/
+    │   ├── __init__.py
+    │   ├── validation_service.py # Lógica de validación de límites y permisos
+    │   └── usage_service.py      # Lógica para registrar y consultar el uso
+    ├── decorators/
+    │   ├── __init__.py
+    │   └── validate_tier.py    # Decorador para aplicar validaciones en endpoints/handlers
+    ├── repositories/
+    │   ├── __init__.py
+    │   └── tier_repository.py    # Abstracción para acceder a la BBDD de configuraciones/uso
+    └── exceptions.py             # Excepciones personalizadas (e.g., TierLimitExceededError)
+```
 
-*   **`TierResourceKey(str, Enum)`**: Enumeración para las claves de los recursos/límites. Esto ayuda a evitar errores tipográficos y mejora la legibilidad.
-    ```python
-    # common/tiers/tiers_constants.py (continuación)
-    class TierResourceKey(str, Enum):
-        # Límites numéricos
-        MAX_AGENTS = "max_agents"
-        MAX_COLLECTIONS_PER_AGENT = "max_collections_per_agent"
-        MAX_DOCUMENTS_PER_COLLECTION = "max_documents_per_collection" 
-        QUERIES_PER_HOUR = "queries_per_hour"
-        EMBEDDINGS_BATCH_SIZE = "embeddings_batch_size"
-        EMBEDDINGS_TEXT_LENGTH = "embeddings_text_length"
-        # ... otros límites numéricos
+## 3. Componentes Detallados
 
-        # Límites de listas (ej. modelos permitidos)
-        ALLOWED_LLM_MODELS = "allowed_llm_models"
-        ALLOWED_EMBEDDING_MODELS = "allowed_embedding_models"
-        # ... otros límites de listas
+### 3.1. Modelos (`common/tiers/models`)
 
-        # Flags booleanos para características
-        CAN_USE_CUSTOM_PROMPTS = "can_use_custom_prompts"
-        CAN_PERSIST_CONVERSATIONS = "can_persist_conversations"
-        # ... otros flags de características
-    ```
+#### `tier_config.py`
 
-*   **`TierLimitSettings(BaseModel)`**: Modelo Pydantic para definir la estructura de los límites de un tier específico. Esto asegura que todos los tiers definan los mismos parámetros y con los tipos correctos.
-    ```python
-    # common/tiers/tiers_constants.py (continuación)
-    from typing import List, Optional, Union, Dict # Asegurar Dict
-    from pydantic import BaseModel, Field
-
-    class TierLimitSettings(BaseModel):
-        # Límites numéricos (ejemplos)
-        max_agents: int = Field(..., description="Número máximo de agentes permitidos.")
-        queries_per_hour: int = Field(..., description="Número máximo de queries por hora.")
-        # ... otros campos numéricos correspondientes a TierResourceKey
-
-        # Límites de listas (ejemplos)
-        allowed_llm_models: List[str] = Field(default_factory=list, description="Lista de modelos LLM permitidos.")
-        # ... otros campos de lista
-
-        # Flags booleanos (ejemplos)
-        can_use_custom_prompts: bool = Field(False, description="Si el tier puede usar prompts personalizados.")
-        # ... otros campos booleanos
-
-        class Config:
-            extra = "forbid" # Para asegurar que no se añadan campos no definidos
-    ```
-
-*   **`TIER_LIMITS: Dict[TierName, TierLimitSettings]`**: Diccionario principal que mapea cada `TierName` a su instancia de `TierLimitSettings`.
-    ```python
-    # common/tiers/tiers_constants.py (continuación)
-    # from typing import Dict # Ya importado arriba
-
-    TIER_LIMITS: Dict[TierName, TierLimitSettings] = {
-        TierName.FREE: TierLimitSettings(
-            max_agents=1,
-            queries_per_hour=100,
-            allowed_llm_models=["default-gpt-3.5"],
-            can_use_custom_prompts=False
-            # ... inicializar todos los demás campos definidos en TierLimitSettings
-        ),
-        TierName.ADVANCE: TierLimitSettings(
-            max_agents=5,
-            queries_per_hour=500,
-            allowed_llm_models=["default-gpt-3.5", "advanced-model-1"],
-            can_use_custom_prompts=True
-            # ... inicializar todos los demás campos
-        ),
-        # ... definiciones para PROFESSIONAL, AGENCY, ENTERPRISE
-    }
-    ```
-
-### 2.2. Servicio de Gestión de Uso (`common/tiers/usage_service.py`)
-
-Este módulo abstrae la lógica de consulta de límites estáticos y la interacción con el sistema de contabilización de uso (Redis).
+Definirá los modelos Pydantic que representan la estructura de configuración de un tier. Se basará en la unión de todos los límites identificados en el análisis previo.
 
 ```python
-# common/tiers/usage_service.py (Conceptual)
-import datetime
-from typing import Any, Optional, Union, List
-from pydantic import BaseModel 
+# common/tiers/models/tier_config.py
+from pydantic import BaseModel, Field
+from typing import List, Optional, Dict
 
-from common.redis_pool import get_redis_pool 
-# from common.utils.queue_manager import QueueManager # Se usará redis_client.lpush directamente por ahora
-from common.utils.logging_utils import NoobleLogger 
-from common.config import settings # Para TIER_USAGE_TRACKING_ENABLED y nombre de cola
+class TierLimits(BaseModel):
+    # Agent Management
+    max_agents: int = Field(..., description="Número máximo de agentes que se pueden crear.")
+    allow_custom_templates: bool = Field(False, description="Permite crear templates personalizados.")
 
-from .tiers_constants import TierName, TierResourceKey, TIER_LIMITS, TierLimitSettings
+    # Conversation
+    max_conversation_history: int = Field(..., description="Máximo de mensajes a retener en el historial.")
+    allow_conversation_persistence: bool = Field(True, description="Permite persistir las conversaciones.")
 
-logger = NoobleLogger(__name__) 
+    # Query Service
+    max_query_length: int = Field(..., description="Longitud máxima del query en caracteres.")
+    allowed_query_models: List[str] = Field(..., description="Modelos de lenguaje permitidos para consultas.")
 
-# Nombre de la cola para actualizaciones de uso, definido en settings.py
-# Ejemplo: USAGE_UPDATE_QUEUE_NAME = "nooble4:dev:common:queues:usage_updates"
-USAGE_UPDATE_QUEUE_NAME = settings.TIER_USAGE_UPDATE_QUEUE_NAME 
+    # Embedding Service
+    max_embedding_batch_size: int = Field(..., description="Tamaño máximo del lote para embeddings.")
+    max_daily_embedding_tokens: int = Field(..., description="Cuota diaria de tokens para embedding.")
 
-# --- Funciones para Consulta de Límites (Usadas principalmente por AOS) ---
+    # Ingestion Service
+    max_file_size_mb: int = Field(..., description="Tamaño máximo de archivo para ingesta (MB).")
+    max_daily_documents: int = Field(..., description="Número máximo de documentos a ingestar por día.")
 
-def get_tier_settings(tier: TierName) -> Optional[TierLimitSettings]:
-    """Devuelve el objeto TierLimitSettings completo para un tier dado."""
-    return TIER_LIMITS.get(tier)
+    # General
+    rate_limit_per_minute: int = Field(..., description="Límite de peticiones por minuto.")
 
-def get_static_limit(tier: TierName, resource_key: TierResourceKey) -> Any:
-    """
-    Recupera un límite estático específico para un tier y recurso.
-    Devuelve None si el tier o el recurso no están definidos.
-    """
-    tier_settings = get_tier_settings(tier)
-    if tier_settings:
-        if hasattr(tier_settings, resource_key.value):
-            return getattr(tier_settings, resource_key.value)
-        else:
-            logger.warning(f"Resource key '{resource_key.value}' no encontrado en TierLimitSettings para el tier '{tier.value}'.")
-            return None 
-    logger.warning(f"Tier '{tier.value}' no encontrado en TIER_LIMITS.")
-    return None
+class TierConfig(BaseModel):
+    tier_name: str
+    limits: TierLimits
 
-async def get_current_usage(tenant_id: str, resource_key: TierResourceKey, time_window_dt: Optional[datetime.datetime] = None) -> int:
-    """
-    Consulta Redis para obtener el uso actual del tenant para el recurso.
-    Devuelve 0 si no hay registro o si TIER_USAGE_TRACKING_ENABLED es False.
-    """
-    if not settings.TIER_USAGE_TRACKING_ENABLED:
-        return 0
+# Ejemplo de configuración completa para todos los tiers
+class AllTiersConfig(BaseModel):
+    tiers: Dict[str, TierLimits]
+```
 
-    redis_client = await get_redis_pool() # Renombrado para claridad
-    key = _build_redis_key(tenant_id, resource_key, time_window_dt)
-    
-    current_value = await redis_client.get(key)
-    return int(current_value) if current_value else 0
+#### `usage_models.py`
 
-async def is_limit_exceeded(
-    tenant_id: str, 
-    tier: TierName, 
-    resource_key: TierResourceKey, 
-    requested_value: Union[int, str] = 1, 
-    current_dt: Optional[datetime.datetime] = None
-) -> bool:
-    """
-    Verifica si el límite para un recurso se excede o no se cumple.
-    """
-    static_limit_value = get_static_limit(tier, resource_key)
+Modelos para registrar y consultar el uso de recursos.
 
-    if static_limit_value is None:
-        logger.error(f"Límite estático no definido para tier '{tier.value}', recurso '{resource_key.value}'. Denegando por defecto.")
-        return True 
+```python
+# common/tiers/models/usage_models.py
+from pydantic import BaseModel, Field
+from datetime import datetime
 
-    if isinstance(static_limit_value, bool): 
-        return not static_limit_value 
-    
-    elif isinstance(static_limit_value, list): 
-        if not isinstance(requested_value, str):
-            logger.error(f"Tipo de 'requested_value' incorrecto para lista de permitidos. Se esperaba str, se obtuvo {type(requested_value)}.")
-            return True 
-        return requested_value not in static_limit_value 
-        
-    elif isinstance(static_limit_value, (int, float)): 
-        if not isinstance(requested_value, (int, float)):
-            logger.error(f"Tipo de 'requested_value' incorrecto para límite numérico. Se esperaba int/float, se obtuvo {type(requested_value)}.")
-            return True 
-        
-        current_usage_val = await get_current_usage(tenant_id, resource_key, current_dt or datetime.datetime.now(datetime.timezone.utc))
-        return (current_usage_val + requested_value) > static_limit_value
-    
-    else:
-        logger.error(f"Tipo de límite estático no manejado: {type(static_limit_value)} para recurso '{resource_key.value}'.")
-        return True 
-
-# --- Funciones para Actualización de Uso (Usadas por Servicios Downstream vía Publicación en Cola) ---
-
-class UsageUpdateMessage(BaseModel):
-    """Modelo Pydantic para los mensajes enviados a la cola de actualización de uso."""
+class UsageRecord(BaseModel):
     tenant_id: str
-    resource_key: TierResourceKey # Usar el Enum directamente
-    amount: int = 1
-    timestamp_utc: datetime.datetime = Field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc))
+    resource: str # e.g., 'embedding_tokens', 'ingested_documents'
+    amount: float
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
 
-async def publish_usage_update(
-    tenant_id: str, 
-    resource_key: TierResourceKey, 
-    amount: int = 1
-):
-    """
-    Publica un mensaje en la cola Redis para que un worker actualice el contador de uso.
-    No hace nada si TIER_USAGE_TRACKING_ENABLED es False, solo loguea.
-    """
-    if not settings.TIER_USAGE_TRACKING_ENABLED:
-        logger.info(f"DEV MODE: Tracking de uso deshabilitado. No se publica actualización para {tenant_id}, {resource_key.value}.")
-        return
-
-    message = UsageUpdateMessage(
-        tenant_id=tenant_id,
-        resource_key=resource_key,
-        amount=amount
-    )
-    
-    try:
-        # Se usa redis_client.lpush directamente para simplificar, en lugar de QueueManager
-        redis_client = await get_redis_pool()
-        await redis_client.lpush(USAGE_UPDATE_QUEUE_NAME, message.model_dump_json())
-        logger.info(f"Publicada actualización de uso en cola '{USAGE_UPDATE_QUEUE_NAME}' para {tenant_id}, {resource_key.value}, cantidad {amount}.")
-    except Exception as e:
-        logger.error(f"Error al publicar actualización de uso para {tenant_id}, {resource_key.value}: {e}", exc_info=True)
-
-# --- Funciones Helper ---
-
-def _build_redis_key(tenant_id: str, resource_key: TierResourceKey, time_window_dt: Optional[datetime.datetime] = None) -> str:
-    """Construye la clave Redis para un contador de uso."""
-    key_base = f"usage:{tenant_id}:{resource_key.value}"
-    # Lógica de ventana de tiempo más robusta podría mapear TierResourceKey a granularidad (horaria, diaria, etc.)
-    if time_window_dt and resource_key == TierResourceKey.QUERIES_PER_HOUR: # Ejemplo simple
-        timestamp_bucket = time_window_dt.strftime("%Y%m%d%H")
-        return f"{key_base}:{timestamp_bucket}"
-    return key_base
+class TenantUsage(BaseModel):
+    daily_embedding_tokens: int
+    daily_documents: int
 ```
 
-### 2.3. Excepciones de Tiers (`common/exceptions/tier_exceptions.py`)
+### 3.2. Repositorio (`common/tiers/repositories/tier_repository.py`)
+
+Será la única capa que interactúe directamente con la base de datos (PostgreSQL) para obtener las configuraciones de los tiers y para leer/escribir los datos de uso de los tenants.
+
+- **Fuente de Configuración:** La configuración de los tiers (`AllTiersConfig`) se cargará desde un archivo de configuración central (e.g., `settings.py` del AOS o un `config.yml`) o una tabla en la BBDD al iniciar el servicio que la necesite, y se cacheará en Redis para acceso rápido.
+- **Fuente de Uso:** El estado de uso de cada tenant (`TenantUsage`) se almacenará en una tabla en PostgreSQL para persistencia y consistencia.
+
+### 3.3. Cliente (`common/tiers/clients/tier_client.py`)
+
+Abstracción de alto nivel que usarán los servicios para obtener información de tiers. Internamente, utilizará el `TierRepository`.
 
 ```python
-# common/exceptions/tier_exceptions.py 
-from .base_exceptions import BaseNoobleError 
-from ..tiers.tiers_constants import TierName, TierResourceKey # Importar Enums
-from typing import Optional # Para typing
+# common/tiers/clients/tier_client.py
+class TierClient:
+    def __init__(self, repository: TierRepository):
+        self._repository = repository
 
-class TierLimitExceededError(BaseNoobleError):
-    """Excepción lanzada cuando se excede un límite de tier.""" 
-    def __init__(self, message: str, error_code: str, resource_key: Optional[TierResourceKey] = None, tier_name: Optional[TierName] = None, status_code: int = 429):
-        super().__init__(
-            message=message, 
-            error_code=error_code, 
-            status_code=status_code 
-        )
-        self.resource_key = resource_key
-        self.tier_name = tier_name
+    async def get_tier_limits_for_tenant(self, tenant_id: str) -> Optional[TierLimits]:
+        # Lógica para obtener el tier del tenant (desde AMS?)
+        # y luego devolver la configuración de límites cacheados.
+        pass
+
+    async def get_tenant_usage(self, tenant_id: str) -> TenantUsage:
+        # Devuelve el uso actual del tenant.
+        pass
 ```
 
-## 3. Modo Desarrollo (`TIER_USAGE_TRACKING_ENABLED`)
+### 3.4. Servicios (`common/tiers/services`)
 
-*   Variable de configuración global en `common/config/settings.py`:
-    `TIER_USAGE_TRACKING_ENABLED: bool = Field(default=False, env="TIER_USAGE_TRACKING_ENABLED")`
-    `TIER_USAGE_UPDATE_QUEUE_NAME: str = Field(default="nooble4:dev:common:queues:usage_updates", env="TIER_USAGE_UPDATE_QUEUE_NAME")`
-*   El módulo `common/tiers/usage_service.py` utiliza `TIER_USAGE_TRACKING_ENABLED` para:
-    *   Si `False`: `get_current_usage(...)` devuelve `0`; `publish_usage_update(...)` loguea y no publica.
-    *   Si `True`: Lógica normal de Redis y publicación en cola.
+#### `validation_service.py`
 
----
+Contendrá la lógica pura de validación. Recibirá el `tenant_id`, el recurso a validar y el valor, y devolverá `True` o lanzará una excepción `TierLimitExceededError`.
+
+```python
+# common/tiers/services/validation_service.py
+class TierValidationService:
+    def __init__(self, tier_client: TierClient):
+        self._tier_client = tier_client
+
+    async def validate_agent_creation(self, tenant_id: str):
+        limits = await self._tier_client.get_tier_limits_for_tenant(tenant_id)
+        # ... Lógica para comparar con el número actual de agentes ...
+        if limit_exceeded:
+            raise TierLimitExceededError("Número máximo de agentes alcanzado.")
+
+    async def validate_query_length(self, tenant_id: str, length: int):
+        # ...
+        pass
+```
+
+#### `usage_service.py`
+
+Encargado de la lógica de contabilidad: incrementar contadores, resetearlos (diariamente), etc.
+
+```python
+# common/tiers/services/usage_service.py
+class TierUsageService:
+    def __init__(self, repository: TierRepository):
+        self._repository = repository
+
+    async def increment_usage(self, tenant_id: str, resource: str, amount: float):
+        # Lógica para actualizar el contador en la BBDD.
+        await self._repository.increment_usage_counter(...)
+```
+
+### 3.5. Decorador (`common/tiers/decorators/validate_tier.py`)
+
+La herramienta principal para que los servicios apliquen las validaciones de forma declarativa y limpia en sus `ActionHandlers` o endpoints de FastAPI.
+
+```python
+# common/tiers/decorators/validate_tier.py
+from functools import wraps
+
+def validate_tier(resource: str, amount_arg: str = None):
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            # 1. Extraer tenant_id del contexto (e.g., del DomainAction)
+            # 2. Obtener el servicio de validación (inyección de dependencias)
+            # 3. Llamar al método de validación apropiado.
+            #    Ej: validation_service.validate(tenant_id, resource, kwargs.get(amount_arg))
+            # 4. Si la validación es exitosa, ejecutar func.
+            return await func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+# Ejemplo de uso en un ActionHandler
+# from common.tiers.decorators import validate_tier
+
+class CreateAgentHandler(BaseActionHandler):
+    @validate_tier(resource="agents.creation")
+    async def handle(self, action: DomainAction) -> CreateAgentResponse:
+        # ... la lógica del handler ...
+```
+
+## 4. Flujo de Operación
+
+1.  **Configuración:** Un administrador define los límites para cada tier en un lugar centralizado (e.g., `config.yml`).
+2.  **Inicio de Servicio:** Al arrancar, cada microservicio que necesite validación de tiers inicializa el `TierClient`, que carga y cachea en Redis la configuración de todos los tiers.
+3.  **Llega una Petición:** Un `ActionHandler` (o endpoint) protegido por el decorador `@validate_tier` recibe una `DomainAction`.
+4.  **Validación:**
+    a. El decorador extrae el `tenant_id` y el recurso a validar.
+    b. Invoca al `TierValidationService`.
+    c. El servicio de validación usa el `TierClient` para obtener los límites del tier del tenant y su uso actual.
+    d. Compara los valores. Si se excede un límite, lanza `TierLimitExceededError`, que es capturada por el worker/API para devolver una respuesta de error estandarizada.
+5.  **Ejecución y Contabilidad:**
+    a. Si la validación es exitosa, el handler se ejecuta.
+    b. Al finalizar una operación que consume una cuota (e.g., procesar tokens), el servicio invoca al `TierUsageService` para registrar el consumo (`increment_usage`).
+
+## 5. Plan de Implementación y Migración
+
+1.  **Paso 1: Crear el Módulo `common/tiers`:** Implementar la estructura de archivos y los modelos Pydantic base (`tier_config.py`).
+2.  **Paso 2: Implementar Repositorio y Cliente:** Desarrollar el `TierRepository` y el `TierClient`, enfocándose primero en leer la configuración desde un archivo y cachearla.
+3.  **Paso 3: Implementar Servicios y Decorador:** Crear el `TierValidationService`, `TierUsageService` y el decorador `@validate_tier`.
+4.  **Paso 4: Migración Servicio por Servicio:**
+    a. Elegir un servicio piloto (e.g., `Query Service`).
+    b. Integrar el `TierClient` y reemplazar la lógica de `settings.py` con llamadas al nuevo módulo.
+    c. Aplicar el decorador `@validate_tier` a los handlers correspondientes.
+    d. Eliminar la configuración de tiers local del servicio.
+    e. Repetir para todos los demás servicios (`AES`, `CS`, `ES`, `IS`, `AMS`).
+
+Este enfoque centralizado no solo reducirá drásticamente el código duplicado, sino que también mejorará la consistencia, facilitará la actualización de los límites y sentará las bases para un sistema de facturación y monitoreo más avanzado.
