@@ -28,61 +28,51 @@ class CallbackHandler:
     """
     Maneja callbacks desde servicios de ejecución.
     """
-    
+
     def __init__(self, websocket_manager: WebSocketManager, redis_client=None):
         """
         Inicializa handler.
-        
+
         Args:
             websocket_manager: Manager de conexiones WebSocket
             redis_client: Cliente Redis para tracking (opcional)
         """
         self.websocket_manager = websocket_manager
         self.redis = redis_client
-    
+
     async def handle_execution_callback(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
         """
         Procesa callback de ejecución de agente.
-        
+
         Args:
             action: Callback action desde Agent Execution Service
             context: Contexto de ejecución (opcional)
-            
+
         Returns:
             Resultado del procesamiento
         """
         start_time = datetime.utcnow()
-        
+
         try:
-            # Convertir a tipo específico para mejor validación
             callback = ExecutionCallbackAction.parse_obj(action.dict())
-            
-            # Extraer tier del contexto si está disponible
-            tenant_tier = "professional"  # Valor por defecto
-            if context:
-                tenant_tier = context.tenant_tier
-            
-            logger.info(f"Procesando callback de ejecución: task_id={callback.task_id}, status={callback.status}, tier={tenant_tier}")
-            
-            # Procesar según estado
+            logger.info(f"Procesando callback de ejecución: task_id={callback.task_id}, status={callback.status}")
+
             if callback.status == "completed":
-                await self._handle_successful_execution(callback, tenant_tier)
+                await self._handle_successful_execution(callback)
             elif callback.status == "failed":
-                await self._handle_failed_execution(callback, tenant_tier)
+                await self._handle_failed_execution(callback)
             else:
                 logger.warning(f"Estado de callback desconocido: {callback.status}")
-                await self._handle_unknown_status(callback, tenant_tier)
-            
-            # Tracking de performance
+                await self._handle_unknown_status(callback)
+
             await self._track_callback_performance(callback, start_time)
-            
+
             return {
                 "success": True,
                 "callback_processed": True,
-                "task_id": callback.task_id,
-                "tenant_tier": tenant_tier
+                "task_id": callback.task_id
             }
-            
+
         except Exception as e:
             logger.error(f"Error procesando callback: {str(e)}")
             return {
@@ -92,20 +82,16 @@ class CallbackHandler:
                     "message": str(e)
                 }
             }
-    
-    async def _handle_successful_execution(self, callback: ExecutionCallbackAction, tenant_tier: str = "professional"):
+
+    async def _handle_successful_execution(self, callback: ExecutionCallbackAction):
         """Maneja ejecución exitosa."""
-        
-        # Extraer resultado
         result = callback.result
         response_text = result.get("response", "")
         sources = result.get("sources", [])
         agent_info = result.get("agent_info", {})
-        
-        # Crear mensaje WebSocket
+
         ws_message = WebSocketMessage(
             type=WebSocketMessageType.AGENT_RESPONSE,
-            tenant_tier=tenant_tier,
             data={
                 "response": response_text,
                 "sources": sources,
@@ -120,33 +106,28 @@ class CallbackHandler:
             },
             task_id=callback.task_id,
             session_id=callback.session_id,
-            tenant_id=callback.tenant_id
+            tenant_id=callback.tenant_id,
+            tenant_tier=callback.tenant_tier
         )
-        
-        # Enviar a sesión específica
+
         sent = await self.websocket_manager.send_to_session(
             session_id=callback.session_id,
             message=ws_message
         )
-        
+
         if sent:
             logger.info(f"Respuesta enviada via WebSocket: session={callback.session_id}, task={callback.task_id}")
         else:
             logger.warning(f"No se pudo enviar WebSocket: session={callback.session_id} no encontrada")
-            # TODO: Considerar store & forward para sesiones desconectadas
-    
-    async def _handle_failed_execution(self, callback: ExecutionCallbackAction, tenant_tier: str = "professional"):
+
+    async def _handle_failed_execution(self, callback: ExecutionCallbackAction):
         """Maneja ejecución fallida."""
-        
-        # Extraer error
         error_info = callback.result.get("error", {})
         error_message = error_info.get("message", "Error desconocido en ejecución")
         error_type = error_info.get("type", "ExecutionError")
-        
-        # Crear mensaje de error
+
         ws_message = WebSocketMessage(
             type=WebSocketMessageType.ERROR,
-            tenant_tier=tenant_tier,
             data={
                 "error": error_message,
                 "error_type": error_type,
@@ -159,23 +140,20 @@ class CallbackHandler:
             },
             task_id=callback.task_id,
             session_id=callback.session_id,
-            tenant_id=callback.tenant_id
+            tenant_id=callback.tenant_id,
+            tenant_tier=callback.tenant_tier
         )
-        
-        # Enviar error a sesión
+
         await self.websocket_manager.send_to_session(
             session_id=callback.session_id,
             message=ws_message
         )
-        
         logger.error(f"Error en ejecución enviado: session={callback.session_id}, error={error_message}")
-    
-    async def _handle_unknown_status(self, callback: ExecutionCallbackAction, tenant_tier: str = "professional"):
+
+    async def _handle_unknown_status(self, callback: ExecutionCallbackAction):
         """Maneja estados desconocidos."""
-        
         ws_message = WebSocketMessage(
             type=WebSocketMessageType.ERROR,
-            tenant_tier=tenant_tier,
             data={
                 "error": f"Estado de ejecución desconocido: {callback.status}",
                 "task_id": callback.task_id,
@@ -183,46 +161,35 @@ class CallbackHandler:
             },
             task_id=callback.task_id,
             session_id=callback.session_id,
-            tenant_id=callback.tenant_id
+            tenant_id=callback.tenant_id,
+            tenant_tier=callback.tenant_tier
         )
-        
+
         await self.websocket_manager.send_to_session(
             session_id=callback.session_id,
             message=ws_message
         )
-    
-    async def _track_callback_performance(
-        self,
-        callback: ExecutionCallbackAction,
-        start_time: datetime
-    ):
+
+    async def _track_callback_performance(self, callback: ExecutionCallbackAction, start_time: datetime):
         """Registra métricas de performance del callback."""
-        
         if not self.redis:
             return
-        
+
         try:
-            # Tiempo de procesamiento del callback
             callback_processing_time = (datetime.utcnow() - start_time).total_seconds()
-            
-            # Métricas por tenant
             tenant_metrics_key = f"callback_metrics:{callback.tenant_id}:{datetime.now().date().isoformat()}"
-            
+
             await self.redis.hincrby(tenant_metrics_key, "total_callbacks", 1)
             await self.redis.hincrby(tenant_metrics_key, f"status_{callback.status}", 1)
-            
-            # Tiempo total de ejecución (desde request inicial hasta callback)
+
             if callback.execution_time:
-                await self.redis.lpush(
-                    f"execution_times:{callback.tenant_tier}",
-                    callback.execution_time
-                )
-                # Mantener solo últimos 1000 tiempos
-                await self.redis.ltrim(f"execution_times:{callback.tenant_tier}", 0, 999)
-            
-            # TTL de métricas (7 días)
+                # Usar una clave unificada para los tiempos de ejecución
+                execution_time_key = "execution_times"
+                await self.redis.lpush(execution_time_key, callback.execution_time)
+                await self.redis.ltrim(execution_time_key, 0, 999)
+
             await self.redis.expire(tenant_metrics_key, 604800)
-            
+
         except Exception as e:
             logger.error(f"Error tracking callback performance: {str(e)}")
     

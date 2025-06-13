@@ -193,10 +193,7 @@ class ManagementWorker(BaseWorker):
             # Ya no necesitamos verificar inicialización aquí
             validation_action = AgentValidationAction.parse_obj(action.dict())
             
-            # Enriquecer acción con contexto si está disponible
-            if context:
-                logger.info(f"Validando agente con tier: {context.tenant_tier}")
-                validation_action.tenant_tier = context.tenant_tier
+
                 
             # TODO: Implementar lógica de validación
             logger.info(f"Validando configuración de agente: {validation_action.task_id}")
@@ -229,10 +226,7 @@ class ManagementWorker(BaseWorker):
             # Ya no necesitamos verificar inicialización aquí
             cache_action = CacheInvalidationAction.parse_obj(action.dict())
             
-            # Enriquecer acción con contexto si está disponible
-            if context:
-                logger.info(f"Invalidando cache con tier: {context.tenant_tier}")
-                cache_action.tenant_tier = context.tenant_tier
+
             
             # TODO: Implementar lógica de invalidación
             logger.info(f"Invalidando cache para agente: {cache_action.agent_id}")

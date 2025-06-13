@@ -41,21 +41,21 @@ class ValidationService:
     ) -> Dict[str, Any]:
         """
         Valida textos para generación de embeddings.
-        
+
         Args:
             texts: Lista de textos
             model: Modelo de embedding
             context: Contexto de ejecución
             raise_error: Si es True, lanza excepciones; si es False, retorna problemas
-            
+
         Returns:
             Dict con resultados de la validación
-            
+
         Raises:
             ValueError: Si hay problemas de validación y raise_error=True
         """
         validation_issues = []
-        
+
         # Validar lista de textos no vacía
         if not texts:
             issue = {
@@ -66,52 +66,49 @@ class ValidationService:
                 raise ValueError(issue["message"])
             validation_issues.append(issue)
             return {"valid": False, "issues": validation_issues}
-        
-        # Obtener límites por tier
-        tier_limits = settings.get_tier_limits(context.tenant_tier)
+
+        # Obtener información del modelo y límites base
         model_info = OPENAI_MODELS.get(model, OPENAI_MODELS[settings.default_embedding_model])
-        
-        # Validar tamaño de batch por tier
-        max_texts = tier_limits["max_texts_per_request"]
+
+        # Validar tamaño de batch
+        max_texts = settings.max_texts_per_request
         if len(texts) > max_texts:
             issue = {
                 "type": "batch_too_large",
-                "message": f"Batch excede el límite para tier {context.tenant_tier}: {len(texts)}/{max_texts}",
+                "message": f"El número de textos ({len(texts)}) excede el límite de {max_texts}",
                 "limit": max_texts,
-                "actual": len(texts),
-                "tier": context.tenant_tier
+                "actual": len(texts)
             }
             if raise_error:
                 raise ValueError(issue["message"])
             validation_issues.append(issue)
-        
-        # Validar longitud de cada texto por tier
-        max_length = tier_limits["max_text_length"]
+
+        # Validar longitud de cada texto
+        max_length = settings.max_text_length
         for i, text in enumerate(texts):
             if not text:  # Text is None or empty
                 continue
-                
+
             if len(text) > max_length:
                 issue = {
                     "type": "text_too_long",
-                    "message": f"Texto {i} excede límite para tier {context.tenant_tier}: {len(text)}/{max_length}",
+                    "message": f"El texto {i} excede el límite de longitud de {max_length} caracteres",
                     "index": i,
                     "limit": max_length,
-                    "actual": len(text),
-                    "tier": context.tenant_tier
+                    "actual": len(text)
                 }
                 if raise_error:
                     raise ValueError(issue["message"])
                 validation_issues.append(issue)
-        
+
         # Validar límite de tokens del modelo
         total_estimated_tokens = sum(len(text.split()) for text in texts if text)
         model_max_tokens = model_info["max_tokens"]
-        
+
         if total_estimated_tokens > model_max_tokens:
             issue = {
                 "type": "tokens_exceeded",
-                "message": f"Tokens estimados exceden límite del modelo {model}: {total_estimated_tokens}/{model_max_tokens}",
+                "message": f"Tokens estimados ({total_estimated_tokens}) exceden el límite del modelo {model} ({model_max_tokens})",
                 "estimated_tokens": total_estimated_tokens,
                 "model_limit": model_max_tokens,
                 "model": model
@@ -119,15 +116,14 @@ class ValidationService:
             if raise_error:
                 raise ValueError(issue["message"])
             validation_issues.append(issue)
-        
+
         # Retornar resultado
         return {
             "valid": len(validation_issues) == 0,
             "issues": validation_issues,
-            "tier_limits": tier_limits,
             "model_info": model_info
         }
-    
+
     async def validate_model_compatibility(
         self,
         model: str,

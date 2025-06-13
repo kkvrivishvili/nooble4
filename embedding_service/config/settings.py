@@ -50,11 +50,14 @@ class EmbeddingServiceSettings(BaseSettings):
     )
     
     # Límites operacionales
-    max_batch_size: int = Field(100, description="Número máximo de textos por batch")
+    max_texts_per_request: int = Field(100, description="Número máximo de textos por request")
     max_text_length: int = Field(8000, description="Longitud máxima de texto en caracteres")
-    
+    max_batch_size: int = Field(100, description="Número máximo de textos por batch")
+    max_requests_per_hour: int = Field(0, description="Máximo de requests por hora (0 para deshabilitado)")
+
     # Caché y métricas
     enable_embedding_tracking: bool = Field(True, description="Habilitar tracking de métricas de embeddings")
+    embedding_cache_enabled: bool = Field(True, description="Habilitar la caché de embeddings")
     embedding_cache_ttl: int = Field(3600, description="Tiempo de vida en segundos para la caché de embeddings")
     
     # Timeouts
@@ -64,61 +67,6 @@ class EmbeddingServiceSettings(BaseSettings):
         validate_assignment = True
         extra = "ignore"
         env_prefix = "EMBEDDING_"
-        
-    def get_tier_limits(self, tier: str) -> Dict[str, Any]:
-        """Obtiene límites y configuraciones específicas por tier.
-
-        Args:
-            tier: Nivel del tenant (free, basic, professional, enterprise)
-
-        Returns:
-            Diccionario de configuraciones y límites
-        """
-        # Configuración base para todos los tiers
-        base_limits = {
-            "cache_enabled": True,
-            "max_batch_size": self.max_batch_size,
-            "max_text_length": self.max_text_length,
-            "allowed_models": list(OPENAI_MODELS.keys()),
-        }
-        
-        # Configuraciones específicas por tier
-        tier_specific = {
-            "free": {
-                "max_texts_per_request": 10,
-                "max_text_length": 2000,
-                "daily_quota": 100,
-                "cache_enabled": True,
-                "allowed_models": ["text-embedding-3-small"],
-            },
-            "basic": {
-                "max_texts_per_request": 25,
-                "max_text_length": 4000,
-                "daily_quota": 500,
-                "cache_enabled": True,
-                "allowed_models": ["text-embedding-3-small"],
-            },
-            "professional": {
-                "max_texts_per_request": 50,
-                "max_text_length": 8000,
-                "daily_quota": 2000,
-                "cache_enabled": True,
-                "allowed_models": ["text-embedding-3-small", "text-embedding-3-large"],
-            },
-            "enterprise": {
-                "max_texts_per_request": 100,
-                "max_text_length": 8000,
-                "daily_quota": 10000,
-                "cache_enabled": True,
-                "allowed_models": ["text-embedding-3-small", "text-embedding-3-large", "text-embedding-ada-002"],
-            },
-        }
-        
-        # Usar tier específico o default a "free"
-        tier_limits = tier_specific.get(tier, tier_specific["free"])
-        
-        # Combinar con límites base
-        return {**base_limits, **tier_limits}
 
 def get_settings() -> EmbeddingServiceSettings:
     """Obtiene la configuración del servicio."""

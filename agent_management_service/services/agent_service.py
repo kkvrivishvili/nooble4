@@ -33,17 +33,10 @@ class AgentService:
     async def create_agent(
         self,
         tenant_id: str,
-        tenant_tier: str,
         request: CreateAgentRequest
     ) -> Agent:
         """Crea un nuevo agente."""
         logger.info(f"Creando agente {request.name} para tenant {tenant_id}")
-        
-        # Validar límites por tier
-        await self.validation_service.validate_tenant_limits(tenant_id, tenant_tier)
-        
-        # Validar configuración
-        await self.validation_service.validate_agent_config(request.dict(), tenant_tier)
         
         # Validar collections si están especificadas
         if request.collections:
@@ -58,7 +51,7 @@ class AgentService:
             description=request.description,
             slug=request.slug,
             type=request.type,
-            model=request.model or self._get_default_model(tenant_tier),
+            model=request.model or "llama3-8b-8192",
             temperature=request.temperature or 0.7,
             max_tokens=request.max_tokens or 2048,
             system_prompt=request.system_prompt,
@@ -94,7 +87,6 @@ class AgentService:
         self,
         agent_id: str,
         tenant_id: str,
-        tenant_tier: str,
         request: UpdateAgentRequest
     ) -> Optional[Agent]:
         """Actualiza un agente existente."""
@@ -231,16 +223,7 @@ class AgentService:
             agent.last_used_at = datetime.utcnow()
             await self._save_agent_to_cache(agent)
     
-    def _get_default_model(self, tenant_tier: str) -> str:
-        """Obtiene modelo por defecto según tier."""
-        tier_models = {
-            "free": "llama3-8b-8192",
-            "advance": "llama3-8b-8192",
-            "professional": "llama3-70b-8192",
-            "enterprise": "llama3-70b-8192"
-        }
-        return tier_models.get(tenant_tier, "llama3-8b-8192")
-    
+
     async def _save_agent_to_cache(self, agent: Agent):
         """Guarda agente en cache Redis."""
         if not self.redis:

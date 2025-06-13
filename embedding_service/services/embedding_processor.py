@@ -72,11 +72,9 @@ class EmbeddingProcessor:
             if not validation_result["valid"]:
                 raise ValueError(f"Validación fallida: {validation_result['issues'][0]['message']}")
             
-            # 2. Verificar cache (si está habilitado para el tier)
-            tier_limits = settings.get_tier_limits(context.tenant_tier)
+            # 2. Verificar cache (si está habilitado)
             embeddings_result = None
-            
-            if tier_limits.get("cache_enabled", True):
+            if settings.embedding_cache_enabled:
                 embeddings_result = await self._check_cache(action.texts, action.model, context.tenant_id)
             
             # 3. Generar embeddings si no están en cache
@@ -90,8 +88,8 @@ class EmbeddingProcessor:
                     metadata=action.metadata
                 )
                 
-                # Cachear resultado si es apropiado
-                if tier_limits.get("cache_enabled", True):
+                # Cachear resultado si está habilitado
+                if settings.embedding_cache_enabled:
                     await self._cache_embeddings(action.texts, action.model, embeddings_result, context.tenant_id)
             
             # 4. Tracking de métricas
@@ -228,28 +226,24 @@ class EmbeddingProcessor:
         """Registra métricas de embedding."""
         if not self.redis or not settings.enable_embedding_tracking:
             return
-        
+
         try:
             today = datetime.now().date().isoformat()
-            
+
             # Métricas por tenant
             tenant_key = f"embedding_metrics:{context.tenant_id}:{today}"
             await self.redis.hincrby(tenant_key, "total_requests", 1)
             await self.redis.hincrby(tenant_key, "total_texts", len(action.texts))
             await self.redis.hincrby(tenant_key, "total_tokens", result["usage"].get("total_tokens", 0))
-            
+
             if result.get("from_cache", False):
                 await self.redis.hincrby(tenant_key, "cache_hits", 1)
             else:
                 await self.redis.hincrby(tenant_key, "cache_misses", 1)
-            
-            # Tiempo de procesamiento por tier
-            await self.redis.lpush(f"embedding_times:{context.tenant_tier}", processing_time)
-            await self.redis.ltrim(f"embedding_times:{context.tenant_tier}", 0, 999)
-            
+
             # TTL
             await self.redis.expire(tenant_key, 86400 * 7)  # 7 días
-            
+
         except Exception as e:
             logger.error(f"Error tracking embedding metrics: {str(e)}")
     

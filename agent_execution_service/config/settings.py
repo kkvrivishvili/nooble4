@@ -11,125 +11,41 @@ from agent_execution_service.config.constants import LLMProviders, DEFAULT_MODEL
 
 class ExecutionSettings(BaseSettings):
     """Configuración específica para Agent Execution Service."""
-    
-    # NUEVO: Domain específico para colas
+
     domain_name: str = "execution"
-    
+
     # URLs de servicios externos
-    embedding_service_url: str = Field(
-        "http://localhost:8001",
-        description="URL del Embedding Service"
-    )
-    query_service_url: str = Field(
-        "http://localhost:8002", 
-        description="URL del Query Service"
-    )
-    conversation_service_url: str = Field(
-        "http://localhost:8004",
-        description="URL del Conversation Service"
-    )
-    agent_management_service_url: str = Field(
-        "http://localhost:8003",
-        description="URL del Agent Management Service"
-    )
-    
+    embedding_service_url: str = Field("http://localhost:8001", description="URL del Embedding Service")
+    query_service_url: str = Field("http://localhost:8002", description="URL del Query Service")
+    conversation_service_url: str = Field("http://localhost:8004", description="URL del Conversation Service")
+    agent_management_service_url: str = Field("http://localhost:8003", description="URL del Agent Management Service")
 
-    default_llm_provider: str = Field(
-        default=LLMProviders.OPENAI,
-        description="Default LLM provider if not specified in agent config"
-    )
-    default_model_name: Optional[str] = Field(
-        default=None,
-        description="Default model name. If not set, derived from default_llm_provider and DEFAULT_MODELS."
-    )
+    # Configuración de LLM
+    default_llm_provider: str = Field(default=LLMProviders.OPENAI, description="Default LLM provider if not specified in agent config")
+    default_model_name: Optional[str] = Field(default=None, description="Default model name. If not set, derived from default_llm_provider.")
 
-    default_agent_type: str = Field(
-        "conversational",
-        description="Tipo de agente por defecto"
-    )
-    max_iterations: int = Field(
-        5,
-        description="Máximo de iteraciones para agentes"
-    )
-    max_execution_time: int = Field(
-        120,
-        description="Tiempo máximo de ejecución (segundos)"
-    )
-    
-    # NUEVO: Configuración de colas
-    callback_queue_prefix: str = Field(
-        "orchestrator",
-        description="Prefijo para colas de callback hacia orchestrator"
-    )
-    
+    # Límites y comportamiento de ejecución
+    default_agent_type: str = Field("conversational", description="Tipo de agente por defecto")
+    max_iterations: int = Field(10, description="Máximo de iteraciones para agentes")
+    max_execution_time: int = Field(120, description="Tiempo máximo de ejecución (segundos)")
+    max_tools: int = Field(10, description="Número máximo de herramientas que un agente puede usar")
+
+    # Configuración de colas
+    callback_queue_prefix: str = Field("orchestrator", description="Prefijo para colas de callback hacia orchestrator")
+
     # Cache de configuraciones
-    agent_config_cache_ttl: int = Field(
-        600,  # Aumentado a 10 minutos (estándar)
-        description="TTL del cache de configuraciones de agente (segundos)"
-    )
-    
+    agent_config_cache_ttl: int = Field(600, description="TTL del cache de configuraciones de agente (segundos)")
+
     # Cache de conversaciones
-    conversation_cache_ttl: int = Field(
-        1200,  # 20 minutos por defecto
-        description="TTL del cache de historiales de conversación (segundos)"
-    )
-    
-    # Límite de mensajes en caché por defecto
-    default_conversation_cache_limit: int = Field(
-        20,  # 20 mensajes por defecto
-        description="Número máximo de mensajes para mantener en caché local de conversación"
-    )
-    
-    # Límites por tier
-    tier_limits: dict = Field(
-        default={
-            "free": {
-                "max_iterations": 3, 
-                "max_tools": 2, 
-                "timeout": 30,
-                "conversation_cache_ttl": 600,    # 10 minutos
-                "conversation_cache_limit": 10,   # Máximo 10 mensajes en caché
-                "wait_for_persistence": True,     # Esperar confirmación en tier gratuito
-            },
-            "advance": {
-                "max_iterations": 5, 
-                "max_tools": 5, 
-                "timeout": 60,
-                "conversation_cache_ttl": 900,    # 15 minutos
-                "conversation_cache_limit": 20,   # Máximo 20 mensajes en caché
-                "wait_for_persistence": False,    # No esperar confirmación
-            },
-            "professional": {
-                "max_iterations": 10, 
-                "max_tools": 10, 
-                "timeout": 120,
-                "conversation_cache_ttl": 1200,   # 20 minutos
-                "conversation_cache_limit": 40,   # Máximo 40 mensajes en caché
-                "wait_for_persistence": False,    # No esperar confirmación
-            },
-            "enterprise": {
-                "max_iterations": 20, 
-                "max_tools": None, 
-                "timeout": 300,
-                "conversation_cache_ttl": 1800,   # 30 minutos
-                "conversation_cache_limit": 100,  # Máximo 100 mensajes en caché
-                "wait_for_persistence": False,    # No esperar confirmación
-            }
-        },
-        description="Límites y configuraciones por tier"
-    )
-    
+    conversation_cache_ttl: int = Field(1200, description="TTL del cache de historiales de conversación (segundos)")
+    default_conversation_cache_limit: int = Field(40, description="Número máximo de mensajes para mantener en caché local de conversación")
+    wait_for_persistence: bool = Field(False, description="Indica si se debe esperar la confirmación de persistencia al guardar mensajes")
+
     # Worker configuración
-    worker_sleep_seconds: float = Field(
-        1.0,
-        description="Tiempo de espera entre polls"
-    )
-    
-    # NUEVO: Performance tracking
-    enable_execution_tracking: bool = Field(
-        True,
-        description="Habilitar tracking de métricas de ejecución"
-    )
+    worker_sleep_seconds: float = Field(1.0, description="Tiempo de espera entre polls")
+
+    # Performance tracking
+    enable_execution_tracking: bool = Field(True, description="Habilitar tracking de métricas de ejecución")
     
     @model_validator(mode='after')
     def set_default_model_name_if_none(self) -> 'ExecutionSettings':

@@ -209,7 +209,7 @@ class ConversationWorker(BaseWorker):
                 action_type=f"{action.get_action_name()}_callback",
                 task_id=action.task_id,
                 tenant_id=action.tenant_id,
-                tenant_tier=action.tenant_tier,
+
                 session_id=action.session_id,
                 data=result
             )
@@ -231,7 +231,7 @@ class ConversationWorker(BaseWorker):
                 action_type="conversation.error",
                 task_id=action_data.get("task_id"),
                 tenant_id=action_data.get("tenant_id"),
-                tenant_tier=action_data.get("tenant_tier"),
+
                 session_id=action_data.get("session_id"),
                 data={"error": error_message}
             )

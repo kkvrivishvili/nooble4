@@ -33,7 +33,6 @@ class TemplateService:
                 "name": "Customer Service Agent",
                 "description": "Agente especializado en atención al cliente",
                 "category": "system",
-                "minimum_tier": "free",
                 "default_config": {
                     "type": "conversational",
                     "model": "llama3-8b-8192",
@@ -54,7 +53,6 @@ class TemplateService:
                 "name": "Knowledge Base Assistant",
                 "description": "Agente RAG para consultas en base de conocimiento",
                 "category": "system",
-                "minimum_tier": "advance",
                 "default_config": {
                     "type": "rag",
                     "model": "llama3-8b-8192",
@@ -72,7 +70,6 @@ class TemplateService:
                 "name": "Sales Assistant",
                 "description": "Agente especializado en ventas y lead qualification",
                 "category": "system",
-                "minimum_tier": "professional",
                 "default_config": {
                     "type": "conversational",
                     "model": "llama3-70b-8192",
@@ -104,20 +101,14 @@ class TemplateService:
     async def list_templates(
         self,
         tenant_id: str,
-        tenant_tier: str,
         category: Optional[str] = None
     ) -> List[AgentTemplate]:
         """Lista templates disponibles para el tenant."""
         templates = []
         
-        # Filtrar templates del sistema por tier
-        tier_access = settings.tier_limits.get(tenant_tier, {}).get("templates_access", [])
-        
         for template in self.system_templates.values():
-            # Verificar acceso por tier
-            if tier_access == ["all"] or template.id.split("_")[0] in tier_access:
-                if not category or template.category == category:
-                    templates.append(template)
+            if not category or template.category == category:
+                templates.append(template)
         
         # TODO: Añadir templates custom del tenant
         
@@ -127,7 +118,6 @@ class TemplateService:
         self,
         template_id: str,
         tenant_id: str,
-        tenant_tier: str,
         name: str,
         customizations: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -135,11 +125,6 @@ class TemplateService:
         template = await self.get_template(template_id, tenant_id)
         if not template:
             raise ValueError(f"Template {template_id} no encontrado")
-        
-        # Verificar tier mínimo
-        tier_hierarchy = {"free": 0, "advance": 1, "professional": 2, "enterprise": 3}
-        if tier_hierarchy.get(tenant_tier, 0) < tier_hierarchy.get(template.minimum_tier, 0):
-            raise ValueError(f"Tier {tenant_tier} insuficiente para template {template_id}")
         
         # Crear configuración base desde template
         config = template.default_config.copy()

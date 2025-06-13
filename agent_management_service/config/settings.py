@@ -35,44 +35,7 @@ class AgentManagementSettings(BaseSettings):
         description="TTL del cache de configuraciones de agente (segundos)"
     )
     
-    # Límites por tier
-    tier_limits: dict = Field(
-        default={
-            "free": {
-                "max_agents": 1,
-                "available_tools": ["basic_chat", "datetime"],
-                "available_models": ["llama3-8b-8192"],
-                "max_collections_per_agent": 1,
-                "templates_access": ["customer_service"]
-            },
-            "advance": {
-                "max_agents": 3,
-                "available_tools": ["basic_chat", "datetime", "rag_query", "calculator"],
-                "available_models": ["llama3-8b-8192", "llama3-70b-8192"],
-                "max_collections_per_agent": 3,
-                "templates_access": ["customer_service", "knowledge_base"]
-            },
-            "professional": {
-                "max_agents": 10,
-                "available_tools": ["all"],
-                "available_models": ["all"],
-                "max_collections_per_agent": 10,
-                "templates_access": ["all"],
-                "custom_templates": True
-            },
-            "enterprise": {
-                "max_agents": None,
-                "available_tools": ["all"],
-                "available_models": ["all"],
-                "max_collections_per_agent": None,
-                "templates_access": ["all"],
-                "custom_templates": True,
-                "advanced_workflows": True
-            }
-        },
-        description="Límites y capacidades por tier"
-    )
-    
+
     # Configuración de templates
     templates_path: str = Field(
         "agent_management_service/templates",

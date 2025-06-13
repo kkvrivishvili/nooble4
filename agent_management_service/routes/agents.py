@@ -33,12 +33,11 @@ async def get_agent_service():
 async def create_agent(
     request: CreateAgentRequest,
     tenant_id: str = Header(..., alias="X-Tenant-ID"),
-    tenant_tier: str = Header(..., alias="X-Tenant-Tier"),
     agent_service: AgentService = Depends(get_agent_service)
 ):
     """Crea un nuevo agente."""
     try:
-        agent = await agent_service.create_agent(tenant_id, tenant_tier, request)
+        agent = await agent_service.create_agent(tenant_id, request)
         return AgentResponse(
             success=True,
             message="Agente creado exitosamente",
@@ -72,12 +71,11 @@ async def update_agent(
     agent_id: str,
     request: UpdateAgentRequest,
     tenant_id: str = Header(..., alias="X-Tenant-ID"),
-    tenant_tier: str = Header(..., alias="X-Tenant-Tier"),
     agent_service: AgentService = Depends(get_agent_service)
 ):
     """Actualiza un agente existente."""
     try:
-        agent = await agent_service.update_agent(agent_id, tenant_id, tenant_tier, request)
+        agent = await agent_service.update_agent(agent_id, tenant_id, request)
         if not agent:
             raise HTTPException(status_code=404, detail="Agente no encontrado")
         

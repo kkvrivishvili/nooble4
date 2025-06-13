@@ -22,7 +22,7 @@ class DomainAction(BaseModel):
     
     # Contexto - NUEVO
     tenant_id: str = Field(..., description="ID del tenant")
-    tenant_tier: str = Field(..., description="Tier del tenant")
+
     session_id: Optional[str] = Field(None, description="ID de la sesión si aplica")
     
     # Execution Context - NUEVO

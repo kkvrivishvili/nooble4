@@ -58,7 +58,7 @@ class OrchestratorSettings(BaseSettings):
     
     # NUEVO: Headers requeridos
     required_headers: List[str] = Field(
-        default=["X-Tenant-ID", "X-Agent-ID", "X-Tenant-Tier", "X-Session-ID"],
+        default=["X-Tenant-ID", "X-Agent-ID", "X-Session-ID"],
         description="Headers requeridos para requests"
     )
     

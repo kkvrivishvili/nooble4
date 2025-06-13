@@ -30,12 +30,12 @@ class WebSocketMessage(BaseModel):
     type: WebSocketMessageType = Field(..., description="Tipo de mensaje")
     data: Dict[str, Any] = Field(..., description="Datos del mensaje")
     timestamp: datetime = Field(default_factory=datetime.now, description="Timestamp del mensaje")
-    tenant_tier: str = Field(..., description="Tier del tenant")
 
     # Identificadores
     task_id: Optional[str] = Field(None, description="ID de la tarea relacionada")
     session_id: Optional[str] = Field(None, description="ID de la sesión")
     tenant_id: Optional[str] = Field(None, description="ID del tenant")
+    tenant_tier: Optional[str] = Field(None, description="Tier del tenant")
     
     # Metadatos
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Metadatos adicionales")
@@ -45,8 +45,8 @@ class ConnectionInfo(BaseModel):
     
     connection_id: str = Field(..., description="ID único de la conexión")
     tenant_id: str = Field(..., description="ID del tenant")
-    session_id: str = Field(..., description="ID de la sesión")
     tenant_tier: str = Field(..., description="Tier del tenant")
+    session_id: str = Field(..., description="ID de la sesión")
     user_id: Optional[str] = Field(None, description="ID del usuario")
     
     # Estado de la conexión

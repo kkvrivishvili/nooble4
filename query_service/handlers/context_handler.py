@@ -3,14 +3,12 @@ Context Handler - Manejo y validación de contextos de consulta en Query Service
 
 Este módulo se encarga de:
 - Resolver ExecutionContext desde DomainActions
-- Validar permisos de consulta por tier
 - Gestionar configuraciones de RAG
 - Cache de configuraciones de colecciones
 """
 
 import logging
-from typing import Optional, Dict, Any, List
-from datetime import datetime
+from typing import Optional, Dict, Any
 import json
 
 from common.models.execution_context import ExecutionContext
@@ -62,7 +60,7 @@ class QueryContextHandler:
             # Crear ExecutionContext desde diccionario
             context = ExecutionContext.from_dict(context_dict)
             
-            logger.info(f"Contexto de consulta resuelto: {context.context_id} (tier: {context.tenant_tier})")
+            logger.info(f"Contexto de consulta resuelto: {context.context_id}")
             return context
             
         except Exception as e:
@@ -140,66 +138,8 @@ class QueryContextHandler:
         if not collection_config.get("is_active", True):
             raise ValueError(f"Colección {collection_config.get('id')} está desactivada")
         
-        # Validar tier vs capacidades de la colección
-        collection_tier_required = collection_config.get("minimum_tier", "free")
-        tier_hierarchy = {"free": 0, "advance": 1, "professional": 2, "enterprise": 3}
-        
-        user_tier_level = tier_hierarchy.get(context.tenant_tier, 0)
-        required_tier_level = tier_hierarchy.get(collection_tier_required, 0)
-        
-        if user_tier_level < required_tier_level:
-            raise ValueError(
-                f"Tier {context.tenant_tier} insuficiente. Se requiere {collection_tier_required}"
-            )
-        
-        # Validar límites por tier para consultas
-        await self._validate_query_limits(context, query_type)
-        
-        logger.info(f"Permisos de consulta validados para {context.context_id} (tier: {context.tenant_tier})")
+        logger.info(f"Permisos de consulta validados para {context.context_id}")
         return True
-    
-    async def _validate_query_limits(self, context: ExecutionContext, query_type: str):
-        """Valida límites específicos del tier para consultas."""
-        # Límites por tier
-        tier_limits = {
-            "free": {
-                "max_queries_per_hour": 50,
-                "max_results": 5,
-                "max_query_length": 500
-            },
-            "advance": {
-                "max_queries_per_hour": 200,
-                "max_results": 10,
-                "max_query_length": 1000
-            },
-            "professional": {
-                "max_queries_per_hour": 1000,
-                "max_results": 20,
-                "max_query_length": 2000
-            },
-            "enterprise": {
-                "max_queries_per_hour": None,  # Sin límites
-                "max_results": 50,
-                "max_query_length": 5000
-            }
-        }
-        
-        limits = tier_limits.get(context.tenant_tier, tier_limits["free"])
-        
-        # Verificar límite por hora si existe
-        if limits["max_queries_per_hour"] and self.redis:
-            current_hour = int(datetime.utcnow().timestamp() / 3600)
-            hour_key = f"query_limit:{context.tenant_id}:hour:{current_hour}"
-            
-            current_count = await self.redis.incr(hour_key)
-            await self.redis.expire(hour_key, 3600)  # TTL de 1 hora
-            
-            if current_count > limits["max_queries_per_hour"]:
-                raise ValueError(
-                    f"Límite de consultas por hora excedido para tier {context.tenant_tier}: {current_count}/hora"
-                )
-        
-        logger.debug(f"Límites de consulta para tier {context.tenant_tier}: {limits}")
     
     async def _fetch_collection_from_db(self, collection_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -215,16 +155,11 @@ class QueryContextHandler:
                 "tenant_id": tenant_id,
                 "name": f"Collection {collection_id}",
                 "is_active": True,
-                "minimum_tier": "free",
                 "vector_dimensions": 1536,
                 "similarity_metric": "cosine"
             }
         
         try:
-            # TODO: Implementar llamada real a Supabase
-            # result = await self.supabase.table("collections").select("*").eq("id", collection_id).eq("tenant_id", tenant_id).execute()
-            # return result.data[0] if result.data else None
-            
             # Simulación temporal
             logger.info(f"Simulando fetch de collection: {collection_id} para tenant {tenant_id}")
             return {
@@ -232,7 +167,6 @@ class QueryContextHandler:
                 "tenant_id": tenant_id,
                 "name": f"Collection {collection_id}",
                 "is_active": True,
-                "minimum_tier": "free",
                 "vector_dimensions": 1536,
                 "similarity_metric": "cosine",
                 "document_count": 1000

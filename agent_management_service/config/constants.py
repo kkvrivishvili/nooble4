@@ -31,42 +31,6 @@ DEFAULT_TEMPLATES = [
     "creative-writer"
 ]
 
-# Constantes para Validación por Tier
-MAX_AGENTS_BY_TIER = {
-    "free": 2,
-    "advance": 5,
-    "professional": 20,
-    "enterprise": 100
-}
-
-MAX_COLLECTIONS_PER_AGENT_BY_TIER = {
-    "free": 1,
-    "advance": 3,
-    "professional": 10,
-    "enterprise": 50
-}
-
-MAX_TOOLS_PER_AGENT_BY_TIER = {
-    "free": 2,
-    "advance": 5,
-    "professional": 10,
-    "enterprise": 25
-}
-
-ALLOWED_TEMPLATE_TYPES_BY_TIER = {
-    "free": [AgentTemplateTypes.RAG, AgentTemplateTypes.CONVERSATIONAL],
-    "advance": [AgentTemplateTypes.RAG, AgentTemplateTypes.CONVERSATIONAL, AgentTemplateTypes.SEARCH],
-    "professional": [AgentTemplateTypes.RAG, AgentTemplateTypes.CONVERSATIONAL, AgentTemplateTypes.SEARCH, AgentTemplateTypes.WORKFLOW],
-    "enterprise": [AgentTemplateTypes.RAG, AgentTemplateTypes.CONVERSATIONAL, AgentTemplateTypes.SEARCH, AgentTemplateTypes.WORKFLOW, AgentTemplateTypes.CUSTOM]
-}
-
-CUSTOM_PROMPTS_ALLOWED_BY_TIER = {
-    "free": False,
-    "advance": True,
-    "professional": True,
-    "enterprise": True
-}
-
 # Constantes para Cache
 AGENT_CACHE_TTL_SECONDS = 600  # 10 minutos
 COLLECTION_VALIDATION_CACHE_TTL_SECONDS = 300  # 5 minutos
@@ -76,14 +40,6 @@ TEMPLATE_CACHE_TTL_SECONDS = 3600  # 1 hora
 PUBLIC_URL_CACHE_TTL_SECONDS = 3600  # 1 hora
 SLUG_MIN_LENGTH = 5
 SLUG_MAX_LENGTH = 50
-
-# Constantes para Analytics
-ANALYTICS_RETENTION_DAYS = {
-    "free": 7,
-    "advance": 30,
-    "professional": 90,
-    "enterprise": 365
-}
 
 # Constantes para LLM y conector a Query Service
 DEFAULT_LLM_MODEL = "gpt-4"

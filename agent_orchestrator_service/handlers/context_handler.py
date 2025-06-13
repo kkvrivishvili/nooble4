@@ -43,9 +43,6 @@ class ContextHandler:
         # Cache de validaciones por 5 minutos
         self.validation_cache_ttl = 300
         
-        # Tiers válidos
-        self.valid_tiers = {"free", "advance", "professional", "enterprise"}
-        
         # Tipos de contexto válidos
         self.valid_context_types = {"agent", "workflow", "collection"}
     
@@ -53,7 +50,6 @@ class ContextHandler:
         self,
         tenant_id: str,
         agent_id: str,
-        tenant_tier: str,
         context_type: str = "agent",
         session_id: Optional[str] = None,
         user_id: Optional[str] = None,
@@ -68,7 +64,6 @@ class ContextHandler:
         Args:
             tenant_id: ID del tenant
             agent_id: ID del agente
-            tenant_tier: Tier del tenant (free, advance, professional, enterprise)
             context_type: Tipo de contexto (agent, workflow, collection)
             session_id: ID de sesión para WebSocket
             user_id: ID del usuario (opcional)
@@ -84,7 +79,7 @@ class ContextHandler:
             HTTPException: Si validación falla
         """
         # Validar campos requeridos
-        await self._validate_required_fields(tenant_id, agent_id, tenant_tier, context_type)
+        await self._validate_required_fields(tenant_id, agent_id, context_type)
         
         # Validar acceso (con cache)
         await self._validate_access(tenant_id, agent_id, user_id)
@@ -123,37 +118,28 @@ class ContextHandler:
             context_id=context_id,
             context_type=context_type,
             tenant_id=tenant_id,
-            tenant_tier=tenant_tier,
             primary_agent_id=agent_id,
             agents=agents,
             collections=collections,
             metadata=metadata
         )
         
-        logger.info(f"Contexto creado: {context_id} para tenant {tenant_id} (tier: {tenant_tier})")
+        logger.info(f"Contexto creado: {context_id} para tenant {tenant_id}")
         return context
     
     async def _validate_required_fields(
         self,
         tenant_id: str,
         agent_id: str,
-        tenant_tier: str,
         context_type: str
     ):
         """Valida campos requeridos."""
         
         # Validar que no estén vacíos
-        if not tenant_id or not agent_id or not tenant_tier or not context_type:
+        if not tenant_id or not agent_id or not context_type:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Headers requeridos: X-Tenant-ID, X-Agent-ID, X-Tenant-Tier, X-Context-Type"
-            )
-        
-        # Validar tier
-        if tenant_tier not in self.valid_tiers:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Tier inválido: {tenant_tier}. Válidos: {self.valid_tiers}"
+                detail="Headers requeridos: X-Tenant-ID, X-Agent-ID, X-Context-Type"
             )
         
         # Validar context_type

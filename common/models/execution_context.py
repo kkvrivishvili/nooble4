@@ -23,7 +23,7 @@ class ExecutionContext:
         context_id: Identificador único del contexto (ej: "agent-123", "workflow-456")
         context_type: Tipo de contexto ("agent", "workflow", "collection")
         tenant_id: ID del tenant propietario
-        tenant_tier: Tier del tenant (free, advance, professional, enterprise)
+
         primary_agent_id: ID del agente principal/inicial
         agents: Lista de todos los agentes involucrados
         collections: Lista de todas las collections utilizadas
@@ -34,7 +34,7 @@ class ExecutionContext:
     context_id: str
     context_type: str  # "agent", "workflow", "collection"
     tenant_id: str
-    tenant_tier: str   # "free", "advance", "professional", "enterprise"
+
     session_id: Optional[str] = None
     primary_agent_id: str
     agents: List[str]
@@ -52,7 +52,7 @@ class ExecutionContext:
         Returns:
             Nombre de cola en formato: {domain}:{context_id}:{tier}
         """
-        return f"{domain}:{self.context_id}:{self.tenant_tier}"
+        return f"{domain}:{self.context_id}"
     
     def get_callback_queue_name(self, target_domain: str) -> str:
         """
@@ -72,7 +72,7 @@ class ExecutionContext:
             "context_id": self.context_id,
             "context_type": self.context_type,
             "tenant_id": self.tenant_id,
-            "tenant_tier": self.tenant_tier,
+
             "primary_agent_id": self.primary_agent_id,
             "agents": self.agents,
             "collections": self.collections,
@@ -153,7 +153,7 @@ class ExecutionContextResolver:
         agent_info = {
             "id": f"agent-{hash(agent_slug) % 10000}",
             "tenant_id": f"tenant-{hash(subdomain) % 1000}",
-            "tenant_tier": "professional",  # TODO: Obtener tier real
+
             "collection_id": f"collection-{hash(agent_slug) % 100}",
             "config": {"model": "llama3-8b-8192"}
         }
@@ -162,7 +162,7 @@ class ExecutionContextResolver:
             context_id=f"agent-{agent_info['id']}",
             context_type="agent",
             tenant_id=agent_info["tenant_id"],
-            tenant_tier=agent_info["tenant_tier"],
+
             primary_agent_id=agent_info["id"],
             agents=[agent_info["id"]],
             collections=[agent_info["collection_id"]],
@@ -196,7 +196,7 @@ class ExecutionContextResolver:
 def create_agent_context(
     agent_id: str,
     tenant_id: str, 
-    tenant_tier: str,
+
     collection_id: str,
     metadata: Dict[str, Any] = None
 ) -> ExecutionContext:
@@ -205,7 +205,7 @@ def create_agent_context(
         context_id=f"agent-{agent_id}",
         context_type="agent",
         tenant_id=tenant_id,
-        tenant_tier=tenant_tier,
+
         primary_agent_id=agent_id,
         agents=[agent_id],
         collections=[collection_id] if collection_id else [],
@@ -216,7 +216,7 @@ def create_agent_context(
 def create_workflow_context(
     workflow_id: str,
     tenant_id: str,
-    tenant_tier: str,
+
     agent_ids: List[str],
     collection_ids: List[str],
     entry_agent_id: str,
@@ -227,7 +227,7 @@ def create_workflow_context(
         context_id=f"workflow-{workflow_id}",
         context_type="workflow",
         tenant_id=tenant_id,
-        tenant_tier=tenant_tier,
+
         primary_agent_id=entry_agent_id,
         agents=agent_ids,
         collections=collection_ids,

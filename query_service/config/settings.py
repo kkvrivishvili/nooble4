@@ -1,6 +1,6 @@
 """
 Configuración para Query Service.
-MODIFICADO: Integración con sistema de colas por tier.
+MODIFICADO: Integración con sistema de colas.
 """
 
 import os
@@ -14,7 +14,7 @@ from common.config import get_service_settings as get_base_settings
 class QueryServiceSettings(BaseSettings):
     """
     Configuración específica para Query Service.
-    MODIFICADO: Integración con domain y límites por tier.
+    MODIFICADO: Integración con domain.
     """
     
     # NUEVO: Domain específico para colas
@@ -54,36 +54,7 @@ class QueryServiceSettings(BaseSettings):
         description="TTL del cache de configuraciones de colección (segundos)"
     )
     
-    # NUEVO: Límites por tier
-    tier_limits: Dict[str, Dict[str, Any]] = Field(
-        default={
-            "free": {
-                "max_queries_per_hour": 50,
-                "max_results": 5,
-                "max_query_length": 500,
-                "cache_enabled": True
-            },
-            "advance": {
-                "max_queries_per_hour": 200,
-                "max_results": 10,
-                "max_query_length": 1000,
-                "cache_enabled": True
-            },
-            "professional": {
-                "max_queries_per_hour": 1000,
-                "max_results": 20,
-                "max_query_length": 2000,
-                "cache_enabled": True
-            },
-            "enterprise": {
-                "max_queries_per_hour": None,  # Sin límites
-                "max_results": 50,
-                "max_query_length": 5000,
-                "cache_enabled": True
-            }
-        },
-        description="Límites por tier"
-    )
+
     
     # Timeouts y reintentos
     http_timeout_seconds: int = Field(default=15, description="Timeout HTTP")
@@ -133,9 +104,7 @@ class QueryServiceSettings(BaseSettings):
         model = model_name or self.default_llm_model
         return self.llm_models_info.get(model, self.llm_models_info[self.default_llm_model])
     
-    def get_tier_limits(self, tier: str) -> Dict[str, Any]:
-        """Obtiene límites para un tier específico."""
-        return self.tier_limits.get(tier, self.tier_limits["free"])
+
     
     class Config:
         env_prefix = "QUERY_"

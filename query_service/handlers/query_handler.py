@@ -203,8 +203,7 @@ class QueryHandler:
                 await self.redis.hincrby(tenant_key, "total_tokens", result["metadata"]["tokens_used"])
             
             # Tiempo de procesamiento por tier
-            await self.redis.lpush(f"query_times:{context.tenant_tier}", processing_time)
-            await self.redis.ltrim(f"query_times:{context.tenant_tier}", 0, 999)
+
             
             # TTL
             await self.redis.expire(tenant_key, 86400 * 7)  # 7 días
