@@ -87,3 +87,16 @@ Los servicios downstream que consumen recursos integrarán:
 ## 5. Configuración
 
 *   `settings.TIER_USAGE_TRACKING_ENABLED`: Esta variable de entorno sigue siendo relevante. El `TierUsageService` la usará internamente para decidir si ejecuta la lógica de actualización o la omite (retornando inmediatamente), lo cual es útil para entornos de desarrollo y pruebas.
+
+---
+
+## 6. Estado de la Implementación
+
+**La lógica de contabilización de uso ha sido implementada en el módulo `refactorizado/common/tiers` y está lista para ser integrada en los servicios downstream.**
+
+La implementación del `TierUsageService` y su método `increment_usage` se encargan de:
+
+1.  **Recibir la clave estandarizada** del recurso (`TierResourceKey`) y la cantidad a incrementar.
+2.  **Invocar al `TierRepository`**, que es la capa de abstracción de la base de datos.
+3.  **El repositorio simula una operación atómica** (usando `asyncio.Lock`) para actualizar el contador de uso del tenant en una base de datos en memoria.
+4.  El manejo de errores (`try...except`) dentro del servicio que consume el recurso sigue siendo una responsabilidad del llamador, como se describe en los ejemplos.

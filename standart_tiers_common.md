@@ -229,3 +229,17 @@ class CreateAgentHandler(BaseActionHandler):
     e. Repetir para todos los demás servicios (`AES`, `CS`, `ES`, `IS`, `AMS`).
 
 Este enfoque centralizado no solo reducirá drásticamente el código duplicado, sino que también mejorará la consistencia, facilitará la actualización de los límites y sentará las bases para un sistema de facturación y monitoreo más avanzado.
+
+---
+
+## 6. Estado de la Implementación
+
+**La lógica descrita en este documento ha sido completamente implementada en el directorio `refactorizado/common/tiers`.**
+
+Los puntos clave de la implementación son:
+
+1.  **`TierResourceKey`**: Se ha creado una `Enum` para estandarizar todos los identificadores de recursos, eliminando el uso de strings mágicos.
+2.  **Repositorio Simulado**: El `TierRepository` simula la interacción con una base de datos y un caché, cargando una configuración de tiers fija y gestionando contadores de uso en memoria, permitiendo pruebas unitarias y de integración sin dependencias externas.
+3.  **Servicios Funcionales**: `TierValidationService` contiene un despachador que mapea cada `TierResourceKey` a un método de validación específico. `TierUsageService` se conecta directamente al repositorio para registrar el consumo.
+4.  **Decorador Inteligente**: El decorador `@validate_tier` está implementado para extraer el `tenant_id` y los argumentos necesarios desde la llamada a la función, e invoca al servicio de validación de forma transparente.
+5.  **Inyección de Dependencias (Simulada)**: Se ha incluido un mecanismo simple para inyectar el `TierValidationService` en el decorador, sentando las bases para una integración con frameworks como FastAPI.

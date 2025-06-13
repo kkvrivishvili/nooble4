@@ -1,12 +1,18 @@
+# common/tiers/__init__.py
 from .clients import TierClient
-from .decorators import validate_tier
+from .decorators import (
+    validate_tier,
+    set_tier_validation_service,
+    get_tier_validation_service,
+)
 from .exceptions import TierLimitExceededError
 from .models import (
-    TierConfig,
+    TierResourceKey,
     TierLimits,
+    TierConfig,
     AllTiersConfig,
-    TenantUsage,
     UsageRecord,
+    TenantUsage,
 )
 from .repositories import TierRepository
 from .services import TierUsageService, TierValidationService
@@ -14,12 +20,15 @@ from .services import TierUsageService, TierValidationService
 __all__ = [
     "TierClient",
     "validate_tier",
+    "set_tier_validation_service",
+    "get_tier_validation_service",
     "TierLimitExceededError",
-    "TierConfig",
+    "TierResourceKey",
     "TierLimits",
+    "TierConfig",
     "AllTiersConfig",
-    "TenantUsage",
     "UsageRecord",
+    "TenantUsage",
     "TierRepository",
     "TierUsageService",
     "TierValidationService",

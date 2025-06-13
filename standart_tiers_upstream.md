@@ -99,3 +99,17 @@ class ComplexActionHandler(BaseActionHandler):
 ## 6. Consideraciones Adicionales
 
 *   **Determinación del Tier del Tenant:** El mecanismo exacto para que AOS determine el `tenant_tier` a partir del `tenant_id` está fuera del alcance de este documento, pero es un prerrequisito crítico para que el decorador y el servicio de validación funcionen.
+
+---
+
+## 7. Estado de la Implementación
+
+**La lógica de validación descrita ha sido implementada en el módulo `refactorizado/common/tiers` y está lista para ser integrada en los `ActionHandlers` de AOS.**
+
+La implementación del decorador `@validate_tier` se encarga de:
+
+1.  **Obtener el `TierValidationService`** a través de un mecanismo de inyección de dependencias (simulado).
+2.  **Extraer el `tenant_id`** del objeto `DomainAction` pasado al handler.
+3.  **Extraer argumentos adicionales** (como el `value_arg` para la longitud de un query) de los `kwargs` de la función.
+4.  **Invocar `validation_service.validate()`** con todos los datos recopilados.
+5.  **Propagar la excepción `TierLimitExceededError`** si la validación falla, lo que detiene la ejecución del handler.
