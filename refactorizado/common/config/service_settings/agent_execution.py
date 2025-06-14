@@ -23,12 +23,10 @@ class ExecutionSettings(CommonAppSettings):
         env_file='.env'
     )
 
-    # Campos que estaban en la antigua BaseSettings y no están en CommonAppSettings,
-    # o que son específicos de ExecutionSettings.
-    # service_name, environment, log_level, redis_url, database_url son heredados de CommonAppSettings.
+# Campos específicos de ExecutionSettings o que anulan valores de CommonAppSettings.
+# service_name, environment, log_level, redis_url, database_url, http_timeout_seconds son heredados de CommonAppSettings.
 
     service_version: str = Field("1.0.0", description="Versión del servicio")
-    http_timeout_seconds: int = Field(30, description="Timeout HTTP para llamadas salientes")
 
     # Campos específicos del Execution Service
     domain_name: str = Field("execution", description="Dominio específico para colas y lógica del servicio de ejecución.")

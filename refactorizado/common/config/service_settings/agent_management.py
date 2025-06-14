@@ -14,13 +14,11 @@ class AgentManagementSettings(CommonAppSettings):
         extra='ignore',
         env_file='.env'
     )
-
-    # Campos que estaban en la antigua BaseSettings y no están en CommonAppSettings,
-    # o que son específicos de AgentManagementSettings.
-    # service_name, environment, log_level, redis_url son heredados de CommonAppSettings.
+# Campos específicos de AgentManagementSettings o que anulan/especifican valores de CommonAppSettings.
+# service_name, environment, log_level, redis_url, http_timeout_seconds son heredados de CommonAppSettings.
+# database_url se hereda pero se le da un valor por defecto específico aquí.
 
     service_version: str = Field("1.0.0", description="Versión del servicio")
-    http_timeout_seconds: int = Field(30, description="Timeout HTTP para llamadas salientes")
 
     # database_url es heredado de CommonAppSettings, pero aquí especificamos un default particular para AMS.
     # Pydantic tomará este default si AMS_DATABASE_URL no está en el entorno.

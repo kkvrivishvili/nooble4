@@ -83,27 +83,36 @@ Este archivo documenta las discrepancias encontradas entre la implementación ac
 4.  **Herencia incorrecta de `BaseContextHandler`:**
     *   **Archivo:** `base_context_handler.py`.
     *   **Declaración Actual:** `class BaseContextHandler(BaseHandler):`
-    *   **Descripción:** El `BaseContextHandler` está diseñado para operar sobre una `DomainAction`, validar su `action.data` usando un `action_data_model`, y producir un `response_object` validado por `response_data_model`, además de gestionar un contexto. Esta funcionalidad es provista y orquestada por `BaseActionHandler`. El constructor de `BaseContextHandler` (`__init__(self, action: DomainAction, redis_pool: RedisPool, ...`) también es idéntico al de `BaseActionHandler`.
     *   **Impacto:** Duplicación de lógica de validación de `action.data` y `response_object` (que actualmente no está presente en `BaseContextHandler.execute` pero debería estarlo si sigue el patrón), y una jerarquía de clases menos clara.
     *   **Corrección Sugerida:** Cambiar la declaración a `class BaseContextHandler(BaseActionHandler):` para heredar la lógica de manejo de `DomainAction` y sus modelos Pydantic asociados.
 
 ---
 
-## Módulo: `config` (`refactorizado/common/config/`)
+## Módulo `config` (`refactorizado/common/config/`)
 
-1.  **Nombre de archivo incorrecto para la configuración base:**
+1.  **Importación relativa profunda en `agent_execution.py` para constantes:**
+    *   **Archivo:** `refactorizado/common/config/service_settings/agent_execution.py`
+    *   **Línea:** `from .....agent_execution_service.config.constants import LLMProviders, DEFAULT_MODELS`
+    *   **Descripción:** La clase `ExecutionSettings` utiliza una importación relativa muy profunda (`.....`) para acceder a constantes (`LLMProviders`, `DEFAULT_MODELS`) definidas dentro de la estructura de directorios del `agent_execution_service` original. Si bien esto puede funcionar si `PYTHONPATH` está configurado adecuadamente o la ejecución se realiza desde un directorio raíz específico, este tipo de importaciones pueden ser frágiles y difíciles de mantener, especialmente si la estructura del proyecto cambia.
+    *   **Impacto:** Potencial fragilidad en las importaciones, menor legibilidad y acoplamiento más fuerte de lo deseado entre el módulo de configuración común y la estructura interna de un servicio específico.
+    *   **Recomendación:** Considerar alternativas para hacer que estas constantes estén disponibles para `ExecutionSettings` de una manera más robusta. Opciones podrían incluir:
+        *   Mover las definiciones de `LLMProviders` y `DEFAULT_MODELS` a una ubicación más centralizada si son verdaderamente comunes o compartidas (aunque parecen específicas del servicio de ejecución).
+        *   Si `ExecutionSettings` es la única que las necesita y son parte de su *configuración*, podrían definirse directamente dentro de `ExecutionSettings` o en un archivo de constantes adyacente dentro de `refactorizado/common/config/service_settings/` si son valores por defecto para la configuración.
+        *   Revisar si estas constantes realmente necesitan ser importadas en tiempo de definición de la clase `Settings` o si pueden ser pasadas/inyectadas en tiempo de ejecución por el propio `agent_execution_service` cuando utiliza su configuración.
+
+2.  **Nombre de archivo incorrecto para la configuración base:**
     *   **Ubicación:** `refactorizado/common/config/settings.py`
     *   **Descripción:** Este archivo contiene la clase `CommonAppSettings`. Según la documentación actualizada en `standart_config.md`, debería llamarse `base_settings.py`.
     *   **Impacto:** Causa confusión y errores en las importaciones en otros archivos del módulo.
 
-2.  **Importaciones incorrectas debido al nombre de archivo de `CommonAppSettings`:**
+3.  **Importaciones incorrectas debido al nombre de archivo de `CommonAppSettings`:**
     *   **Archivos Afectados:**
         *   `refactorizado/common/config/__init__.py` (intenta `from .base_settings import CommonAppSettings`)
         *   Clases de configuración específicas en `refactorizado/common/config/service_settings/` (ej. `agent_orchestrator.py` intenta `from ..base_settings import CommonAppSettings`)
     *   **Descripción:** Las importaciones de `CommonAppSettings` apuntan a `base_settings.py`, que no existe con ese nombre.
     *   **Impacto:** Fallos de importación en tiempo de ejecución.
 
-3.  **Divergencia en la definición de `CommonAppSettings`:**
+4.  **Divergencia en la definición de `CommonAppSettings`:**
     *   **Archivo:** `refactorizado/common/config/settings.py` (actual) vs. `standart_config.md` (documentación actualizada).
     *   **Descripción:** La clase `CommonAppSettings` en el código actual carece de varios campos que se añadieron a su definición en `standart_config.md`. Campos faltantes en `settings.py` (pero presentes en `standart_config.md`) incluyen:
         *   `service_version`
@@ -116,7 +125,7 @@ Este archivo documenta las discrepancias encontradas entre la implementación ac
         *   `redis_use_ssl` (y potencialmente otros detalles de Redis).
     *   **Impacto:** Las clases de configuración específicas de servicio están redefiniendo estos campos, lo que contradice la idea de que sean "comunes" y heredados. Se debe sincronizar la definición de `CommonAppSettings` en el código con la documentación.
 
-4.  **Función `get_service_settings` remanente:**
+5.  **Función `get_service_settings` remanente:**
     *   **Archivo:** `refactorizado/common/config/__init__.py` importa `get_service_settings`.
     *   **Descripción:** `standart_config.md` y comentarios en `settings.py` sugieren que esta función ya no es necesaria. Su importación y posible uso deben ser revisados y eliminados si es obsoleta.
     *   **Impacto:** Código muerto o innecesario si ya no se utiliza.
@@ -164,3 +173,10 @@ Este archivo documenta las discrepancias encontradas entre la implementación ac
         *   `BaseWorker` intenta instanciar y llamar a métodos de `QueueManager` de forma incompatible con su definición actual.
     *   **Impacto:** Falta de estandarización real en la nomenclatura de colas si los componentes principales no utilizan el gestor centralizado correctamente.
     *   **Recomendación:** Revisar y refactorizar `BaseWorker` y `BaseRedisClient` para que utilicen la instancia de `QueueManager` de `refactorizado.common.utils.queue_manager` de acuerdo con su API definida. Asegurar que la instancia de `QueueManager` se pase correctamente a estos componentes o se instancie de manera consistente.
+
+2.  **Claridad del parámetro `event_name` en `QueueManager.get_callback_queue`:**
+    *   **Archivo:** `refactorizado/common/utils/queue_manager.py`
+    *   **Método:** `get_callback_queue(self, origin_service: str, event_name: str, context: Optional[str] = None)`
+    *   **Descripción:** El parámetro `event_name` es funcionalmente adecuado para distinguir diferentes tipos de callbacks. Sin embargo, para una mayor alineación semántica con el campo `callback_action_type` (que se espera en el `DomainAction` cuando se usa `BaseRedisClient.send_action_async_with_callback`), se podría considerar en el futuro un nombre como `callback_identifier` o `callback_purpose` para `event_name`.
+    *   **Impacto:** Menor; se trata de una mejora de legibilidad y alineación conceptual, no de un error funcional.
+    *   **Recomendación:** Considerar este cambio de nombre en futuras refactorizaciones si se busca una mayor cohesión terminológica. La funcionalidad actual no se ve afectada.

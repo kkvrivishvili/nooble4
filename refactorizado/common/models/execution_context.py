@@ -20,7 +20,6 @@ class ExecutionContext(BaseModel):
         context_id: Identificador único del contexto (ej: "agent-123", "workflow-456")
         context_type: Tipo de contexto ("agent", "workflow", "collection")
         tenant_id: ID del tenant propietario
-        tenant_tier: Tier del tenant (free, advance, professional, enterprise)
         session_id: (Opcional) ID de la sesión de conversación o interacción.
         primary_agent_id: ID del agente principal/inicial
         agents: Lista de todos los agentes involucrados
@@ -32,7 +31,6 @@ class ExecutionContext(BaseModel):
     context_id: str
     context_type: str  # "agent", "workflow", "collection"
     tenant_id: str
-    tenant_tier: str   # "free", "advance", "professional", "enterprise"
     session_id: Optional[str] = None
     primary_agent_id: str
     agents: List[str]
