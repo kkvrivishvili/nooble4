@@ -20,7 +20,7 @@ class BaseCallbackHandler(BaseActionHandler):
 
     async def _send_callback(self, callback_data: BaseModel, callback_action_type: Optional[str] = None, callback_queue_name: Optional[str] = None):
         """
-        Construye y envía una DomainAction de callback.
+        Construye y envía una DomainAction de callback de forma asíncrona.
 
         Utiliza `callback_action_type` y `callback_queue_name` de la acción original
         a menos que se proporcionen explícitamente. Propaga los identificadores
@@ -52,22 +52,24 @@ class BaseCallbackHandler(BaseActionHandler):
             correlation_id=self.action.correlation_id,  # Propagado
             task_id=self.action.task_id,              # Propagado
             trace_id=self.action.trace_id,            # Propagado
-            data=callback_data.model_dump(mode='json'),
+            data=callback_data.model_dump(mode='json'), # BaseRedisClient espera dict o Pydantic model, model_dump es bueno.
             callback_queue_name=None,  # Los callbacks no suelen encadenar más callbacks
             callback_action_type=None
         )
 
         try:
-            with self.redis_pool.get_connection() as conn:
-                conn.lpush(queue_name, callback_action.model_dump_json())
+            # Utilizar el redis_client (BaseRedisClient) inyectado y su método asíncrono
+            await self.redis_client.send_action_async(action=callback_action, specific_queue=queue_name)
+            # El logging de éxito ya está en BaseRedisClient.send_action_async
+            # Se podría añadir un log específico aquí si se desea confirmar desde el handler.
             self._logger.info(
-                f"Callback '{action_type}' ({callback_action.action_id}) enviado a la cola '{queue_name}'.",
+                f"Llamada a send_action_async para callback '{action_type}' ({callback_action.action_id}) a la cola '{queue_name}' completada.",
                 extra=callback_action.get_log_extra()
             )
-        except redis.RedisError as e:
+        except Exception as e: # Captura excepciones más generales que podría lanzar send_action_async
             self._logger.error(
-                f"Error de Redis al enviar callback a la cola '{queue_name}': {e}",
+                f"Error al intentar enviar callback '{action_type}' ({callback_action.action_id}) a la cola '{queue_name}': {e}",
                 extra=callback_action.get_log_extra(),
                 exc_info=True
             )
-            raise  # Re-lanzar para que el handler que llama sepa que el envío falló
+            raise # Re-lanzar para que el handler que llama sepa que el envío falló

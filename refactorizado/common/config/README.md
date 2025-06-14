@@ -89,10 +89,3 @@ print(settings.mi_parametro_especifico)
 
 Se recomienda un archivo `.env` centralizado en el directorio `refactorizado/` (con una plantilla en `refactorizado/.env.example`). Las clases `Settings` están configuradas para cargar desde este archivo por defecto.
 Las variables de entorno deben seguir el prefijo definido en cada clase de configuración específica del servicio (ej. `AOS_SERVICE_NAME`, `ES_OPENAI_API_KEY`).
-
-## Próximos Pasos (Correcciones Necesarias)
-
-Consultar `refactorizado/common/inconsistencies.md` para ver las acciones necesarias para alinear la implementación actual con esta documentación, principalmente:
-- Renombrar `refactorizado/common/config/settings.py` a `refactorizado/common/config/base_settings.py`.
-- Asegurar que las importaciones de `CommonAppSettings` en todo el módulo sean consistentes con este cambio.
-- Sincronizar la definición de la clase `CommonAppSettings` en `base_settings.py` con la especificación detallada en `standart_config.md` para incluir todos los campos comunes previstos.

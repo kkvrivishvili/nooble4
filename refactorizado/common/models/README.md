@@ -8,20 +8,15 @@ El archivo `__init__.py` de este módulo exporta los siguientes modelos clave:
 
 -   `DomainAction` (de `actions.py`)
 -   `DomainActionResponse` (de `actions.py`)
--   `ErrorDetail` (de `actions.py`)
+-   `ErrorDetail` (de `error_detail.py`)
 -   `ExecutionContext` (de `execution_context.py`)
 
 ### 1. `actions.py`
 
-Este archivo contiene los modelos esenciales para la comunicación basada en acciones:
-
--   **`ErrorDetail`**: Un modelo estructurado para describir errores. Incluye:
-    -   `error_type`: Tipo general del error (ej: 'ValidationError').
-    -   `error_code`: Código específico de negocio (ej: 'AGENT_NOT_FOUND').
-    -   `message`: Mensaje descriptivo del error.
-    -   `details`: Diccionario para información adicional estructurada.
+Este archivo contiene los modelos esenciales para la comunicación basada en acciones (`DomainAction`, `DomainActionResponse`).
 
 -   **`DomainAction`**: El modelo principal para representar una solicitud o comando en el sistema. Sus campos clave incluyen:
+
     -   `action_id`: UUID único para la acción.
     -   `action_type`: String que define la acción (formato: "servicio_destino.entidad.verbo").
     -   `timestamp`: Fecha y hora de creación (UTC).
@@ -40,24 +35,32 @@ Este archivo contiene los modelos esenciales para la comunicación basada en acc
     -   `timestamp`: Fecha y hora de creación de la respuesta (UTC).
     -   `data`: Payload de la respuesta si `success` es `True`.
     -   `error`: Objeto `ErrorDetail` si `success` es `False`.
-    -   Incluye una validación (`@root_validator`) para asegurar la consistencia entre `success`, `data`, y `error`.
+    -   Incluye una validación (`@model_validator(mode='after')`) para asegurar la consistencia entre `success`, `data`, y `error`.
 
-### 2. `execution_context.py`
+### 2. `error_detail.py`
+
+Define el modelo `ErrorDetail`:
+
+-   **`ErrorDetail`**: Un modelo estructurado para describir errores. Incluye:
+    -   `error_type`: Tipo general del error (ej: 'ValidationError').
+    -   `error_code`: Código específico de negocio (ej: 'AGENT_NOT_FOUND').
+    -   `message`: Mensaje descriptivo del error.
+    -   `details`: Diccionario para información adicional estructurada.
+
+### 3. `execution_context.py`
 
 Define el modelo `ExecutionContext`, utilizado para pasar información de contexto relevante a través de los servicios o dentro de un mismo servicio durante el procesamiento de una solicitud.
 
 -   **`ExecutionContext`**: Representa el contexto en el que se ejecuta una operación. Sus campos incluyen:
     -   `context_id`: Identificador único del contexto (ej: "agent-123").
-    -   `context_type`: Tipo de contexto (ej: "agent", "workflow").
-    -   `tenant_id`: ID del tenant.
-    -   `session_id`: ID de la sesión de conversación (opcional).
+    -   `context_type`: Tipo de contexto ("agent", "workflow", "collection").
+    -   `tenant_id`: ID del tenant propietario.
+    -   `session_id`: (Opcional) ID de la sesión de conversación.
     -   `primary_agent_id`: ID del agente principal involucrado.
     -   `agents`: Lista de IDs de todos los agentes involucrados.
     -   `collections`: Lista de IDs de todas las colecciones utilizadas.
     -   `metadata`: Diccionario para metadatos específicos del contexto.
     -   `created_at`: Timestamp de creación.
-
-    **Nota sobre Inconsistencias:** Como se detalla en `refactorizado/common/inconsistencies.md`, este modelo actualmente contiene un campo `tenant_tier` que se considera obsoleto y debería eliminarse para alinearse con la nueva gestión centralizada de tiers.
 
 ## Uso
 
