@@ -1,7 +1,7 @@
 # Estándar de Colas Redis en Nooble4
 
-> **Última Revisión:** 14 de Junio de 2024
-> **Estado:** Aprobado y en implementación.
+> **Última Revisión:** 14 de Junio de 2025
+> **Estado:** Actualizado según implementación vigente.
 > **Clase de Referencia:** `common.utils.queue_manager.QueueManager`
 
 ## 1. Introducción
@@ -10,7 +10,13 @@ Este documento establece el estándar para la nomenclatura de colas Redis en Noo
 
 ## 2. El `QueueManager`: La Única Fuente de Verdad
 
-La clase `QueueManager`, ubicada en `common/utils/queue_manager.py`, es la responsable de generar todos los nombres de colas de manera consistente y predecible. Se inicializa con los settings de la aplicación (`CommonAppSettings`) para acceder a valores como el prefijo global (`nooble4`) y el entorno (`dev`, `prod`).
+La clase `QueueManager`, ubicada en `common/utils/queue_manager.py`, es la responsable de generar todos los nombres de colas de manera consistente y predecible. 
+
+Se inicializa con:
+- `prefix`: El prefijo global para todas las claves (por defecto "nooble4").
+- `environment`: El entorno de despliegue (ej. "dev", "prod"), obtenido de `CommonAppSettings` o la variable de entorno `ENVIRONMENT`.
+
+El `service_name` y otros parámetros contextuales se pasan a los métodos específicos del `QueueManager` según sea necesario.
 
 ### 2.1. Uso en `BaseWorker` y `BaseRedisClient`
 
@@ -22,29 +28,63 @@ Aunque no necesitas construir estos nombres, es útil conocer el patrón para fi
 
 ### a) Colas de Acciones
 
-Son las colas donde los workers escuchan por trabajo nuevo. `BaseWorker` la usa para saber de dónde leer mensajes.
+Son las colas donde los workers (`BaseWorker`) escuchan por trabajo nuevo.
 
-*   **Método**: `QueueManager.get_action_queue_name(service_name: str)`
-*   **Formato**: `{prefix}:{env}:{service_name}:actions`
-*   **Ejemplo**: `nooble4:dev:embedding:actions`
+*   **Método en `QueueManager`**: `get_action_queue(service_name: str, context: Optional[str] = None)`
+*   **Formato**: `{prefix}:{env}:{service_name}[:{context}]:actions`
+    *   El segmento `:{context}` es opcional y se añade si se provee el parámetro `context`.
+*   **Ejemplos**:
+    *   `nooble4:dev:embedding:actions` (sin contexto, usado por `BaseWorker` por defecto para su cola principal de escucha, donde `service_name` es el del propio worker).
+    *   `nooble4:dev:agent_execution:tenant_123:actions` (con contexto, si un servicio necesitara colas de acción por tenant).
+*   **Uso en `BaseWorker`**: `BaseWorker` escucha en la cola generada por `self.queue_manager.get_action_queue(service_name=self.service_name)` (sin contexto por defecto).
+*   **Uso en `BaseRedisClient`**: Al enviar una acción, `BaseRedisClient` determina el `target_service` (ej. de `action.action_type`) y envía a la cola `self.queue_manager.get_action_queue(service_name=target_service)`.
 
 ### b) Colas de Respuesta (Pseudo-Síncronas)
 
-Son colas temporales creadas por `BaseRedisClient` para cada llamada pseudo-síncrona.
+Son colas temporales creadas y escuchadas por `BaseRedisClient` para cada llamada pseudo-síncrona, esperando una `DomainActionResponse`.
 
-*   **Método**: `QueueManager.get_response_queue_name(correlation_id: str)`
-*   **Formato**: `{prefix}:{env}:responses:{correlation_id}`
-*   **Ejemplo**: `nooble4:dev:responses:a1b2c3d4-e5f6-7890-1234-567890abcdef`
+*   **Método en `QueueManager`**: `get_response_queue(origin_service: str, action_name: str, correlation_id: str, context: Optional[str] = None)`
+*   **Formato**: `{prefix}:{env}:{origin_service}[:{context}]:responses:{action_name}:{correlation_id}`
+    *   El segmento `:{context}` es opcional.
+*   **Uso en `BaseRedisClient` (para `send_action_pseudo_sync`)**: 
+    *   `origin_service`: El nombre del servicio que está haciendo la llamada (ej., `self.service_name` del cliente).
+    *   `action_name`: El `action.action_type` de la solicitud original.
+    *   `correlation_id`: El ID de correlación de la solicitud.
+    *   `context`: No se utiliza por defecto en `BaseRedisClient` para estas colas.
+*   **Ejemplo de cola generada por `BaseRedisClient`**: `nooble4:dev:orchestrator:responses:agent.run_tool:a1b2c3d4-e5f6-7890-1234-567890abcdef` (donde `orchestrator` es `origin_service` y `agent.run_tool` es `action_name`).
 
-`BaseRedisClient` asigna este nombre al campo `callback_queue_name` de la `DomainAction` antes de enviarla. El worker receptor simplemente usa ese campo para saber dónde enviar la `DomainActionResponse`.
+`BaseRedisClient` asigna este nombre de cola de respuesta al campo `callback_queue_name` de la `DomainAction` que envía. El worker receptor utiliza este campo para saber dónde enviar la `DomainActionResponse`.
 
 ### c) Colas de Callback (Asíncronas)
 
-Para los flujos asíncronos con callback, el servicio que inicia la acción es responsable de definir el nombre de la cola donde espera la respuesta y pasarlo en el campo `callback_queue_name` de la `DomainAction`. El `QueueManager` puede usarse para construir un nombre consistente si se desea.
+Para flujos asíncronos donde un servicio solicitante espera una notificación/respuesta posterior en una cola específica.
+
+*   **Método en `QueueManager`**: `get_callback_queue(origin_service: str, event_name: str, context: Optional[str] = None)`
+*   **Formato**: `{prefix}:{env}:{origin_service}[:{context}]:callbacks:{event_name}`
+    *   El segmento `:{context}` es opcional.
+*   **Uso en `BaseRedisClient` (para `send_action_async_with_callback`)**:
+    *   `origin_service`: El nombre del servicio que está haciendo la llamada y que escuchará en esta cola (ej., `self.service_name` del cliente).
+    *   `event_name`: Un nombre que describe el evento o la tarea para la cual se espera el callback.
+    *   `context`: Un contexto opcional para hacer la cola más específica (ej. `session_id`, `task_id`, o parte del `correlation_id`).
+*   **Ejemplo**: `nooble4:dev:ingestion:callbacks:embedding_completed` (donde `ingestion` es `origin_service` y `embedding_completed` es `event_name`).
+*   **Ejemplo con contexto**: `nooble4:dev:ingestion:doc_xyz:callbacks:embedding_completed` (donde `doc_xyz` es el `context`).
+
+El servicio solicitante (usando `BaseRedisClient`) construye este nombre de cola usando `QueueManager` y lo establece en el campo `callback_queue_name` de la `DomainAction` enviada. El servicio receptor, después de procesar la tarea, enviará la `DomainActionResponse` (o una nueva `DomainAction` de notificación) a esta cola.
+
+### d) Canales de Notificación (Pub/Sub)
+
+Para patrones de publicación/suscripción, donde un servicio emite notificaciones y múltiples servicios pueden estar interesados.
+
+*   **Método en `QueueManager`**: `get_notification_channel(origin_service: str, event_name: str, context: Optional[str] = None)`
+*   **Formato**: `{prefix}:{env}:{origin_service}[:{context}]:notifications:{event_name}`
+    *   El segmento `:{context}` es opcional.
+*   **Ejemplo**: `nooble4:dev:document_service:notifications:document_updated`
+
+Este tipo de canal se usaría con los comandos `PUBLISH` y `SUBSCRIBE` de Redis.
 
 ## 4. Conclusión
 
-La estandarización de colas se logra mediante la **centralización**, no mediante la documentación de un formato manual. Al usar `BaseWorker` y `BaseRedisClient`, te adhieres automáticamente al estándar de colas sin necesidad de conocer los detalles de implementación del `QueueManager`.
+La estandarización de colas se logra mediante la **centralización de la lógica de nomenclatura en `QueueManager`**. Al utilizar `BaseWorker` y `BaseRedisClient`, los servicios se adhieren automáticamente al estándar de colas. Es fundamental entender los parámetros (`service_name`, `origin_service`, `action_name`, `event_name`, `correlation_id`, `context`) que estos componentes base utilizan con `QueueManager` para asegurar la correcta comunicación.
 
 ### 4.3. Patrón Asíncrono con Callbacks (Reemplazando HTTP y Estandarizando)
 
@@ -53,7 +93,7 @@ Este patrón es crucial para tareas de larga duración donde el bloqueo no es vi
 *   **Flujo (Ej. `ServiceA` solicita una tarea a `ServiceB` y espera un callback)**:
     1.  **`ServiceA` (Cliente de `ServiceB`)**:
         *   Genera `action_id` (nuevo UUID para la solicitud), `correlation_id` (nuevo UUID para correlacionar esta solicitud con su futuro callback), y `trace_id` (propagar o nuevo).
-        *   Define la cola donde esperará el callback: `client_callback_queue = "nooble4:dev:serviceA:callbacks:serviceB_task_result:{correlation_id}"`.
+        *   Define la cola donde esperará el callback. Usando `QueueManager.get_callback_queue(origin_service="serviceA", event_name="serviceB_task_result", context=correlation_id)` podría generar: `client_callback_queue = "nooble4:dev:serviceA:callbacks:serviceB_task_result:{correlation_id}"` (asumiendo que `correlation_id` se usa como `context`, o se incorpora en `event_name`).
         *   Define el tipo de acción que espera en el callback: `expected_callback_action_type = "serviceB.task.completed"`.
         *   Construye la `DomainAction` de solicitud con:
             *   `action_id`, `action_type` (ej. `serviceB.task.start`)
@@ -91,7 +131,7 @@ Este patrón es crucial para tareas de larga duración donde el bloqueo no es vi
         *   `correlation_id`: `corr123` (generado por Ingestion)
         *   `trace_id`: `trace789`
         *   `origin_service`: `IngestionService`
-        *   `callback_queue_name`: `nooble4:dev:ingestion_service:callbacks:embedding_result:corr123`
+        *   `callback_queue_name`: `nooble4:dev:ingestion_service:callbacks:embedding_result` (si `corr123` no se usa como contexto explícito aquí, o `event_name` es `embedding_result:corr123`). O, si se usa `QueueManager.get_callback_queue(origin_service="ingestion_service", event_name="embedding_result", context="corr123")`, sería `nooble4:dev:ingestion_service:corr123:callbacks:embedding_result`.
         *   `callback_action_type`: `embedding.batch.generated` (o `embedding.batch.completed`)
         *   `data`: `{ "texts": [...], ... }`
     *   **Respuesta (Callback de `EmbeddingService` a `IngestionService`)**: `EmbeddingService` envía un *nuevo* `DomainAction` a la `callback_queue_name` (`nooble4:dev:ingestion_service:callbacks:embedding_result:corr123`).
@@ -145,7 +185,7 @@ Este modelo permite al orquestador mantener el estado de la tarea principal (`ta
 
 ## 5. Gestión de Colas y Workers
 
-*   **`DomainQueueManager`**: Esta clase (o una similar) debería ser la responsable de construir los nombres de las colas de manera consistente, basándose en la configuración del servicio y los parámetros de la acción.
+    *   **`QueueManager`**: Esta clase es la única responsable de construir los nombres de las colas de manera consistente, basándose en el prefijo, entorno, y los parámetros específicos proporcionados (como `service_name`, `event_name`, `correlation_id`, `context`).
 *   **Workers**: Los `BaseWorker` deben ser configurados para escuchar en las colas de `actions` apropiadas. Workers especializados (o el mismo worker con lógica de despacho) pueden escuchar en colas de `callbacks` o `notifications` si es necesario.
 *   **Dead Letter Queues (DLQ)**:
     *   Implementar un mecanismo de DLQ para cada cola de `actions` principal.

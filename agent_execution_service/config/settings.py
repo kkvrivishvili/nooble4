@@ -5,7 +5,7 @@ Importa la configuración específica del servicio desde la ubicación común ce
 from functools import lru_cache
 
 # Importa la clase de settings específica del servicio desde la ubicación común centralizada
-from refactorizado.common.config.service_settings import ExecutionSettings
+from common.config.service_settings import ExecutionSettings
 
 @lru_cache()
 def get_settings() -> ExecutionSettings:
