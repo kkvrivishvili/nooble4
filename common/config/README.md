@@ -36,7 +36,7 @@ refactorizado/common/config/
 ### `service_settings/`
 
 - Cada archivo dentro de este subdirectorio (ej. `agent_orchestrator.py`) define una clase de configuración específica para un microservicio (ej. `OrchestratorSettings`).
-- Estas clases heredan de `CommonAppSettings`.
+- Estas clases heredan de **`CommonAppSettings`**: Define las configuraciones comunes a todos los servicios (ej. `ENVIRONMENT`, `LOG_LEVEL`, `REDIS_URL`) que son utilizadas por `BaseWorker`, `BaseService` y otros componentes de `common`.
 - Definen sus propios parámetros específicos del servicio.
 - Especifican un `env_prefix` único en su `model_config` (ej. `AOS_`) para que las variables de entorno se carguen correctamente para ese servicio.
 

@@ -1,6 +1,6 @@
 # Módulo de Workers Comunes (`refactorizado/common/workers/`)
 
-Este módulo proporciona la infraestructura base para los workers de los microservicios en el sistema Nooble4.
+Este módulo define la capa de **Infraestructura de Workers** en la Arquitectura v4.0 de Nooble4. Los workers son procesos de larga duración que escuchan `DomainAction` de colas Redis y delegan la lógica de negocio a la Capa de Servicio.
 
 ## Componentes Principales
 

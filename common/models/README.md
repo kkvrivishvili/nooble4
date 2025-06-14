@@ -1,6 +1,6 @@
 # Módulo de Modelos Comunes (`refactorizado.common.models`)
 
-Este módulo define los modelos de datos Pydantic fundamentales utilizados en toda la plataforma Nooble4. Estos modelos aseguran una estructura de datos coherente para la comunicación entre servicios, el manejo de errores y la representación de contextos de ejecución.
+Este módulo define los modelos de datos Pydantic que son compartidos y utilizados a través de los diferentes microservicios de Nooble4, formando la base de la comunicación en la Arquitectura v4.0. Estos modelos aseguran la consistencia, validación y serialización/deserialización de los datos que fluyen por el sistema.
 
 ## Archivos Principales y Modelos Exportados
 
@@ -15,8 +15,7 @@ El archivo `__init__.py` de este módulo exporta los siguientes modelos clave:
 
 Este archivo contiene los modelos esenciales para la comunicación basada en acciones (`DomainAction`, `DomainActionResponse`).
 
--   **`DomainAction`**: El modelo principal para representar una solicitud o comando en el sistema. Sus campos clave incluyen:
-
+-   **`DomainAction`**: El modelo estándar para todas las acciones (comandos o eventos) que se envían entre servicios a través de Redis. Sus campos clave incluyen:
     -   `action_id`: UUID único para la acción.
     -   `action_type`: String que define la acción (formato: "servicio_destino.entidad.verbo").
     -   `timestamp`: Fecha y hora de creación (UTC).
@@ -28,7 +27,7 @@ Este archivo contiene los modelos esenciales para la comunicación basada en acc
     -   `data`: Payload específico de la acción (un diccionario que idealmente se valida con otro modelo Pydantic).
     -   `metadata`: Metadatos adicionales.
 
--   **`DomainActionResponse`**: El modelo para las respuestas a una `DomainAction`. Contiene:
+-   **`DomainActionResponse`**: El modelo estándar para las respuestas a las `DomainAction`, especialmente en patrones pseudo-síncronos. Contiene:
     -   `action_id`: ID de la `DomainAction` original.
     -   `correlation_id`, `trace_id`: Deben coincidir con los de la `DomainAction` original.
     -   `success`: Booleano que indica si la acción fue exitosa.

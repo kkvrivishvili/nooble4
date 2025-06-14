@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 # Removed direct import of RedisPool class, will expect an initialized client
 from common.models.actions import DomainAction, DomainActionResponse
-from common.utils.queue_manager import QueueManager
+from common.clients.queue_manager import QueueManager
 from common.config.base_settings import CommonAppSettings
 
 # logging.basicConfig(level=logging.INFO) #basicConfig is usually called once at app start

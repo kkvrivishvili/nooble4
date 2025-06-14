@@ -14,13 +14,14 @@ from embedding_service.models.actions import EmbeddingGenerateAction, EmbeddingV
 from embedding_service.handlers.context_handler import EmbeddingContextHandler
 from embedding_service.services.embedding_processor import EmbeddingProcessor
 from embedding_service.services.validation_service import ValidationService
-from embedding_service.config.settings import get_settings
+from embedding_service.config.config import EmbeddingSettings
+from common.services import BaseService
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
-class GenerationService:
+class GenerationService(BaseService):
     """
     Servicio que encapsula la lógica de negocio para las acciones de embeddings.
     """
@@ -38,6 +39,11 @@ class GenerationService:
 
         # Inicializar sub-servicios
         self.validation_service = ValidationService(redis_client)
+        super().__init__(app_settings=settings, redis_client=redis_client)
+        # self.settings ya está disponible como self.app_settings a través de BaseService, 
+        # pero mantenemos self.settings por ahora para minimizar cambios internos en esta clase.
+        # A futuro, se podría refactorizar para usar self.app_settings directamente.
+        self.settings = settings 
         self.embedding_processor = EmbeddingProcessor(self.validation_service, redis_client)
 
     async def generate_embeddings(self, action: EmbeddingGenerateAction) -> Dict[str, Any]:

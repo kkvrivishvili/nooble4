@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from common.handlers.base_handler import BaseHandler # Ancestro común
 from common.handlers.base_context_handler import BaseContextHandler # Para isinstance
 from common.models.actions import DomainAction, DomainActionResponse, ErrorDetail
-from common.utils.queue_manager import QueueManager
+from common.clients.queue_manager import QueueManager
 from common.config import CommonAppSettings # Para el constructor
 from common.clients import BaseRedisClient # Para el constructor y uso
 

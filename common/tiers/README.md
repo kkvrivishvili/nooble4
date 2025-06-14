@@ -1,6 +1,6 @@
 # Módulo de Gestión de Tiers (`refactorizado.common.tiers`)
 
-Este módulo proporciona una solución centralizada para la gestión de tiers (niveles de suscripción/servicio) y sus límites asociados dentro de la plataforma Nooble4. Permite definir configuraciones de tier, validar el acceso a recursos basado en el tier del tenant y contabilizar el uso de dichos recursos.
+Este módulo, `common.tiers`, implementa la lógica centralizada para la gestión de tiers y la validación de acceso a recursos dentro del ecosistema Nooble4, operando en conjunto con la Arquitectura v4.0. Permite definir configuraciones de tier, validar el acceso a recursos basado en el tier del tenant y contabilizar el uso de dichos recursos.
 
 ## Estructura del Módulo
 

@@ -1,6 +1,6 @@
 # Módulo de Clientes Comunes (`refactorizado.common.clients`)
 
-Este módulo proporciona clientes estandarizados para la comunicación entre los microservicios de Nooble4. Actualmente, su componente principal es el `BaseRedisClient`.
+Este módulo proporciona clientes reutilizables para interactuar con otros servicios o sistemas externos dentro de la Arquitectura v4.0. El objetivo es encapsular la lógica de comunicación y ofrecer una interfaz simplificada y estandarizada.
 
 ## `BaseRedisClient`
 

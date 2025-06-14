@@ -2,7 +2,7 @@
 
 ## Visión General
 
-Este módulo proporciona un conjunto de clases base abstractas diseñadas para estandarizar y simplificar la creación de handlers dentro de los diversos servicios de la aplicación Nooble4. Los handlers son componentes responsables de procesar unidades de trabajo específicas, como acciones de dominio, callbacks o interacciones que requieren la gestión de un estado (contexto).
+Este módulo define las clases base para los **Handlers Especializados** en la Arquitectura v4.0 de Nooble4. Estos handlers NO son funciones registradas en un worker, sino clases con responsabilidades únicas y bien definidas que son utilizadas por la Capa de Servicio (`BaseService`) para ejecutar tareas específicas. Este módulo proporciona un conjunto de clases base abstractas diseñadas para estandarizar y simplificar la creación de handlers dentro de los diversos servicios de la aplicación Nooble4. Los handlers son componentes responsables de procesar unidades de trabajo específicas, como acciones de dominio, callbacks o interacciones que requieren la gestión de un estado (contexto).
 
 Al heredar de estas clases base, los desarrolladores pueden centrarse en la lógica de negocio específica de su handler, mientras que la infraestructura común (logging, inicialización, validación de datos, gestión de callbacks, persistencia de contexto) es gestionada por las clases base.
 

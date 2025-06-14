@@ -1,19 +1,16 @@
 # Módulo de Utilidades Comunes (`refactorizado.common.utils`)
 
-Este directorio contiene módulos de utilidad de propósito general que pueden ser utilizados por múltiples servicios dentro de la aplicación Nooble4.
+Este directorio contiene utilidades genéricas y compartidas que pueden ser utilizadas por cualquier otro módulo o servicio dentro del proyecto Nooble4, complementando la Arquitectura v4.0.
 
 ## Contenido del Módulo
 
 Actualmente, este directorio incluye los siguientes módulos:
 
-1.  **`logging.py`**: Proporciona una función para inicializar una configuración de logging estandarizada.
-2.  **`queue_manager.py`**: Ofrece una clase para generar nombres de colas Redis de manera consistente y centralizada.
+1. ### 1. `logging.py`
 
----
+- **Propósito**: Proporciona una función `init_logging()` para configurar el sistema de logging de manera estandarizada en toda la aplicación. Permite la configuración del nivel de log, formato, y handlers (ej. consola, archivo).
 
-### 1. `logging.py`
-
-**Propósito:** Estandarizar la configuración del logging a través de los diferentes microservicios.
+(Anteriormente, este módulo también contenía `QueueManager`, que ha sido movido a `common.clients` ya que su funcionalidad está estrechamente ligada a la gestión de colas para el cliente Redis).
 
 **Componentes Principales:**
 

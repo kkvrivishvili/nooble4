@@ -1,4 +1,74 @@
-# [OBSOLETO] Estándar de Handlers de Acciones
+# Estándar: Handlers Especializados (Arquitectura v4.0)
+
+## 1. El Nuevo Rol del Handler
+
+En la arquitectura v4.0, el concepto de "Handler" ha sido redefinido. Ya no es una función genérica que se registra para un tipo de acción, sino una **clase especializada con una responsabilidad única y bien definida**.
+
+Los Handlers son **componentes de negocio** que son instanciados y utilizados por la **Capa de Servicio** para delegar tareas específicas. No tienen conocimiento del `Worker` ni de las colas de Redis.
+
+**Principios Clave de un Handler:**
+
+- **Responsabilidad Única**: Un handler hace una sola cosa y la hace bien.
+- **Especialización**: Su nombre debe reflejar su propósito específico (ej: `ContextHandler`, `CallbackHandler`).
+- **Desacoplamiento**: No conoce a su llamador (la Capa de Servicio). Recibe los datos que necesita, los procesa y devuelve un resultado.
+- **Reutilización**: Al ser componentes pequeños y enfocados, pueden ser reutilizados por diferentes métodos de la Capa de Servicio si es necesario.
+
+## 2. Tipos Comunes de Handlers
+
+Estos son los "Componentes de Negocio Especializados" que utiliza la Capa de Servicio. Aunque no hay una regla estricta, se pueden agrupar en las siguientes categorías:
+
+### 2.1. `ContextHandler`
+
+**Propósito**: Encargado de todo lo relacionado con el `ExecutionContext`. Sus responsabilidades incluyen:
+- Cargar datos adicionales para enriquecer el contexto.
+- Validar que el contexto es válido para la operación solicitada.
+- Validar permisos y límites basados en el `tenant_tier` y otros datos del contexto.
+
+**Ejemplo (`embedding_service`):**
+```python
+# embedding_service/handlers/context_handler.py
+
+class EmbeddingContextHandler:
+    async def resolve_embedding_context(self, exec_context: ExecutionContext) -> EnrichedContext:
+        # ... Lógica para cargar configuraciones del tenant, etc.
+        pass
+
+    async def validate_embedding_permissions(self, context: EnrichedContext, ...):
+        # ... Lógica para verificar si el tier del tenant permite usar el modelo, etc.
+        pass
+```
+
+### 2.2. `CallbackHandler`
+
+**Propósito**: Encapsula la lógica de construir y enviar una `DomainAction` de callback. Esto mantiene a la Capa de Servicio limpia de los detalles de la comunicación asíncrona.
+
+**Ejemplo (`embedding_service`):**
+```python
+# embedding_service/handlers/embedding_callback_handler.py
+
+class EmbeddingCallbackHandler:
+    def __init__(self, queue_manager: DomainQueueManager, redis_client):
+        # ...
+    
+    async def send_success_callback(self, task_id: str, callback_queue: str, ...):
+        # 1. Construir el payload del callback (EmbeddingCallbackAction).
+        # 2. Crear la DomainAction de callback.
+        # 3. Usar el redis_client para enviarla a la callback_queue.
+        pass
+```
+
+### 2.3. Otros Componentes (Processors, Validators)
+
+Aunque no siempre lleven el sufijo "Handler", otras clases especializadas como `EmbeddingProcessor` o `ValidationService` siguen la misma filosofía. Son componentes con una responsabilidad única que son orquestados por la Capa de Servicio.
+
+## 3. Conclusión
+
+En resumen, el patrón es:
+
+- El **Worker** delega a la **Capa de Servicio**.
+- La **Capa de Servicio** orquesta el flujo de trabajo delegando tareas específicas a diferentes **Handlers Especializados**.
+
+Este enfoque promueve un código más limpio, modular y fácil de probar, donde cada clase tiene un propósito claro y definido.
 
 > **ESTE DOCUMENTO ESTÁ OBSOLETO Y SE MANTIENE ÚNICAMENTE COMO REFERENCIA HISTÓRICA.**
 > **NO DEBE USARSE COMO GUÍA PARA NUEVAS IMPLEMENTACIONES.**
