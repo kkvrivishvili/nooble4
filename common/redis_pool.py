@@ -6,9 +6,8 @@ import logging
 import redis.asyncio as redis
 from typing import Optional
 
-from refactorizado.common.config.base_settings import CommonAppSettings # Added import
+from common.config.base_settings import CommonAppSettings 
 
-logger = logging.getLogger(__name__)
 
 class RedisPool:
     """Gestor singleton de conexiones Redis."""

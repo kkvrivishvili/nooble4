@@ -11,12 +11,12 @@ import redis.asyncio as redis_async # Cambiado a redis.asyncio
 from pydantic import ValidationError
 
 # from refactorizado.common.redis_pool import RedisPool # Eliminado, se usará conexión async directa
-from refactorizado.common.handlers.base_handler import BaseHandler # Ancestro común
-from refactorizado.common.handlers.base_context_handler import BaseContextHandler # Para isinstance
-from refactorizado.common.models.actions import DomainAction, DomainActionResponse, ErrorDetail
-from refactorizado.common.utils.queue_manager import QueueManager
-from refactorizado.common.config import CommonAppSettings # Para el constructor
-from refactorizado.common.clients import BaseRedisClient # Para el constructor y uso
+from common.handlers.base_handler import BaseHandler # Ancestro común
+from common.handlers.base_context_handler import BaseContextHandler # Para isinstance
+from common.models.actions import DomainAction, DomainActionResponse, ErrorDetail
+from common.utils.queue_manager import QueueManager
+from common.config import CommonAppSettings # Para el constructor
+from common.clients import BaseRedisClient # Para el constructor y uso
 
 logger = logging.getLogger(__name__)
 
