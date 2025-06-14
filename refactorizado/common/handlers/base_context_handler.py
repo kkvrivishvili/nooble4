@@ -4,12 +4,12 @@ from typing import Type, Optional, Any, Tuple
 import redis
 from pydantic import BaseModel, ValidationError
 
-from .base_handler import BaseHandler
-from refactorizado.common.db.redis_pool import RedisPool
+from .base_action_handler import BaseActionHandler
+from refactorizado.common.redis_pool import RedisPool
 from refactorizado.common.models.actions import DomainAction
 
 
-class BaseContextHandler(BaseHandler):
+class BaseContextHandler(BaseActionHandler):
     """
     Extiende BaseActionHandler para añadir la gestión de un 'contexto' persistente en Redis.
 

@@ -6,7 +6,7 @@ from typing import Optional
 from pydantic import Field, model_validator
 from pydantic_settings import SettingsConfigDict
 
-from ..settings import CommonAppSettings # Ajustado para la nueva ubicación
+from ..base_settings import CommonAppSettings # Ajustado para la nueva ubicación
 
 # Ajuste de ruta para importar constantes del servicio específico.
 # Esto asume que la raíz del proyecto está en el PYTHONPATH
@@ -65,6 +65,10 @@ class ExecutionSettings(CommonAppSettings):
 
     # Performance tracking
     enable_execution_tracking: bool = Field(True, description="Habilitar tracking de métricas de ejecución")
+
+    # Tool and Streaming settings
+    tool_timeout_seconds: int = Field(30, description="Timeout for individual tool executions in seconds.")
+    stream_chunk_size: int = Field(10, description="Chunk size in tokens for streaming LLM responses.")
     
     @model_validator(mode='after')
     def set_default_model_name_if_none(self) -> 'ExecutionSettings':

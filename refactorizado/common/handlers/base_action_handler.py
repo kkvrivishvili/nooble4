@@ -3,7 +3,7 @@ from typing import Type, Optional
 
 from pydantic import BaseModel, ValidationError
 
-from refactorizado.common.db.redis_pool import RedisPool
+from refactorizado.common.redis_pool import RedisPool
 from refactorizado.common.models.actions import DomainAction
 from .base_handler import BaseHandler
 

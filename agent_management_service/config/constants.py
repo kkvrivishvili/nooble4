@@ -7,8 +7,7 @@ la clase AgentManagementSettings.
 """
 
 # Constantes de Colas y Processing
-# Este prefijo podría moverse a settings si se necesita configurar por entorno.
-CALLBACK_QUEUE_PREFIX = "agent-management"
+# (Las configuraciones de colas ahora se gestionan en AgentManagementSettings)
 
 # Constantes para Templates de Agentes
 class AgentTemplateTypes:

@@ -4,7 +4,7 @@ Definición de la configuración específica para Agent Management Service.
 from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 
-from ..settings import CommonAppSettings # Ajustado para la nueva ubicación
+from ..base_settings import CommonAppSettings # Ajustado para la nueva ubicación
 
 class AgentManagementSettings(CommonAppSettings):
     """Configuración específica para Agent Management Service."""
@@ -96,4 +96,10 @@ class AgentManagementSettings(CommonAppSettings):
     default_agent_rag_results_limit: int = Field(
         5, 
         description="Límite de resultados RAG por defecto para agentes"
+    )
+
+    # Configuración de Colas
+    callback_queue_prefix: str = Field(
+        "agent-management", 
+        description="Prefix for callback queues used by AMS."
     )

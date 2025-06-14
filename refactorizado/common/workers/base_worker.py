@@ -10,7 +10,7 @@ from pydantic import BaseModel
 import redis
 from pydantic import ValidationError
 
-from refactorizado.common.db.redis_pool import RedisPool
+from refactorizado.common.redis_pool import RedisPool
 from refactorizado.common.handlers.base_handler import BaseHandler
 from refactorizado.common.models.actions import DomainAction, DomainActionResponse, ErrorDetail
 from refactorizado.common.utils.queue_manager import QueueManager

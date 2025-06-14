@@ -16,14 +16,8 @@ class WebSocketMessageTypes:
     DONE = "done"
     START = "start"
 
-# Constantes de Rate Limiting (si son fijas y no varían por entorno)
-# Si estos valores necesitan ser configurables, deben moverse a settings.py
-RATE_LIMITING_TIERS = {
-    "free": 50,      # 50 requests por sesión por hora
-    "advance": 100,  # 100 requests por sesión por hora
-    "professional": 300,  # 300 requests por sesión por hora
-    "enterprise": 500  # 500 requests por sesión por hora
-}
+# Constantes de Rate Limiting
+# (La configuración de rate limiting ahora se gestiona en OrchestratorSettings)
 
 # Constantes para Endpoints
 class EndpointPaths:

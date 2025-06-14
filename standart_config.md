@@ -53,22 +53,27 @@ def get_settings() -> ServiceSpecificSettings:
 
 ### 3.2. `config/constants.py` (Opcional)
 
-- Este archivo es opcional y solo debe usarse para constantes verdaderamente inmutables y específicas del servicio.
-- **Ejemplos**: Enums para tipos de acción interna, nombres de colas internas fijas (si no se derivan del `service_name` o `domain_name`), nombres de endpoints fijos que no cambian entre entornos.
-- **NO debe contener**: Valores que podrían cambiar (TTLs, URLs de otros servicios, límites, flags de features, etc.). Estos son configuraciones y pertenecen a `settings.py`.
+- Este archivo es opcional y solo debe usarse para constantes verdaderamente inmutables y específicas del servicio que no son adecuadas para las clases de configuración Pydantic.
+- **Ejemplos**: Enums para tipos de acción interna, estados de tareas, tipos de documentos, o rutas de endpoints fijas del propio servicio.
+- **NO debe contener**: Valores que podrían cambiar entre entornos (TTLs, URLs de otros servicios, límites, flags de features), la versión del servicio (manejada en `CommonAppSettings`), nombres de colas Redis configurables, o cualquier lógica de tiers.
+- Durante la refactorización, muchos elementos que antes estaban en `constants.py` (como `VERSION`, definiciones de nombres de colas, o límites por tier) se han movido a las clases `Settings` correspondientes o se ha determinado que se construirán dinámicamente a partir de la configuración.
 
-**Ejemplo (`<nombre_servicio>_service/config/constants.py`):**
+**Ejemplo (`<nombre_servicio>_service/config/constants.py` después de la limpieza):**
 ```python
 from enum import Enum
 
-SERVICE_VERSION = "1.0.2-beta"
+class TaskStates(str, Enum):
+    PENDING = "pending"
+    COMPLETED = "completed"
+    FAILED = "failed"
 
-class InternalActionTypes(Enum):
-    PROCESS_DATA = "process_data"
-    VALIDATE_INPUT = "validate_input"
+class DocumentTypes(str, Enum):
+    PDF = "pdf"
+    TEXT = "text"
 
 class FixedEndpointPaths:
-    STATUS_INTERNAL = "/_internal/status"
+    HEALTH_CHECK = "/health"
+    MAIN_RESOURCE = "/resource"
 ```
 
 ### 3.3. `config/__init__.py`
@@ -98,7 +103,7 @@ refactorizado/
 |-- common/
 |   |-- config/
 |   |   |-- __init__.py
-|   |   |-- settings.py  # Define CommonAppSettings
+|   |   |-- base_settings.py  # Define CommonAppSettings
 |   |   |-- service_settings/ # Subdirectorio para configuraciones específicas de servicio
 |   |   |   |-- __init__.py
 |   |   |   |-- agent_orchestrator.py # Define OrchestratorSettings
@@ -107,32 +112,57 @@ refactorizado/
 |-- ...
 ```
 
-### 4.1. `refactorizado/common/config/settings.py` (Configuración Base Común)
+### 4.1. `refactorizado/common/config/base_settings.py` (Configuración Base Común)
 
 - Define la clase base `CommonAppSettings` que todas las configuraciones específicas de servicio heredarán.
 - Esta clase utiliza `pydantic_settings.BaseSettings`.
 
-**Contenido (`refactorizado/common/config/settings.py`):**
+**Contenido (`refactorizado/common/config/base_settings.py`):**
 ```python
-from typing import Optional
+from typing import List, Optional, Union
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic import Field, AnyHttpUrl
 
 class CommonAppSettings(BaseSettings):
     model_config = SettingsConfigDict(extra='ignore', env_file='.env')
 
-    service_name: str = Field(..., description="Nombre del servicio, ej: 'agent-orchestrator-service'. Requerido.")
+    # Identificación y Entorno del Servicio
+    service_name: str = Field(..., description="Nombre del servicio, ej: 'agent-orchestrator'. Requerido.")
+    service_version: str = Field("0.1.0", description="Versión del servicio.")
     environment: str = Field("development", description="Entorno de ejecución (development, staging, production).")
     log_level: str = Field("INFO", description="Nivel de logging (DEBUG, INFO, WARNING, ERROR).")
+    enable_telemetry: bool = Field(False, description="Habilitar telemetría y seguimiento distribuido.")
 
-    redis_url: str = Field("redis://localhost:6379/0", description="URL de conexión a Redis.")
+    # Configuración HTTP Común
+    http_timeout_seconds: int = Field(30, description="Timeout global para clientes HTTP salientes.")
+    max_retries: int = Field(3, description="Número máximo de reintentos para operaciones críticas.")
+    worker_sleep_seconds: float = Field(0.1, description="Tiempo de espera para los workers entre ciclos de polling.")
+
+    # Configuración CORS
+    cors_origins: List[Union[AnyHttpUrl, str]] = Field(default_factory=lambda: ["*"], description="Orígenes permitidos para CORS.")
+    cors_allow_credentials: bool = Field(True, description="Permitir credenciales en CORS.")
+    cors_allow_methods: List[str] = Field(default_factory=lambda: ["*"], description="Métodos HTTP permitidos por CORS.")
+    cors_allow_headers: List[str] = Field(default_factory=lambda: ["*"], description="Cabeceras HTTP permitidas por CORS.")
+
+    # Configuración de API Key (para proteger los propios endpoints del servicio)
+    api_key_header_name: str = Field("X-API-Key", description="Nombre de la cabecera para la API key de acceso al servicio.")
+
+    # Configuración de Redis
+    redis_url: Optional[str] = Field(None, description="URL de conexión a Redis completa (ej. redis://user:pass@host:port/db?ssl_cert_reqs=required). Si se provee, otras variables redis_* pueden ser ignoradas.")
     redis_host: str = Field("localhost", description="Host de Redis.")
     redis_port: int = Field(6379, description="Puerto de Redis.")
-    redis_db: int = Field(0, description="Base de datos Redis.")
-    redis_password: Optional[str] = Field(None, description="Contraseña de Redis (opcional).")
+    redis_password: Optional[str] = Field(None, description="Contraseña de Redis.")
+    redis_db: int = Field(0, description="Número de la base de datos Redis.")
+    redis_use_ssl: bool = Field(False, description="Usar SSL para la conexión a Redis.")
+    redis_socket_connect_timeout: int = Field(5, description="Timeout en segundos para la conexión del socket Redis.")
+    redis_max_connections: Optional[int] = Field(None, description="Número máximo de conexiones en el pool de Redis.")
+    redis_health_check_interval: int = Field(30, description="Intervalo en segundos para el health check de la conexión Redis.")
+    redis_decode_responses: bool = Field(True, description="Decodificar automáticamente las respuestas de Redis a UTF-8.")
 
-    database_url: Optional[str] = Field(None, description="URL de conexión a la base de datos principal (opcional).")
-    # ... otros campos comunes ...
+    # Configuración de Base de Datos (Opcional por servicio)
+    database_url: Optional[str] = Field(None, description="URL de conexión a la base de datos principal (ej. PostgreSQL, MySQL).")
+
+    # Otros campos comunes pueden añadirse aquí según evolucionen las necesidades.
 ```
 
 ### 4.2. `refactorizado/common/config/service_settings/<nombre_servicio>.py` (Configuraciones Específicas)
@@ -146,7 +176,7 @@ class CommonAppSettings(BaseSettings):
 from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 
-from ..settings import CommonAppSettings # Importa la base común
+from ..base_settings import CommonAppSettings # Importa la base común
 
 class MiServicioSettings(CommonAppSettings):
     # Modelo de configuración con el prefijo específico del servicio
@@ -177,7 +207,7 @@ class MiServicioSettings(CommonAppSettings):
 - `refactorizado/common/config/__init__.py` exportará `CommonAppSettings` y podría re-exportar las configuraciones de `service_settings`.
   ```python
   # refactorizado/common/config/__init__.py
-  from .settings import CommonAppSettings
+  from .base_settings import CommonAppSettings
   from . import service_settings # Para acceder como service_settings.OrchestratorSettings
   # o directamente: from .service_settings import OrchestratorSettings, ...
 
@@ -199,18 +229,40 @@ Esta estructura centralizada asegura que todas las definiciones de configuració
 
 ## 6. Variables de Entorno y Archivos `.env`
 
-- **Prefijos**: Cada servicio usará un prefijo único para sus variables de entorno (ej. `AOS_`, `AES_`, `CONVERSATION_`) definido en `SettingsConfigDict(env_prefix=...)`.
-- **Archivos `.env`**: Para desarrollo local, se recomienda el uso de archivos `.env` en la raíz de cada servicio o en la raíz del proyecto. Pydantic (`BaseSettings`) los carga automáticamente si se especifica `env_file='.env'` en `SettingsConfigDict`.
+- **Prefijos**: Cada servicio usará un prefijo único para sus variables de entorno (ej. `AGENT_ORCHESTRATOR_`, `AGENT_EXECUTION_`, `CONVERSATION_`) definido en `SettingsConfigDict(env_prefix=...)` en su clase de settings específica.
+- **Archivos `.env`**: Para desarrollo local, se recomienda el uso de archivos `.env`. Pydantic (`BaseSettings`) los carga automáticamente (por defecto busca un archivo `.env` en el directorio actual). Se provee una plantilla general en `refactorizado/.env.example` que debe ser copiada a `refactorizado/.env` y personalizada. Los servicios pueden cargar este `.env` común si `env_file='.env'` está en su `SettingsConfigDict` y se ejecutan desde el directorio `refactorizado`, o pueden tener sus propios archivos `.env` locales si es necesario (aunque se prefiere el centralizado).
 
-## 7. Acciones Específicas de Refactorización (Resumen del Análisis)
+## 7. Resumen de la Refactorización Realizada
 
-- **Todos los Servicios**: Revisar `constants.py` y mover cualquier valor configurable a `settings.py`.
-- **`common/config.py`**: Implementar `CommonAppSettings` como se describe arriba. Eliminar o refactorizar `get_service_settings`.
-- **Conversation Service**: Crear `config/__init__.py`. Asegurar que `supabase_url`, `supabase_key` se carguen desde el entorno.
-- **Embedding Service**: Crear `config/__init__.py`. Eliminar el hardcoding de `openai_api_key` en `get_settings()` y asegurar que se cargue desde el entorno. Mover el diccionario `OPENAI_MODELS` a `constants.py` si es estático, o gestionarlo como configuración si sus valores (ej. `max_tokens`) pueden variar.
-- **Ingestion Service**: Modificar `get_settings()` para seguir el patrón estándar de instanciar `IngestionServiceSettings()` directamente, confiando en la herencia de `CommonAppSettings` y Pydantic para la carga. Eliminar la redundancia masiva entre `constants.py` y los defaults en `settings.py`.
-- **Query Service**: Asegurar que la llamada en `get_settings()` sea `QueryServiceSettings(**base_settings.model_dump())` o simplemente `QueryServiceSettings()` si `base_settings` ya es un diccionario compatible o si `CommonAppSettings` se maneja correctamente por herencia directa.
-- **Todos los `get_settings()`**: Estandarizar a la forma simple `@lru_cache() def get_settings(): return ServiceSpecificSettings()`.
+La estandarización de la configuración implicó los siguientes cambios clave a través del codebase:
+
+- **Centralización de Clases de Configuración**:
+  - Se creó una clase base `CommonAppSettings` en `refactorizado/common/config/base_settings.py`, que contiene todas las configuraciones compartidas entre servicios (nombre del servicio, versión, entorno, logging, CORS, parámetros de Redis, etc.).
+  - Las clases de configuración específicas de cada servicio (ej. `OrchestratorSettings`, `EmbeddingSettings`) se movieron a `refactorizado/common/config/service_settings/`, heredando de `CommonAppSettings` y definiendo sus propios parámetros y prefijos de entorno.
+
+- **Simplificación de `config/settings.py` en Servicios Individuales**:
+  - Los archivos `settings.py` dentro de cada servicio ahora simplemente importan su clase de configuración específica desde la ubicación centralizada y la instancian a través de una función `get_settings()` cacheada.
+
+- **Limpieza de Archivos `constants.py`**:
+  - Se revisaron los archivos `constants.py` en cada servicio.
+  - Se eliminaron valores configurables, como la `VERSION` del servicio (ahora en `CommonAppSettings`), nombres de colas Redis (ahora derivados de la configuración en las clases `Settings`), y cualquier parámetro relacionado con tiers.
+  - `constants.py` ahora solo contiene verdaderas constantes inmutables específicas del dominio del servicio (ej. Enums para estados, tipos de documentos, rutas de API fijas del propio servicio).
+
+- **Eliminación de Lógica de Tiers de las Configuraciones de Servicio**:
+  - Todas las configuraciones relacionadas con límites o comportamientos específicos por tier de usuario (ej. `max_requests_per_hour_by_tier`, `feature_enabled_by_tier`) fueron eliminadas de las clases `Settings` de los servicios individuales.
+  - Esta lógica será manejada por un futuro módulo de gestión de tiers centralizado (`refactorizado/common/tiers`).
+
+- **Manejo de Nombres de Colas Redis**:
+  - Los nombres de las colas Redis ya no se definen como constantes fijas. En su lugar, se construyen dinámicamente utilizando parámetros de las clases `Settings` (como `domain_name`, `service_name`, y sufijos/segmentos específicos de cola definidos en la configuración del servicio).
+
+- **Archivo `.env.example`**:
+  - Se creó un archivo `refactorizado/.env.example` para servir como plantilla de las variables de entorno comunes y específicas de los servicios, facilitando la configuración del entorno de desarrollo.
+
+- **Actualización de `CommonAppSettings`**:
+  - Se añadieron nuevos campos relevantes a `CommonAppSettings`, incluyendo `service_version`, `worker_sleep_seconds`, `enable_telemetry`, y parámetros detallados para la conexión Redis (timeouts, SSL, max_connections, etc.).
+
+- **Consistencia en `__init__.py`**:
+  - Se estandarizaron los archivos `__init__.py` en las carpetas `config/` de los servicios y en `refactorizado/common/config/` para exportar adecuadamente las configuraciones y funciones `get_settings`.
 
 ## 8. Conclusión
 

@@ -6,7 +6,7 @@ from typing import List
 from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 
-from ..settings import CommonAppSettings # Ajustado para la nueva ubicación
+from ..base_settings import CommonAppSettings # Ajustado para la nueva ubicación
 
 class OrchestratorSettings(CommonAppSettings):
     """Configuración específica para Agent Orchestrator Service."""

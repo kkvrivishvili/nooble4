@@ -6,6 +6,8 @@ import logging
 import redis.asyncio as redis
 from typing import Optional
 
+from refactorizado.common.config.base_settings import CommonAppSettings # Added import
+
 logger = logging.getLogger(__name__)
 
 class RedisPool:
@@ -19,7 +21,7 @@ class RedisPool:
             cls._instance = super().__new__(cls)
         return cls._instance
     
-    async def get_client(self, redis_url: str = "redis://localhost:6379") -> redis.Redis:
+    async def get_client(self, settings: CommonAppSettings) -> redis.Redis: # Changed signature
         """
         Obtiene el cliente Redis compartido.
         
@@ -28,13 +30,13 @@ class RedisPool:
         """
         if self._redis_client is None:
             self._redis_client = redis.from_url(
-                redis_url,
-                decode_responses=True,
-                socket_connect_timeout=5,
-                socket_keepalive=True,
-                socket_keepalive_options={},
-                max_connections=50,
-                health_check_interval=30
+                settings.redis_url, # Use settings
+                decode_responses=settings.redis_decode_responses, # Use settings
+                socket_connect_timeout=settings.redis_socket_connect_timeout, # Use settings
+                socket_keepalive=True, # Kept hardcoded for now
+                socket_keepalive_options={}, # Kept hardcoded for now
+                max_connections=settings.redis_max_connections, # Use settings
+                health_check_interval=settings.redis_health_check_interval # Use settings
             )
             
             try:
@@ -57,9 +59,9 @@ class RedisPool:
 # Instancia global
 redis_pool = RedisPool()
 
-async def get_redis_client(redis_url: str = "redis://localhost:6379") -> redis.Redis:
+async def get_redis_client(settings: CommonAppSettings) -> redis.Redis: # Changed signature
     """Helper para obtener cliente Redis."""
-    return await redis_pool.get_client(redis_url)
+    return await redis_pool.get_client(settings) # Pass settings
 
 async def close_redis_pool():
     """Helper para cerrar pool."""

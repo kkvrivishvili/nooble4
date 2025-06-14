@@ -8,7 +8,7 @@ Esto permite importar configuraciones así:
 from refactorizado.common.config import CommonAppSettings, AgentOrchestratorSettings, EmbeddingServiceSettings, IngestionServiceSettings
 """
 
-from .settings import CommonAppSettings, get_service_settings
+from .base_settings import CommonAppSettings, get_service_settings
 from .service_settings import (
     AgentManagementSettings,
     OrchestratorSettings,       # Corrected name based on its definition

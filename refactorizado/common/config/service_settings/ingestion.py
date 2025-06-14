@@ -7,7 +7,7 @@ from enum import Enum
 from pydantic import Field, field_validator
 from pydantic_settings import SettingsConfigDict
 
-from ..settings import CommonAppSettings
+from ..base_settings import CommonAppSettings
 
 # --- Enums and constants specific to Ingestion Service configuration ---
 class ChunkingStrategies(str, Enum):
@@ -86,23 +86,6 @@ class IngestionServiceSettings(CommonAppSettings):
 
     # CORS (ya en CommonAppSettings, se puede sobreescribir si es necesario)
     # cors_origins: List[str] = Field(default=["*"], description="Orígenes permitidos para CORS en Ingestion Service")
-
-    # Tier-specific limits (ejemplos, podrían ser más complejos)
-    # Estas estructuras podrían ser más elaboradas, por ejemplo, un Pydantic model por tier.
-    max_documents_per_hour_free_tier: int = Field(default=5, description="Max docs/hr para tier Free")
-    max_documents_per_hour_advance_tier: int = Field(default=20, description="Max docs/hr para tier Advance")
-    max_documents_per_hour_professional_tier: int = Field(default=100, description="Max docs/hr para tier Professional")
-    max_documents_per_hour_enterprise_tier: int = Field(default=500, description="Max docs/hr para tier Enterprise")
-
-    max_file_size_bytes_free_tier: int = Field(default=5 * 1024 * 1024, description="Max file size (bytes) para tier Free - 5MB")
-    max_file_size_bytes_advance_tier: int = Field(default=10 * 1024 * 1024, description="Max file size (bytes) para tier Advance - 10MB")
-    max_file_size_bytes_professional_tier: int = Field(default=50 * 1024 * 1024, description="Max file size (bytes) para tier Professional - 50MB")
-    max_file_size_bytes_enterprise_tier: int = Field(default=100 * 1024 * 1024, description="Max file size (bytes) para tier Enterprise - 100MB")
-
-    max_chunks_per_document_free_tier: int = Field(default=500, description="Max chunks/doc para tier Free")
-    max_chunks_per_document_advance_tier: int = Field(default=1000, description="Max chunks/doc para tier Advance")
-    max_chunks_per_document_professional_tier: int = Field(default=5000, description="Max chunks/doc para tier Professional")
-    max_chunks_per_document_enterprise_tier: int = Field(default=10000, description="Max chunks/doc para tier Enterprise")
 
     @field_validator("cors_origins", pre=True, check_fields=False) # check_fields=False si se hereda
     def parse_cors_origins(cls, v):

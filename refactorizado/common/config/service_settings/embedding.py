@@ -7,7 +7,7 @@ from enum import Enum
 from pydantic import Field, field_validator
 from pydantic_settings import SettingsConfigDict
 
-from ..settings import CommonAppSettings
+from ..base_settings import CommonAppSettings
 
 # --- Constantes que se usan en Settings o son informativas ---
 class EmbeddingProviders(str, Enum):
@@ -107,36 +107,6 @@ class EmbeddingServiceSettings(CommonAppSettings):
     embedding_cache_enabled: bool = Field(True, description="Habilitar la caché de embeddings.")
     cache_ttl_seconds: int = Field(86400, description="TTL para la caché de embeddings (segundos). 24 horas por defecto.")
     cache_max_size: int = Field(10000, description="Número máximo de entradas en la caché de embeddings.")
-
-    # --- Límites por Tier (Rate Limiting y Uso) ---
-    # Estos podrían ser cargados desde una base de datos o un sistema de configuración más dinámico en el futuro.
-    max_embeddings_per_hour_by_tier: Dict[str, int] = Field(
-        default_factory=lambda: {
-            "free": 100,
-            "advance": 1000,
-            "professional": 10000,
-            "enterprise": 100000 # O un valor muy alto para representar "ilimitado"
-        },
-        description="Máximo de embeddings generados por hora, por tier de usuario."
-    )
-    max_batch_size_by_tier: Dict[str, int] = Field(
-        default_factory=lambda: {
-            "free": 10,
-            "advance": 50,
-            "professional": 100,
-            "enterprise": 500
-        },
-        description="Tamaño máximo de lote permitido por tier de usuario."
-    )
-    max_text_length_by_tier: Dict[str, int] = Field(
-        default_factory=lambda: {
-            "free": 4096,
-            "advance": 8192,
-            "professional": 16384,
-            "enterprise": 32768
-        },
-        description="Longitud máxima de texto permitida por tier de usuario."
-    )
 
     # --- Configuración de Reintentos y Timeouts para Proveedores Externos ---
     provider_timeout_seconds: int = Field(30, description="Timeout en segundos para llamadas a proveedores de embeddings.")

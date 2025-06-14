@@ -31,8 +31,14 @@ class CommonAppSettings(BaseSettings):
     redis_db: int = Field(0, description="Número de base de datos Redis.")
     redis_password: Optional[str] = Field(None, description="Contraseña de Redis (si es requerida).")
 
+    # Configuraciones del pool de Redis
+    redis_socket_connect_timeout: int = Field(5, description="Socket connect timeout for Redis in seconds.")
+    redis_max_connections: int = Field(50, description="Max connections for Redis pool.")
+    redis_health_check_interval: int = Field(30, description="Health check interval for Redis connections in seconds.")
+    redis_decode_responses: bool = Field(True, description="Whether Redis client should decode responses to strings.")
+
     # Configuración de Base de Datos (opcional, si el servicio la requiere)
-    database_url: Optional[str] = Field(None, description="URL de conexión a la base de datos principal (ej: postgresql://user:pass@host:port/dbname).")
+    database_url: Optional[str] = Field(None, description="Database URL for the service (e.g., postgresql://user:pass@host:port/db)")
 
     # Otros campos comunes podrían incluir:
     # http_timeout_seconds: int = Field(30, description="Timeout para llamadas HTTP salientes.")

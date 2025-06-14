@@ -10,13 +10,9 @@ se encuentran ahora en 'refactorizado.common.config.service_settings.embedding.p
 junto con EmbeddingServiceSettings para mantener la cohesión.
 """
 
-# Nombres de colas. El prefijo 'embedding' es parte de `domain_name` o `callback_queue_prefix` en settings.
-# Estos nombres completos se mantienen aquí si la estructura es muy fija.
-# Alternativamente, podrían construirse dinámicamente usando el prefijo de settings.
-class QueueNames:
-    EMBEDDING_GENERATE = "embedding:generate"  # Podría ser f"{settings.domain_name}:generate"
-    EMBEDDING_CALLBACK = "embedding:callback"  # Podría ser f"{settings.callback_queue_prefix}:callback"
-    EMBEDDING_VALIDATE = "embedding:validate"  # Podría ser f"{settings.domain_name}:validate"
+# Nombres de colas
+# (Los nombres de las colas ahora se construyen dinámicamente en el código
+# utilizando los valores de 'domain_name' y/o 'callback_queue_prefix' de EmbeddingServiceSettings)
 
 # Constantes para Endpoints
 class EndpointPaths:

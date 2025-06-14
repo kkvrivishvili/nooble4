@@ -10,9 +10,6 @@ Las Enums ChunkingStrategies y StorageTypes ahora se definen en
 """
 from enum import Enum
 
-# Versión del servicio (puede ser útil para logs o health checks)
-VERSION = "1.0.0" 
-
 # Constantes para Estados de Tareas
 class TaskStates(str, Enum):
     PENDING = "pending"

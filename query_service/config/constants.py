@@ -6,9 +6,6 @@ de consultas mediante RAG. Los valores configurables se gestionan a través de
 QueryServiceSettings en la configuración centralizada.
 """
 
-# Versión del servicio (puede ser útil para logs o health checks)
-VERSION = "1.0.0"
-
 # Constantes de Proveedores de LLM (usado para identificar proveedores soportados)
 class LLMProviders:
     GROQ = "groq"
@@ -18,16 +15,10 @@ class LLMProviders:
     OLLAMA = "ollama"
     # Añadir otros proveedores según sea necesario
 
-# Nombres de colas específicas del Query Service (el prefijo global y de servicio viene de settings)
-# Estos son los nombres *base* de las colas que el servicio escucha o publica.
-# La nomenclatura completa de la cola se construye usando QueueManager (ver MEMORY[9395f05a-ecfb-4003-ad50-a3deff0156af])
-class QueueNames:
-    # Cola principal donde el Query Service recibe acciones de consulta
-    PROCESS_QUERY_ACTION = "process_query" # Ejemplo: nooble4:dev:query:process_query:actions
-    
-    # Podrían existir otras colas para tareas internas o callbacks específicos del QS
-    # Por ejemplo, si el QS necesita realizar sub-tareas asíncronas internamente.
-    # QUERY_SUBTASK_EXAMPLE = "internal_subtask"
+# Nombres de colas
+# (Los nombres de las colas ahora se construyen dinámicamente en el código
+# utilizando los valores de 'domain_name' y 'process_query_queue_segment' de QueryServiceSettings,
+# junto con la lógica de QueueManager para los sufijos estándar como ':actions' o ':callback'.)
 
 # Constantes para Endpoints del API del Query Service
 class EndpointPaths:

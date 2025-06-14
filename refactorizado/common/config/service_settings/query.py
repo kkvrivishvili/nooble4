@@ -3,7 +3,7 @@ Configuración específica para el Query Service.
 """
 from typing import Dict, Any
 from pydantic import Field
-from ..settings import CommonAppSettings # Ajustado para importar CommonAppSettings
+from ..base_settings import CommonAppSettings # Ajustado para importar CommonAppSettings
 
 class QueryServiceSettings(CommonAppSettings):
     """
@@ -17,7 +17,7 @@ class QueryServiceSettings(CommonAppSettings):
 
     # Redis y colas específicas del Query Service
     # redis_url ya está en CommonAppSettings
-    query_actions_queue_prefix: str = Field(default="query", description="Prefijo para colas de acciones del Query Service")
+    process_query_queue_segment: str = Field(default="process_query", description="Segmento específico para la cola de acciones de procesamiento de consultas (ej. 'process_query' en 'servicio:process_query:actions')")
     
     # Configuración de colas de callback (hacia dónde responde el QS)
     # Esto podría ser más genérico si el QS responde a múltiples servicios.
