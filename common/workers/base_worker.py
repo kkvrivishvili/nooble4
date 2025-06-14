@@ -7,13 +7,16 @@ from typing import Optional, Type, Dict, Any
 
 from pydantic import BaseModel
 
-import redis
+import redis.asyncio as redis_async # Cambiado a redis.asyncio
 from pydantic import ValidationError
 
-from refactorizado.common.redis_pool import RedisPool
-from refactorizado.common.handlers.base_handler import BaseHandler
+# from refactorizado.common.redis_pool import RedisPool # Eliminado, se usará conexión async directa
+from refactorizado.common.handlers.base_handler import BaseHandler # Ancestro común
+from refactorizado.common.handlers.base_context_handler import BaseContextHandler # Para isinstance
 from refactorizado.common.models.actions import DomainAction, DomainActionResponse, ErrorDetail
 from refactorizado.common.utils.queue_manager import QueueManager
+from refactorizado.common.config import CommonAppSettings # Para el constructor
+from refactorizado.common.clients import BaseRedisClient # Para el constructor y uso
 
 logger = logging.getLogger(__name__)
 
@@ -30,22 +33,34 @@ class BaseWorker:
     Descubre, instancia y ejecuta el handler apropiado para cada `DomainAction`
     basándose en una convención de nombres y estructura de carpetas.
 
-    VERSIÓN: 6.0 - Refactorizado para descubrimiento dinámico de handlers.
+    VERSIÓN: 7.0 - Refactorizado para Redis asíncrono y nueva instanciación de handlers.
     """
 
-    def __init__(self, service_name: str, redis_pool: RedisPool, handler_base_package_path: str):
-        if not service_name:
-            raise ValueError("El nombre del servicio (service_name) es obligatorio.")
-        if redis_pool is None:
-            raise ValueError("El pool de Redis (redis_pool) es obligatorio.")
+    def __init__(self, app_settings: CommonAppSettings, async_redis_conn: redis_async.Redis, handler_base_package_path: str):
+        if not app_settings:
+            raise ValueError("La configuración de la aplicación (app_settings) es obligatoria.")
+        if not app_settings.service_name:
+            raise ValueError("El nombre del servicio (app_settings.service_name) es obligatorio.")
+        if async_redis_conn is None:
+            raise ValueError("La conexión Redis asíncrona (async_redis_conn) es obligatoria.")
         if not handler_base_package_path:
             raise ValueError("La ruta base del paquete de handlers (handler_base_package_path) es obligatoria.")
 
-        self.service_name = service_name
-        self.redis_pool = redis_pool
+        self.app_settings = app_settings
+        self.service_name = app_settings.service_name # Tomado de app_settings
+        self.async_redis_conn = async_redis_conn # Conexión Redis asíncrona 'cruda'
         self.handler_base_package_path = handler_base_package_path
+        
+        # QueueManager ahora podría tomar app_settings si necesita más config, o solo service_name
         self.queue_manager = QueueManager(service_name=self.service_name)
         self.action_queue_name = self.queue_manager.get_service_action_queue()
+
+        # Crear el BaseRedisClient para los handlers
+        self.redis_client = BaseRedisClient(
+            app_settings=self.app_settings,
+            redis_conn=self.async_redis_conn, # BaseRedisClient usa la conexión 'cruda'
+            # service_name es tomado de app_settings dentro de BaseRedisClient
+        )
 
         self._running = False
         self._worker_task: Optional[asyncio.Task] = None
@@ -62,11 +77,12 @@ class BaseWorker:
             
             full_module_to_import = f"{self.handler_base_package_path}.{module_relative_path}"
 
-            logger.debug(f"Intentando importar handler: {full_module_to_import}.{class_name_camel}")
+            logger.debug(f"[{self.service_name}] Intentando importar handler: {full_module_to_import}.{class_name_camel}")
             handler_module = importlib.import_module(full_module_to_import)
             handler_class = getattr(handler_module, class_name_camel)
             return handler_class
         except (ImportError, AttributeError) as e:
+            logger.error(f"[{self.service_name}] No se pudo encontrar o cargar el handler para action_type='{action_type}'. Detalle: {e}")
             raise HandlerNotFoundError(
                 f"No se pudo encontrar o cargar el handler para action_type='{action_type}'. "
                 f"Detalle: {e}"
@@ -75,8 +91,30 @@ class BaseWorker:
     async def _get_handler_instance(self, action: DomainAction) -> BaseHandler:
         """Obtiene una instancia inicializada del handler para una acción."""
         handler_class = self._get_handler_class(action.action_type)
-        handler_instance = handler_class(action=action, redis_pool=self.redis_pool, service_name=self.service_name)
-        await handler_instance.initialize()
+        
+        handler_args = {
+            "action": action,
+            "app_settings": self.app_settings,
+            "redis_client": self.redis_client
+            # service_name es parte de app_settings y BaseActionHandler lo usa desde allí.
+            # El logger también se configura en BaseActionHandler usando app_settings.
+        }
+
+        if issubclass(handler_class, BaseContextHandler):
+            handler_args["context_redis_client"] = self.async_redis_conn
+        
+        # No se necesita un caso especial para BaseCallbackHandler ya que sus necesidades
+        # son cubiertas por los argumentos de BaseActionHandler.
+
+        # El kwarg 'service_name' ya no se pasa directamente a BaseActionHandler si usa app_settings.
+        # Si BaseHandler (el ancestro más antiguo) lo necesitara explícitamente y no lo toma de app_settings,
+        # se podría añadir aquí, pero BaseActionHandler ya maneja service_name y logger desde app_settings.
+        handler_instance = handler_class(**handler_args)
+        
+        # El método initialize puede necesitar acceso a app_settings o redis_client si realiza
+        # operaciones asíncronas o de configuración que ahora dependen de estos.
+        # Por ahora, asumimos que initialize() no necesita cambios o los tomará de self.
+        await handler_instance.initialize() 
         return handler_instance
 
     async def _handle_action(self, action: DomainAction) -> Optional[DomainActionResponse]:
@@ -101,17 +139,19 @@ class BaseWorker:
             return self._create_error_response(action, f"Error interno del handler: {e}", "HANDLER_EXECUTION_ERROR")
 
     async def _process_action_loop(self):
-        """Bucle principal que escucha y procesa acciones de la cola Redis."""
+        """Bucle principal que escucha y procesa acciones de la cola Redis de forma asíncrona."""
         logger.info(f"[{self.service_name}] Worker iniciando. Escuchando en cola: {self.action_queue_name}")
         self._running = True
 
         while self._running:
             try:
-                with self.redis_pool.get_connection() as conn:
-                    message_data = conn.brpop(self.action_queue_name, timeout=1)
+                # Usar la conexión Redis asíncrona para brpop
+                message_data = await self.async_redis_conn.brpop(self.action_queue_name, timeout=1)
 
                 if message_data is None:
-                    await asyncio.sleep(0.01)
+                    # No es necesario un sleep aquí si brpop tiene timeout, pero un pequeño sleep puede ser útil
+                    # para ceder control en caso de que el bucle esté muy activo sin mensajes.
+                    await asyncio.sleep(0.01) 
                     continue
 
                 _, message_json = message_data
@@ -123,41 +163,41 @@ class BaseWorker:
                     response = await self._handle_action(action)
 
                     if response and action.callback_queue_name:
-                        self._send_response(response)
+                        await self._send_response(response) # _send_response ahora es async
                     
                 except ValidationError as e:
                     logger.error(f"[{self.service_name}] Error de validación de DomainAction: {e}. Mensaje: {message_json}")
                     if action and action.callback_queue_name:
                         error_response = self._create_error_response(action, f"Error de validación: {e}", "VALIDATION_ERROR")
-                        self._send_response(error_response)
+                        await self._send_response(error_response) # _send_response ahora es async
                 
                 except Exception as e:
                     logger.error(f"[{self.service_name}] Error inesperado procesando acción {getattr(action, 'action_id', 'N/A')}: {e}", extra=getattr(action, 'get_log_extra', lambda: {})())
                     traceback.print_exc()
                     if action and action.callback_queue_name:
                         error_response = self._create_error_response(action, f"Error interno del worker: {e}", "WORKER_EXECUTION_ERROR")
-                        self._send_response(error_response)
+                        await self._send_response(error_response) # _send_response ahora es async
 
-            except redis.ConnectionError as e:
+            except redis_async.RedisError as e: # Capturar excepciones de Redis asíncrono
                 logger.error(f"[{self.service_name}] Error de conexión con Redis: {e}. Reintentando en 5s...")
                 await asyncio.sleep(5)
             except Exception as e:
                 logger.critical(f"[{self.service_name}] Error crítico en el bucle del worker: {e}")
-                self._running = False
+                self._running = False # Considerar si detenerse o intentar recuperarse
 
         logger.info(f"[{self.service_name}] Worker detenido.")
 
-    def _send_response(self, response: DomainActionResponse):
-        """Envía una DomainActionResponse a su cola de callback correspondiente."""
+    async def _send_response(self, response: DomainActionResponse):
+        """Envía una DomainActionResponse a su cola de callback correspondiente de forma asíncrona."""
         if not response.callback_queue_name:
             logger.warning(f"[{self.service_name}] Se intentó enviar respuesta para {response.correlation_id} sin callback_queue_name.")
             return
 
         try:
-            with self.redis_pool.get_connection() as conn:
-                conn.lpush(response.callback_queue_name, response.model_dump_json())
+            # Usar la conexión Redis asíncrona para lpush
+            await self.async_redis_conn.lpush(response.callback_queue_name, response.model_dump_json())
             logger.info(f"[{self.service_name}] Respuesta {response.action_id} para {response.correlation_id} enviada a {response.callback_queue_name}.", extra=response.get_log_extra())
-        except redis.RedisError as e:
+        except redis_async.RedisError as e: # Capturar excepciones de Redis asíncrono
             logger.error(f"[{self.service_name}] Error de Redis al enviar respuesta {response.action_id} a {response.callback_queue_name}: {e}", extra=response.get_log_extra())
 
     def _create_success_response(self, original_action: DomainAction, response_model: Optional[BaseModel]) -> DomainActionResponse:

@@ -13,15 +13,17 @@ import json
 from typing import Dict, Any, Optional
 from datetime import datetime
 
+import redis.asyncio as redis_async # Importar redis.asyncio
+
 from common.models.actions import DomainAction
 from common.models.execution_context import ExecutionContext
 from agent_orchestrator_service.models.actions_model import ExecutionCallbackAction
 from agent_orchestrator_service.models.websocket_model import WebSocketMessage, WebSocketMessageType
 from agent_orchestrator_service.services.websocket_manager import WebSocketManager
-from agent_orchestrator_service.config.settings import get_settings
+# from agent_orchestrator_service.config.settings import get_settings # settings ya no se usa directamente aquí
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
+# settings = get_settings() # settings se obtendrá de app_settings si es necesario, o no se usará.
 
 
 class CallbackHandler:
@@ -29,16 +31,16 @@ class CallbackHandler:
     Maneja callbacks desde servicios de ejecución.
     """
 
-    def __init__(self, websocket_manager: WebSocketManager, redis_client=None):
+    def __init__(self, websocket_manager: WebSocketManager, async_redis_conn: Optional[redis_async.Redis] = None):
         """
         Inicializa handler.
 
         Args:
             websocket_manager: Manager de conexiones WebSocket
-            redis_client: Cliente Redis para tracking (opcional)
+            async_redis_conn: Conexión Redis asíncrona para tracking (opcional)
         """
         self.websocket_manager = websocket_manager
-        self.redis = redis_client
+        self.async_redis_conn = async_redis_conn # Renombrado para claridad y tipo
 
     async def handle_execution_callback(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
         """
@@ -172,57 +174,67 @@ class CallbackHandler:
 
     async def _track_callback_performance(self, callback: ExecutionCallbackAction, start_time: datetime):
         """Registra métricas de performance del callback."""
-        if not self.redis:
+        if not self.async_redis_conn:
             return
 
         try:
-            callback_processing_time = (datetime.utcnow() - start_time).total_seconds()
+            # callback_processing_time = (datetime.utcnow() - start_time).total_seconds() # No se usa actualmente
             tenant_metrics_key = f"callback_metrics:{callback.tenant_id}:{datetime.now().date().isoformat()}"
 
-            await self.redis.hincrby(tenant_metrics_key, "total_callbacks", 1)
-            await self.redis.hincrby(tenant_metrics_key, f"status_{callback.status}", 1)
+            await self.async_redis_conn.hincrby(tenant_metrics_key, "total_callbacks", 1)
+            await self.async_redis_conn.hincrby(tenant_metrics_key, f"status_{callback.status}", 1)
 
             if callback.execution_time:
                 # Usar una clave unificada para los tiempos de ejecución
-                execution_time_key = "execution_times"
-                await self.redis.lpush(execution_time_key, callback.execution_time)
-                await self.redis.ltrim(execution_time_key, 0, 999)
+                execution_time_key = f"callback_metrics:{callback.tenant_id}:execution_times_ms"
+                await self.async_redis_conn.lpush(execution_time_key, int(callback.execution_time * 1000)) # Guardar en ms como entero
+                await self.async_redis_conn.ltrim(execution_time_key, 0, 999) # Mantener últimos 1000 tiempos
+                await self.async_redis_conn.expire(execution_time_key, 604800) # 7 días
 
-            await self.redis.expire(tenant_metrics_key, 604800)
+            await self.async_redis_conn.expire(tenant_metrics_key, 604800) # 7 días para las métricas diarias
 
+        except redis_async.RedisError as e: # Ser específico con la excepción de Redis
+            logger.error(f"Redis error tracking callback performance: {str(e)}")
         except Exception as e:
             logger.error(f"Error tracking callback performance: {str(e)}")
-    
+
     async def get_callback_stats(self, tenant_id: str) -> Dict[str, Any]:
         """Obtiene estadísticas de callbacks para un tenant."""
-        
-        if not self.redis:
+
+        if not self.async_redis_conn:
             return {"metrics": "disabled"}
-        
+
         try:
             today = datetime.now().date().isoformat()
             metrics_key = f"callback_metrics:{tenant_id}:{today}"
-            
-            metrics = await self.redis.hgetall(metrics_key)
-            
+
+            # hgetall devuelve un diccionario de bytes a bytes
+            metrics_bytes = await self.async_redis_conn.hgetall(metrics_key)
+            # Decodificar a str para facilitar el uso, asumiendo UTF-8
+            metrics = {k.decode('utf-8'): v.decode('utf-8') for k, v in metrics_bytes.items()}
+
             return {
                 "date": today,
                 "total_callbacks": int(metrics.get("total_callbacks", 0)),
                 "completed": int(metrics.get("status_completed", 0)),
                 "failed": int(metrics.get("status_failed", 0)),
-                "success_rate": self._calculate_success_rate(metrics)
+                "success_rate": self._calculate_success_rate(metrics) # Pasar el dict decodificado
             }
-            
+
+        except redis_async.RedisError as e: # Ser específico con la excepción de Redis
+            logger.error(f"Redis error obteniendo stats de callback: {str(e)}")
+            return {"error": str(e), "type": "RedisError"}
         except Exception as e:
             logger.error(f"Error obteniendo stats de callback: {str(e)}")
             return {"error": str(e)}
-    
-    def _calculate_success_rate(self, metrics: Dict[str, str]) -> float:
+
+    def _calculate_success_rate(self, metrics: Dict[str, str]) -> float: # Métricas ahora son str:str
         """Calcula tasa de éxito."""
         total = int(metrics.get("total_callbacks", 0))
         completed = int(metrics.get("status_completed", 0))
-        
+
         if total == 0:
             return 0.0
+
         
         return round((completed / total) * 100, 2)

@@ -71,3 +71,13 @@ class OrchestratorSettings(CommonAppSettings):
         True,
         description="Habilitar tracking de performance para operaciones clave"
     )
+
+    active_tenants: List[str] = Field(
+        default_factory=lambda: ["*"],
+        description="Lista de IDs de tenants activos para los cuales el worker procesará callbacks. Ejemplo: ['tenant1', 'tenant2']. '*' para todos."
+    )
+
+    active_tenants: List[str] = Field(
+        default_factory=lambda: ["*"],
+        description="Lista de IDs de tenants activos para los cuales el worker procesará callbacks. Ejemplo: ['tenant1', 'tenant2']. '*' para todos."
+    )

@@ -1,12 +1,14 @@
 from abc import abstractmethod
 from typing import Type, Optional, Any, Tuple
 
-import redis
+import redis.asyncio as redis_async # Importación para Redis asíncrono
 from pydantic import BaseModel, ValidationError
 
 from .base_action_handler import BaseActionHandler
-from refactorizado.common.redis_pool import RedisPool
+# from refactorizado.common.redis_pool import RedisPool # Eliminada importación síncrona
 from refactorizado.common.models.actions import DomainAction
+from refactorizado.common.config import CommonAppSettings # Para tipado y constructor
+from refactorizado.common.clients import BaseRedisClient # Para tipado y constructor
 
 
 class BaseContextHandler(BaseActionHandler):
@@ -32,12 +34,17 @@ class BaseContextHandler(BaseActionHandler):
     response_data_model: Optional[Type[BaseModel]] = None
     context_model: Type[BaseModel]
 
-    def __init__(self, action: DomainAction, redis_pool: RedisPool, service_name: str, **kwargs):
-        super().__init__(service_name=service_name, **kwargs)
+    def __init__(self, 
+                 action: DomainAction, 
+                 app_settings: CommonAppSettings, 
+                 redis_client: BaseRedisClient, 
+                 context_redis_client: redis_async.Redis, 
+                 **kwargs):
+        super().__init__(app_settings=app_settings, redis_client=redis_client, **kwargs)
         if not isinstance(action, DomainAction):
             raise TypeError("El parámetro 'action' debe ser una instancia de DomainAction.")
         self.action = action
-        self.redis_pool = redis_pool
+        self.context_redis_client = context_redis_client # Cliente Redis asíncrono para contexto
 
     @abstractmethod
     async def get_context_key(self) -> str:
@@ -53,18 +60,18 @@ class BaseContextHandler(BaseActionHandler):
         raise NotImplementedError("Las subclases deben implementar 'get_context_key'.")
 
     async def _load_context(self, redis_key: str) -> Optional[BaseModel]:
-        """Carga y deserializa el contexto desde Redis."""
+        """Carga y deserializa el contexto desde Redis de forma asíncrona."""
         self._logger.debug(f"Cargando contexto desde la clave: {redis_key}")
         try:
-            with self.redis_pool.get_connection() as conn:
-                context_data = conn.get(redis_key)
+            context_data_bytes = await self.context_redis_client.get(redis_key)
             
-            if not context_data:
+            if not context_data_bytes:
                 self._logger.debug(f"No se encontró contexto para la clave: {redis_key}")
                 return None
             
-            return self.context_model.model_validate_json(context_data)
-        except redis.RedisError as e:
+            context_data_str = context_data_bytes.decode('utf-8') if isinstance(context_data_bytes, bytes) else context_data_bytes
+            return self.context_model.model_validate_json(context_data_str)
+        except redis_async.RedisError as e: # Excepción del cliente Redis asíncrono
             self._logger.error(f"Error de Redis al cargar contexto desde '{redis_key}': {e}", exc_info=True)
             raise  # Re-lanzar para que el worker lo maneje como un error de procesamiento
         except ValidationError as e:
@@ -72,16 +79,15 @@ class BaseContextHandler(BaseActionHandler):
             raise
 
     async def _save_context(self, redis_key: str, context: Optional[BaseModel]):
-        """Guarda el contexto en Redis o lo elimina si es None."""
+        """Guarda el contexto en Redis o lo elimina si es None, de forma asíncrona."""
         try:
-            with self.redis_pool.get_connection() as conn:
-                if context:
-                    self._logger.debug(f"Guardando contexto en la clave: {redis_key}")
-                    conn.set(redis_key, context.model_dump_json())
-                else:
-                    self._logger.debug(f"Eliminando contexto de la clave: {redis_key}")
-                    conn.delete(redis_key)
-        except redis.RedisError as e:
+            if context:
+                self._logger.debug(f"Guardando contexto en la clave: {redis_key}")
+                await self.context_redis_client.set(redis_key, context.model_dump_json())
+            else:
+                self._logger.debug(f"Eliminando contexto de la clave: {redis_key}")
+                await self.context_redis_client.delete(redis_key)
+        except redis_async.RedisError as e: # Excepción del cliente Redis asíncrono
             self._logger.error(f"Error de Redis al guardar/borrar contexto en '{redis_key}': {e}", exc_info=True)
             raise
 
@@ -115,7 +121,7 @@ class BaseContextHandler(BaseActionHandler):
                 return None
             
             if not isinstance(response_object, self.response_data_model):
-                msg = f"El handler para '{self.action.action_type}' devolvió un objeto de tipo '{type(response_object).__name__}' pero se esperaba '{self.response_data_model.__name__}'."
+                msg = f"El handler para '{self.action.action_type}' devolvió un objeto de tipo '{type(response_object).__name__}' pero se esperaba '{self.response_data_model.__name__}'"
                 self._logger.error(msg, extra=self.action.get_log_extra())
                 raise TypeError(msg)
         
