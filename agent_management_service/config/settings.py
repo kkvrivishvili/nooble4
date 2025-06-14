@@ -1,58 +1,20 @@
 """
-Configuración específica para Agent Management Service.
-INTEGRADO: Con sistema de configuración base común.
+Configuración del Agent Management Service.
+Importa la configuración específica del servicio desde la ubicación común centralizada.
 """
+from functools import lru_cache
 
-from pydantic import Field
-from common.config import Settings as BaseSettings
-from common.config import get_service_settings as get_base_settings
+# Importa la clase de settings específica del servicio desde la ubicación común centralizada
+from refactorizado.common.config.service_settings import AgentManagementSettings
 
-class AgentManagementSettings(BaseSettings):
-    """Configuración específica para Agent Management Service."""
-    
-    # NUEVO: Domain específico para colas
-    domain_name: str = "management"
-    
-    # URLs de servicios externos para validación
-    ingestion_service_url: str = Field(
-        "http://localhost:8006",
-        description="URL del Ingestion Service para validar collections"
-    )
-    execution_service_url: str = Field(
-        "http://localhost:8005", 
-        description="URL del Agent Execution Service para cache invalidation"
-    )
-    
-    # Base de datos (futuro)
-    database_url: str = Field(
-        "postgresql://user:pass@localhost/nooble_agents",
-        description="URL de base de datos para agentes"
-    )
-    
-    # Cache de configuraciones
-    agent_config_cache_ttl: int = Field(
-        300,
-        description="TTL del cache de configuraciones de agente (segundos)"
-    )
-    
-
-    # Configuración de templates
-    templates_path: str = Field(
-        "agent_management_service/templates",
-        description="Ruta base para templates del sistema"
-    )
-    
-    # Validación
-    enable_collection_validation: bool = Field(
-        True,
-        description="Habilitar validación de collections con Ingestion Service"
-    )
-    
-    class Config:
-        env_prefix = "AGENT_MANAGEMENT_"
-
+@lru_cache()
 def get_settings() -> AgentManagementSettings:
-    """Obtiene configuración del servicio."""
-    base_settings = get_base_settings("agent-management-service")
-    return AgentManagementSettings(**base_settings.model_dump())
-
+    """
+    Retorna la instancia de configuración para Agent Management Service.
+    Utiliza lru_cache para retornar la misma instancia una vez cargada.
+    La clase AgentManagementSettings (importada) se encarga de la carga desde el entorno
+    con el prefijo AMS_ y el archivo .env.
+    El campo 'service_name' (requerido por CommonAppSettings, de la cual hereda AgentManagementSettings)
+    debe ser provisto vía variable de entorno (ej. AMS_SERVICE_NAME="agent-management-service").
+    """
+    return AgentManagementSettings()
