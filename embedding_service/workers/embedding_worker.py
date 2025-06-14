@@ -17,7 +17,7 @@ from common.models.actions import DomainAction
 from common.models.execution_context import ExecutionContext
 from common.services.domain_queue_manager import DomainQueueManager
 from embedding_service.models.actions import EmbeddingGenerateAction, EmbeddingValidateAction, EmbeddingCallbackAction
-from embedding_service.handlers.embedding_handler import EmbeddingHandler
+from embedding_service.services.generation_service import GenerationService
 from embedding_service.handlers.context_handler import get_embedding_context_handler
 from embedding_service.handlers.embedding_callback_handler import EmbeddingCallbackHandler
 from embedding_service.config.settings import get_settings
@@ -55,7 +55,7 @@ class EmbeddingWorker(BaseWorker):
         # Handlers que se inicializarán de forma asíncrona
         self.context_handler = None
         self.embedding_callback_handler = None
-        self.embedding_handler = None
+        self.generation_service = None
         self.initialized = False
     
     async def initialize(self):
@@ -87,8 +87,8 @@ class EmbeddingWorker(BaseWorker):
             self.queue_manager, self.redis_client
         )
         
-        # Embedding handler principal
-        self.embedding_handler = EmbeddingHandler(
+        # Servicio de generación principal
+        self.generation_service = GenerationService(
             self.context_handler, self.redis_client
         )
         
@@ -119,14 +119,11 @@ class EmbeddingWorker(BaseWorker):
         action_type = action.action_type
         
         try:
-            if action_type == "embedding.generate":
-                return await self._handle_embedding_generate(action, context)
-                
-            elif action_type == "embedding.generate.sync":
-                return await self._handle_embedding_generate_sync(action, context)
-                
+            if action_type == "embedding.generate" or action_type == "embedding.generate.sync":
+                return await self.generation_service.generate_embeddings(action)
+
             elif action_type == "embedding.validate":
-                return await self._handle_embedding_validate(action, context)
+                return await self.generation_service.validate_embeddings(action)
                 
             elif action_type == "embedding.callback":
                 return await self._handle_embedding_callback(action, context)
@@ -143,83 +140,6 @@ class EmbeddingWorker(BaseWorker):
                 "error": str(e)
             }
     
-    async def _handle_embedding_generate(self, action: DomainAction, context: ExecutionContext = None) -> Dict[str, Any]:
-        """
-        Handler específico para generación de embeddings.
-        
-        Args:
-            action: Acción de embedding
-            context: Contexto de ejecución opcional con metadatos
-            
-        Returns:
-            Resultado del procesamiento
-        """
-        try:
-            # Verificar inicialización
-            if not self.initialized:
-                await self.initialize()
-                
-            # Convertir a tipo específico
-            embedding_action = EmbeddingGenerateAction.parse_obj(action.dict())
-            
-            # Enriquecer con datos de contexto si está disponible
-            if context:
-                logger.info(f"Generando embeddings con tier: {context.tenant_tier}")
-                embedding_action.tenant_tier = context.tenant_tier
-            
-            # Procesar embedding
-            result = await self.embedding_handler.handle_generate(embedding_action)
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error en handle_embedding_generate: {str(e)}")
-            return {
-                "success": False,
-                "error": {
-                    "type": type(e).__name__,
-                    "message": str(e)
-                }
-            }
-    
-    async def _handle_embedding_validate(self, action: DomainAction, context: ExecutionContext = None) -> Dict[str, Any]:
-        """
-        Handler específico para validación de embeddings.
-        
-        Args:
-            action: Acción de validación
-            context: Contexto de ejecución opcional con metadatos
-            
-        Returns:
-            Resultado del procesamiento
-        """
-        try:
-            # Verificar inicialización
-            if not self.initialized:
-                await self.initialize()
-                
-            # Convertir a tipo específico
-            validate_action = EmbeddingValidateAction.parse_obj(action.dict())
-            
-            # Enriquecer con datos de contexto si está disponible
-            if context:
-                logger.info(f"Validando embeddings con tier: {context.tenant_tier}")
-                validate_action.tenant_tier = context.tenant_tier
-            
-            # Procesar validación
-            result = await self.embedding_handler.handle_validate(validate_action)
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error en handle_embedding_validate: {str(e)}")
-            return {
-                "success": False,
-                "error": {
-                    "type": type(e).__name__,
-                    "message": str(e)
-                }
-            }
 
     def create_action_from_data(self, action_data: Dict[str, Any]) -> DomainAction:
         """
@@ -356,8 +276,8 @@ class EmbeddingWorker(BaseWorker):
         
         try:
             # Stats de embeddings
-            if self.embedding_handler and hasattr(self.embedding_handler, 'get_embedding_stats'):
-                embedding_stats = await self.embedding_handler.get_embedding_stats("all")
+            if self.generation_service and hasattr(self.generation_service, 'get_embedding_stats'):
+                embedding_stats = await self.generation_service.get_embedding_stats("all")
                 stats["embedding_stats"] = embedding_stats
             
             # Stats de callbacks
@@ -371,85 +291,4 @@ class EmbeddingWorker(BaseWorker):
         
         return stats
         
-    async def _handle_embedding_generate_sync(self, action: DomainAction, context: ExecutionContext = None) -> Dict[str, Any]:
-        """
-        Handler específico para generación de embeddings con patrón pseudo-síncrono.
-        
-        A diferencia del método asíncrono normal, este método responde directamente
-        a una cola temporal específica con el correlation_id proporcionado en la acción.
-        
-        Args:
-            action: Acción de embedding con correlation_id
-            context: Contexto de ejecución opcional con metadatos
-            
-        Returns:
-            Resultado del procesamiento con los embeddings generados
-        """
-        try:
-            # Verificar inicialización
-            if not self.initialized:
-                await self.initialize()
-                
-            # Convertir a tipo específico
-            generate_action = EmbeddingGenerateAction.parse_obj(action.dict())
-            
-            # Extraer correlation_id de los datos
-            correlation_id = generate_action.data.get('correlation_id')
-            if not correlation_id:
-                raise ValueError("Se requiere correlation_id para acciones sync")
-                
-            # Generar cola de respuesta basada en correlation_id
-            response_queue = f"embedding:responses:generate:{correlation_id}"
-                
-            # Enriquecer con datos de contexto si está disponible
-            if context:
-                logger.info(f"Procesando generación sync con tier: {context.tenant_tier}")
-                generate_action.tenant_tier = context.tenant_tier
-            
-            # Procesar generación de embeddings
-            result = await self.embedding_handler.handle_embedding_generate(generate_action)
-            
-            # Publicar resultado directamente en la cola de respuesta
-            if result.get("success", False):
-                await self.redis_client.rpush(
-                    response_queue,
-                    json.dumps({
-                        "success": True,
-                        "embeddings": result.get("embeddings", []),
-                        "metadata": result.get("metadata", {})
-                    })
-                )
-                # Establecer tiempo de expiración para la cola temporal
-                await self.redis_client.expire(response_queue, 300)  # 5 minutos
-            else:
-                await self.redis_client.rpush(
-                    response_queue,
-                    json.dumps({
-                        "success": False,
-                        "error": result.get("error", "Error desconocido")
-                    })
-                )
-                await self.redis_client.expire(response_queue, 300)  # 5 minutos
-                
-            logger.info(f"Respuesta sync enviada a {response_queue}")
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error en handle_embedding_generate_sync: {str(e)}")
-            # Intentar enviar error a cola de respuesta si tenemos correlation_id
-            correlation_id = action.data.get('correlation_id')
-            if correlation_id:
-                response_queue = f"embedding:responses:generate:{correlation_id}"
-                await self.redis_client.rpush(
-                    response_queue,
-                    json.dumps({
-                        "success": False,
-                        "error": str(e)
-                    })
-                )
-                await self.redis_client.expire(response_queue, 300)  # 5 minutos
-            
-            return {
-                "success": False,
-                "error": str(e)
-            }
+

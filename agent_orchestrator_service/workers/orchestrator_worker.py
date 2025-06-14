@@ -17,7 +17,7 @@ from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
 from common.models.execution_context import ExecutionContext
 from common.services.domain_queue_manager import DomainQueueManager
-from agent_orchestrator_service.models.actions_model import ExecutionCallbackAction
+from agent_orchestrator_service.services.orchestration_service import OrchestrationService
 from agent_orchestrator_service.handlers.callback_handler import CallbackHandler
 from agent_orchestrator_service.services.websocket_manager import get_websocket_manager
 # Importamos los modelos sólo cuando sea necesario para evitar dependencias circulares
@@ -52,6 +52,7 @@ class OrchestratorWorker(BaseWorker):
         self.domain = settings.domain_name  # "orchestrator"
         
         # Variables que se inicializarán de forma asíncrona
+        self.orchestration_service: Optional[OrchestrationService] = None
         self.callback_handler = None
         self.websocket_manager = None
         self.initialized = False
@@ -65,9 +66,16 @@ class OrchestratorWorker(BaseWorker):
         self.websocket_manager = get_websocket_manager()
         self.callback_handler = CallbackHandler(self.websocket_manager, self.redis_client)
         
+        # Inicializar componente de orquestación
+        await self._initialize_components()
+        
         # Configurar estado inicializado
         self.initialized = True
         logger.info("OrchestratorWorker inicializado correctamente")
+    
+    async def _initialize_components(self):
+        """Inicializa los componentes y servicios necesarios para el worker."""
+        self.orchestration_service = OrchestrationService(self.redis_client)
     
     async def start(self):
         """Extiende el start para asegurar inicialización e iniciar dos procesadores."""
@@ -98,7 +106,7 @@ class OrchestratorWorker(BaseWorker):
             self.running = False
     
     async def _process_callbacks_loop(self):
-        """Procesa callbacks directamente de las colas specificas."""
+        """Procesa callbacks directamente de las colas específicas."""
         while self.running:
             try:
                 # Obtener lista de tenants activos de configuración
@@ -142,32 +150,46 @@ class OrchestratorWorker(BaseWorker):
                 logger.error(f"Error procesando callbacks: {str(e)}")
                 await asyncio.sleep(1)
     
-    # Ya no es necesario el método _initialize_handlers
-    # La inicialización se realiza directamente en el método initialize()
-    
-    async def _handle_action(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
+    async def _handle_action(self, action: DomainAction) -> Optional[Dict[str, Any]]:
         """
-        Implementa el método abstracto de BaseWorker para manejar acciones específicas
-        del dominio de orchestrator.
-        
-        Args:
-            action: La acción a procesar
-            context: Contexto opcional de ejecución
-            
-        Returns:
-            Diccionario con el resultado del procesamiento
-        
-        Raises:
-            ValueError: Si no hay handler implementado para ese tipo de acción
+        Maneja las acciones de dominio delegando al servicio de orquestación.
+        BaseWorker 4.0: Este método reemplaza el sistema de registro de handlers.
         """
-        action_type = action.action_type
-        
-        # Nota: actualmente el orchestrator no procesa acciones estándar a través del sistema
-        # de colas de DomainQueueManager, pero podríamos añadir handlers aquí en el futuro
-        error_msg = f"No hay handler implementado para la acción: {action_type}"
-        logger.warning(error_msg)
-        raise ValueError(error_msg)
+        logger.info(f"OrchestratorWorker procesando acción: {action.action_type}")
 
+        if not self.orchestration_service:
+            logger.error("OrchestrationService no está inicializado.")
+            return {"success": False, "error": "Servicio no disponible"}
+
+        handler_result = None
+        try:
+            if action.action_type == "chat.process":
+                handler_result = await self.orchestration_service.process_message(action)
+            elif action.action_type == "chat.status":
+                handler_result = await self.orchestration_service.get_task_status(action)
+            elif action.action_type == "chat.cancel":
+                handler_result = await self.orchestration_service.cancel_task(action)
+            else:
+                logger.warning(f"Acción no reconocida en OrchestratorWorker: {action.action_type}")
+                return {
+                    "success": False,
+                    "error": {
+                        "type": "ActionNotSupported",
+                        "message": f"La acción {action.action_type} no es soportada."
+                    }
+                }
+        except Exception as e:
+            logger.exception(f"Error al procesar la acción {action.action_type} en OrchestrationService")
+            return {
+                "success": False,
+                "error": {
+                    "type": type(e).__name__,
+                    "message": str(e)
+                }
+            }
+        
+        return handler_result
+    
     def create_action_from_data(self, action_data: Dict[str, Any]) -> DomainAction:
         """
         Crea objeto de acción apropiado según los datos.

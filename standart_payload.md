@@ -1,4 +1,8 @@
-# Propuesta de Estandarización de Payloads y Modelos de Datos en Nooble4
+# Estándar de Payloads y Modelos de Datos en Nooble4
+
+> **Última Revisión:** 14 de Junio de 2024
+> **Estado:** Aprobado y en implementación.
+> **Modelos Pydantic de Referencia:** `common/models/actions.py`
 
 ## 1. Introducción
 
@@ -12,50 +16,43 @@ La comunicación vía Redis se basa en el intercambio de mensajes serializados. 
 
 ### 2.1. `DomainAction` (Para Solicitudes y Mensajes Asíncronos)
 
-Este es el objeto enviado por un cliente a un servicio o por un servicio a una cola de callbacks/notificaciones. Su diseño se inspira en los datos intercambiados según `inter_service_communication_v2.md`.
+Este es el objeto enviado por un cliente a un servicio o por un servicio a una cola de callbacks/notificaciones. Es la unidad fundamental de comunicación asíncrona en la arquitectura.
 
-*   **Ubicación del Modelo Pydantic**: `nooble4.common.messaging.domain_actions.py` (o similar en un módulo común).
+*   **Ubicación del Modelo Pydantic**: `common/models/actions.py`
 *   **Campos Estándar**:
 
     ```python
-    # nooble4/common/messaging/domain_actions.py
-    from typing import Optional, Dict, Any, List
-    from pydantic import BaseModel, Field
-    import uuid
-    from datetime import datetime, timezone
+# common/models/actions.py
+from typing import Optional, Dict, Any
+from pydantic import BaseModel, Field
+import uuid
+from datetime import datetime, timezone
 
-    class DomainAction(BaseModel):
-        action_id: uuid.UUID = Field(default_factory=uuid.uuid4, description="Identificador único de esta acción específica.")
-        action_type: str = Field(..., description='Tipo de acción en formato "servicio_destino.entidad.verbo" o "servicio_origen.evento.tipo_notificacion". Ej: "management.agent.get_config", "ingestion.document.processed".')
-        timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Timestamp UTC de creación de la acción.")
-        
-        # --- Contexto de Negocio y Enrutamiento ---
-        # Estos campos son cruciales y deben ser propagados consistentemente.
-        tenant_id: Optional[str] = Field(None, description="Identificador del tenant al que pertenece esta acción.")
-        session_id: Optional[str] = Field(None, description="Identificador de la sesión de conversación, si la acción es parte de una.")
-        
-        # --- Información de Origen y Seguimiento ---
-        origin_service: Optional[str] = Field(None, description="Nombre del servicio que emite la acción. Ej: 'AgentExecutionService'.")
-        # correlation_id se usa para encadenar múltiples acciones dentro de un flujo más grande o para pseudo-síncrono.
-        correlation_id: Optional[uuid.UUID] = Field(None, description="ID para correlacionar esta acción con otras en un flujo o con una respuesta.")
-        # trace_id es para observabilidad extremo a extremo a través de múltiples servicios.
-        trace_id: Optional[uuid.UUID] = Field(default_factory=uuid.uuid4, description="ID de rastreo para seguir la solicitud a través de múltiples servicios.")
+class DomainAction(BaseModel):
+    action_id: uuid.UUID = Field(default_factory=uuid.uuid4, description="Identificador único de esta acción específica.")
+    action_type: str = Field(..., description='Tipo de acción en formato "servicio_destino.entidad.verbo". Ej: "management.agent.get_config".')
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Timestamp UTC de creación de la acción.")
+    
+    # --- Contexto de Negocio y Enrutamiento ---
+    tenant_id: Optional[str] = Field(None, description="Identificador del tenant al que pertenece esta acción.")
+    user_id: Optional[str] = Field(None, description="Identificador del usuario que originó la acción, si aplica.")
+    session_id: Optional[str] = Field(None, description="Identificador de la sesión de conversación.")
+    
+    # --- Información de Origen y Seguimiento ---
+    origin_service: Optional[str] = Field(None, description="Nombre del servicio que emite la acción.")
+    correlation_id: Optional[uuid.UUID] = Field(None, description="ID para correlacionar esta acción con otras en un flujo o con una respuesta.")
+    trace_id: Optional[uuid.UUID] = Field(default_factory=uuid.uuid4, description="ID de rastreo para seguir la solicitud a través de múltiples servicios.")
 
-        # --- Para Callbacks ---
-        # callback_queue_name es la cola específica donde el servicio receptor debe enviar su respuesta/evento de callback.
-        callback_queue_name: Optional[str] = Field(None, description="Nombre de la cola Redis donde se espera el callback.")
-        # callback_action_type es el action_type esperado para el mensaje de callback.
-        callback_action_type: Optional[str] = Field(None, description="El action_type que tendrá el mensaje de callback.")
+    # --- Para Callbacks ---
+    callback_queue_name: Optional[str] = Field(None, description="Nombre de la cola Redis donde se espera el callback.")
+    callback_action_type: Optional[str] = Field(None, description="El action_type que tendrá el mensaje de callback.")
 
-        # --- Payload y Metadatos ---
-        data: Dict[str, Any] = Field(..., description="Payload específico de la acción, validado por un modelo Pydantic dedicado.")
-        metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Metadatos adicionales no críticos para la lógica principal pero útiles para logging, debugging o información contextual.")
-        
-        # --- Versionado (Opcional, pero recomendado para la evolución del schema de 'data') ---
-        # data_schema_version: str = Field("1.0", description="Versión del schema del payload en 'data'.")
+    # --- Payload y Metadatos ---
+    data: Dict[str, Any] = Field(..., description="Payload específico de la acción, validado por un modelo Pydantic dedicado.")
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Metadatos adicionales no críticos para la lógica principal.")
 
-        class Config:
-            validate_assignment = True # Asegura que los campos se validen también al ser asignados después de la creación.
+    class Config:
+        validate_assignment = True
     ```
 *   **`action_type`**: Debe ser una cadena estructurada que identifique claramente la intención. Se recomienda el formato `servicio_destino.entidad.verbo` para solicitudes directas, y `servicio_origen.evento_principal.detalle_evento` para notificaciones o callbacks. Ejemplos:
     *   Solicitudes: `management.agent.get_config`, `embedding.batch.generate`, `query.rag.execute_sync`.
@@ -68,55 +65,45 @@ Este es el objeto enviado por un cliente a un servicio o por un servicio a una c
 
 ### 2.2. `DomainActionResponse` (Para Respuestas en Patrón Pseudo-Síncrono)
 
-Este es el objeto enviado por un servicio de vuelta al cliente en la cola de respuesta temporal, como se describe en `inter_service_communication_v2.md` para flujos pseudo-síncronos.
+Este es el objeto enviado por un servicio de vuelta al cliente en la cola de respuesta temporal para flujos pseudo-síncronos. Su propósito es confirmar el resultado de una `DomainAction` específica.
 
-*   **Ubicación del Modelo Pydantic**: `nooble4.common.messaging.domain_actions.py`
+*   **Ubicación del Modelo Pydantic**: `common/models/actions.py`
 *   **Campos Estándar**:
 
     ```python
-    # nooble4/common/messaging/domain_actions.py (continuación)
-    from pydantic import root_validator
+# common/models/actions.py (continuación)
+from pydantic import root_validator
 
-    class ErrorDetail(BaseModel):
-        error_type: str = Field(..., description="Tipo de error general. Ej: 'NotFound', 'ValidationError', 'ResourceConflict', 'UpstreamServiceError', 'InternalError'.")
-        error_code: Optional[str] = Field(None, description="Código de error específico del servicio o de la lógica de negocio. Ej: 'AGENT_NOT_FOUND', 'EMBEDDING_MODEL_UNAVAILABLE'.")
-        message: str = Field(..., description="Mensaje descriptivo del error, orientado al desarrollador.")
-        details: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Detalles adicionales estructurados, como errores de validación por campo.")
-        # upstream_error: Optional[Dict[str, Any]] = Field(None, description="Si el error se originó en un servicio externo, aquí se pueden incluir detalles de ese error.")
+class ErrorDetail(BaseModel):
+    error_type: str = Field(..., description="Tipo de error general. Ej: 'NotFound', 'ValidationError', 'InternalError'.")
+    error_code: Optional[str] = Field(None, description="Código de error específico de la lógica de negocio. Ej: 'AGENT_NOT_FOUND'.")
+    message: str = Field(..., description="Mensaje descriptivo del error, orientado al desarrollador.")
+    details: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Detalles adicionales estructurados.")
 
-    class DomainActionResponse(BaseModel):
-        action_id: uuid.UUID = Field(default_factory=uuid.uuid4, description="Identificador único de este mensaje de respuesta.")
-        correlation_id: uuid.UUID = Field(..., description="ID de correlación de la DomainAction original para que el cliente pueda emparejar la respuesta.")
-        trace_id: uuid.UUID = Field(..., description="ID de rastreo de la DomainAction original para mantener la observabilidad end-to-end.")
-        action_type_response_to: str = Field(..., description="El 'action_type' de la solicitud original, para claridad del cliente.")
+class DomainActionResponse(BaseModel):
+    action_id: uuid.UUID = Field(..., description="ID de la DomainAction original a la que esta respuesta corresponde.")
+    correlation_id: uuid.UUID = Field(..., description="DEBE coincidir con el correlation_id de la DomainAction original.")
+    trace_id: uuid.UUID = Field(..., description="DEBE coincidir con el trace_id de la DomainAction original.")
+    
+    success: bool = Field(..., description="Indica si la acción fue procesada exitosamente.")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Timestamp UTC de creación de la respuesta.")
+    
+    data: Optional[Dict[str, Any]] = Field(None, description="Payload de respuesta si success=True.")
+    error: Optional[ErrorDetail] = Field(None, description="Detalles del error si success=False.")
 
-        success: bool = Field(..., description="Indica si la acción fue procesada exitosamente.")
-        timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Timestamp UTC de creación de la respuesta.")
-        
-        data: Optional[Dict[str, Any]] = Field(None, description="Payload de respuesta si success=True, validado por un modelo Pydantic específico.")
-        error: Optional[ErrorDetail] = Field(None, description="Detalles del error si success=False.")
-        
-        # Para telemetría (opcional)
-        # service_processing_time_ms: Optional[float] = None 
+    @root_validator
+    def check_data_and_error(cls, values):
+        success, data, error = values.get('success'), values.get('data'), values.get('error')
+        if success and error is not None:
+            raise ValueError("El campo 'error' debe ser nulo si 'success' es True.")
+        if not success and error is None:
+            raise ValueError("El campo 'error' es obligatorio si 'success' es False.")
+        return values 
 
-        @root_validator
-        def check_data_or_error(cls, values):
-            success, data, error = values.get('success'), values.get('data'), values.get('error')
-            if success and data is None:
-                raise ValueError("'data' must be provided when success is True")
-            if not success and error is None:
-                raise ValueError("'error' must be provided when success is False")
-            if success and error is not None:
-                raise ValueError("'error' must be None when success is True")
-            if not success and data is not None:
-                raise ValueError("'data' must be None when success is False")
-            return values
-
-        class Config:
-            validate_assignment = True
     ```
-*   **`action_id`**: Identificador único del propio mensaje de respuesta.
-*   **`correlation_id`, `trace_id`, `action_type_response_to`**: Esenciales para que el cliente pueda emparejar la respuesta con su solicitud original, mantener el contexto de seguimiento y saber a qué tipo de acción responde.
+*   **`action_id`**: Corresponde al `action_id` de la `DomainAction` original. Es crucial para que el solicitante sepa a qué acción se está respondiendo.
+*   **`correlation_id` y `trace_id`**: Se propagan desde la `DomainAction` original para mantener la correlación del flujo y la trazabilidad de extremo a extremo.
+*   **`success`, `data`, `error`**: La lógica de la respuesta. Si `success` es `True`, `data` puede contener el resultado. Si es `False`, `error` DEBE contener un objeto `ErrorDetail`. El modelo asegura esta consistencia.
 *   **`data`**: Si `success` es `True`, este campo contiene el resultado. Su estructura también **DEBE** ser validada por un modelo Pydantic específico.
 *   **`error`**: Si `success` es `False`, este campo proporciona detalles estructurados del error. El modelo `ErrorDetail` se ha expandido para ser más informativo.
 

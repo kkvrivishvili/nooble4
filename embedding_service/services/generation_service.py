@@ -1,11 +1,13 @@
 """
-Handler para procesar Domain Actions de embeddings.
-MODIFICADO: Integración con sistema de colas por tier y nuevos servicios.
+Servicio de negocio para procesar las operaciones de embeddings.
+
+Esta clase encapsula la lógica de negocio para la generación y validación
+de embeddings, siendo utilizada por el EmbeddingWorker.
 """
 
 import logging
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from common.models.execution_context import ExecutionContext
 from embedding_service.models.actions import EmbeddingGenerateAction, EmbeddingValidateAction
@@ -18,73 +20,72 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
-class EmbeddingHandler:
+class GenerationService:
     """
-    Handler para procesar acciones de embeddings.
-    MODIFICADO: Usar nuevos servicios y context handler.
+    Servicio que encapsula la lógica de negocio para las acciones de embeddings.
     """
-    
+
     def __init__(self, context_handler: EmbeddingContextHandler, redis_client=None):
         """
-        Inicializa handler.
-        
+        Inicializa el servicio de generación.
+
         Args:
-            context_handler: Handler de contexto
-            redis_client: Cliente Redis (opcional)
+            context_handler: Handler de contexto para resolver y validar permisos.
+            redis_client: Cliente Redis (opcional).
         """
         self.context_handler = context_handler
         self.redis = redis_client
-        
-        # Inicializar servicios
+
+        # Inicializar sub-servicios
         self.validation_service = ValidationService(redis_client)
         self.embedding_processor = EmbeddingProcessor(self.validation_service, redis_client)
-    
-    async def handle_generate(self, action: EmbeddingGenerateAction) -> Dict[str, Any]:
+
+    async def generate_embeddings(self, action: EmbeddingGenerateAction) -> Dict[str, Any]:
         """
-        Procesa una acción de generación de embeddings.
-        
+        Procesa una solicitud de generación de embeddings.
+
         Args:
-            action: Acción de embedding
-            
+            action: Acción de embedding con los datos necesarios.
+
         Returns:
-            Dict con resultado del procesamiento
+            Dict con el resultado del procesamiento.
         """
         start_time = time.time()
         task_id = action.task_id
-        
+
         try:
             logger.info(f"Procesando generación de embeddings para tarea {task_id}")
-            
+
             # 1. Resolver contexto de embedding
             context = await self.context_handler.resolve_embedding_context(
                 action.execution_context
             )
-            
+
             # 2. Validar permisos de embedding
             await self.context_handler.validate_embedding_permissions(
                 context=context,
                 texts=action.texts,
                 model=action.model or settings.default_embedding_model
             )
-            
+
             # 3. Procesar embedding
             embedding_result = await self.embedding_processor.process_embedding_request(
                 action, context
             )
-            
+
             # 4. Tracking de métricas
             await self._track_embedding_metrics(
                 context, action, embedding_result, time.time() - start_time
             )
-            
+
             logger.info(f"Embedding completado: task_id={task_id}, tiempo={time.time() - start_time:.2f}s")
-            
+
             return {
                 "success": True,
                 "result": embedding_result,
                 "execution_time": time.time() - start_time
             }
-            
+
         except Exception as e:
             logger.error(f"Error en embedding {task_id}: {str(e)}")
             return {
@@ -95,45 +96,49 @@ class EmbeddingHandler:
                     "message": str(e)
                 }
             }
-    
-    async def handle_validate(self, action: EmbeddingValidateAction) -> Dict[str, Any]:
+
+    async def validate_embeddings(self, action: EmbeddingValidateAction) -> Dict[str, Any]:
         """
-        Procesa una acción de validación de textos.
-        
+        Procesa una solicitud de validación de embeddings.
+
         Args:
-            action: Acción de validación
-            
+            action: Acción de validación con los datos necesarios.
+
         Returns:
-            Dict con resultado del procesamiento
+            Dict con el resultado de la validación.
         """
         start_time = time.time()
         task_id = action.task_id
-        
+
         try:
             logger.info(f"Procesando validación para tarea {task_id}")
-            
-            # 1. Resolver contexto de validación
+
+            # 1. Resolver contexto
             context = await self.context_handler.resolve_embedding_context(
                 action.execution_context
             )
-            
-            # 2. Realizar validaciones
+
+            # 2. Validar
             validation_result = await self.validation_service.validate_texts(
                 texts=action.texts,
                 model=action.model or settings.default_embedding_model,
                 context=context,
                 raise_error=False
             )
-            
-            processing_time = time.time() - start_time
-            logger.info(f"Validación completada en {processing_time:.2f}s")
-            
+
+            # 3. Tracking
+            await self._track_validation_metrics(
+                context, action, validation_result, time.time() - start_time
+            )
+
+            logger.info(f"Validación completada: task_id={task_id}, tiempo={time.time() - start_time:.2f}s")
+
             return {
                 "success": True,
                 "result": validation_result,
-                "execution_time": processing_time
+                "execution_time": time.time() - start_time
             }
-            
+
         except Exception as e:
             logger.error(f"Error en validación {task_id}: {str(e)}")
             return {
@@ -144,15 +149,9 @@ class EmbeddingHandler:
                     "message": str(e)
                 }
             }
-    
-    async def _track_embedding_metrics(
-        self,
-        context: ExecutionContext,
-        action: EmbeddingGenerateAction,
-        result: Dict[str, Any],
-        processing_time: float
-    ):
-        """Registra métricas de embedding."""
+
+    async def _track_embedding_metrics(self, context: ExecutionContext, action: EmbeddingGenerateAction, result: Dict[str, Any], duration: float):
+        """Helper para tracking de métricas de generación."""
         if not self.redis or not settings.enable_embedding_tracking:
             return
         
@@ -170,7 +169,7 @@ class EmbeddingHandler:
                 await self.redis.hincrby(tenant_key, "total_tokens", result["total_tokens"])
             
             # Tiempo de procesamiento por tier
-            await self.redis.lpush(f"embedding_times:{context.tenant_tier}", processing_time)
+            await self.redis.lpush(f"embedding_times:{context.tenant_tier}", duration)
             await self.redis.ltrim(f"embedding_times:{context.tenant_tier}", 0, 999)
             
             # TTL

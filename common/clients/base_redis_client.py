@@ -7,9 +7,9 @@ import redis.asyncio as redis # Use asyncio version of redis
 from pydantic import ValidationError
 
 # Removed direct import of RedisPool class, will expect an initialized client
-from refactorizado.common.models.actions import DomainAction, DomainActionResponse
-from refactorizado.common.utils.queue_manager import QueueManager
-from refactorizado.common.config.base_settings import CommonAppSettings # Import CommonAppSettings
+from common.models.actions import DomainAction, DomainActionResponse
+from common.utils.queue_manager import QueueManager
+from common.config.base_settings import CommonAppSettings
 
 # logging.basicConfig(level=logging.INFO) #basicConfig is usually called once at app start
 logger = logging.getLogger(__name__) # Logger setup is fine

@@ -1,102 +1,21 @@
-# Estándar de Handlers de Acciones en Nooble4 (Arquitectura v6)
+# [OBSOLETO] Estándar de Handlers de Acciones
 
-## 1. Filosofía y Principios
+> **ESTE DOCUMENTO ESTÁ OBSOLETO Y SE MANTIENE ÚNICAMENTE COMO REFERENCIA HISTÓRICA.**
+> **NO DEBE USARSE COMO GUÍA PARA NUEVAS IMPLEMENTACIONES.**
 
-Este documento define el estándar para implementar la lógica de negocio en Nooble4. Los principios clave son:
+## Razón de la Obsolescencia
 
--   **Responsabilidad Única**: Los `Workers` se encargan de la comunicación (escuchar en colas, enviar respuestas). Los `Handlers` se encargan de la lógica de negocio.
--   **Desacoplamiento y Carga Dinámica**: El `BaseWorker` no conoce los `action_types` específicos. Descubre y carga el `Handler` apropiado dinámicamente basado en una convención de nombres.
--   **Contratos de Datos Estrictos**: Los `Handlers` usan modelos Pydantic para validar explícitamente tanto la entrada (`action.data`) como la salida, garantizando la integridad de los datos.
--   **Jerarquía Especializada**: Una jerarquía de clases base (`BaseHandler`, `BaseActionHandler`, `BaseContextHandler`, `BaseCallbackHandler`) proporciona funcionalidades comunes para diferentes patrones de lógica de negocio.
--   **Testeabilidad**: Los `Handlers` son clases aisladas con dependencias explícitas, lo que los hace fáciles de probar unitariamente.
+La arquitectura basada en `Handlers` dinámicos ha sido **reemplazada** por el patrón `BaseWorker` unificado. La nueva arquitectura elimina la necesidad de clases `Handler` individuales y la carga dinámica en tiempo de ejecución.
 
-## 2. Arquitectura General y Flujo de Ejecución
+## El Nuevo Estándar: `BaseWorker`
 
-1.  Un `BaseWorker` escucha en la cola de acciones de su servicio (ej. `nooble4:dev:management:actions`).
-2.  Recibe un mensaje (`DomainAction` en formato JSON) y lo deserializa.
-3.  **Dinámicamente**, determina el `Handler` a usar a partir del `action.action_type` (ej. `management.agent.get_config` -> `ManagementAgentGetConfigHandler`).
-4.  El `Worker` instancia el `Handler` encontrado, inyectándole las dependencias necesarias (`action`, `redis_pool`, `service_name`).
-5.  El `Worker` invoca el método `async def execute()` del `Handler`.
-6.  **Dentro de `execute()`**, el propio `Handler` orquesta:
-    a.  La validación del `action.data` contra su `action_data_model`.
-    b.  La llamada a su método `async def handle()`, que contiene la lógica de negocio pura.
-    c.  La validación de la respuesta del `handle()` contra su `response_data_model`.
-7.  El `Handler` devuelve el objeto de respuesta (un modelo Pydantic) al `Worker`.
-8.  Si la acción era pseudo-síncrona, el `Worker` construye una `DomainActionResponse` con el resultado y la envía a la cola de respuesta especificada.
+La lógica de negocio que antes residía en los `Handlers` ahora se implementa directamente dentro de los métodos de los workers que heredan de `BaseWorker`.
 
-## 3. La Jerarquía de Handlers
+El enrutamiento de acciones se realiza de forma explícita dentro del método `_handle_action(self, action: DomainAction)` del worker, típicamente usando una estructura `if/elif/else` sobre el `action.action_type`.
 
-La funcionalidad se organiza en una jerarquía de clases base reutilizables.
+**Para entender la arquitectura actual y cómo implementar la lógica de negocio, por favor, consulte el siguiente documento:**
 
-### 3.1. `BaseHandler` (La Raíz)
-
-Es la clase más fundamental. Todos los handlers heredan de ella.
-
--   **Ubicación**: `refactorizado/common/handlers/base_handler.py`
--   **Propósito**: Proporcionar funcionalidades transversales.
--   **Características Clave**:
-    -   Recibe `service_name` para un logging contextualizado.
-    -   Configura un `logger` estándar para toda la clase.
-    -   Define un método `async def initialize()` para lógica de inicialización asíncrona si fuera necesario.
-
-### 3.2. `BaseActionHandler` (Para Lógica Petición-Respuesta)
-
-Hereda de `BaseHandler`. Es el caballo de batalla para la mayoría de las acciones que siguen un patrón simple de petición-respuesta.
-
--   **Ubicación**: `refactorizado/common/handlers/base_action_handler.py`
--   **Propósito**: Orquestar la validación de entrada/salida y la ejecución de la lógica de negocio.
--   **Contrato que debe implementar el hijo**:
-    -   `action_data_model`: Modelo Pydantic para validar `action.data` (o `None` si no hay datos).
-    -   `response_data_model`: Modelo Pydantic para validar la salida (o `None` si no hay respuesta).
-    -   `async def handle(self, validated_data)`: Método que contiene la lógica de negocio. Devuelve `Optional[BaseModel]`.
-
-#### Ejemplo: `management.agent.get_config`
-
-```python
-# refactorizado/agent_management_service/handlers/management/agent/get_config.py
-from pydantic import BaseModel, Field
-import uuid
-from typing import Optional, Type
-
-from refactorizado.common.handlers.base_action_handler import BaseActionHandler
-
-# --- Modelos de Datos ---
-class AgentGetConfigData(BaseModel):
-    agent_id: uuid.UUID
-
-class AgentGetConfigResponse(BaseModel):
-    agent_id: uuid.UUID
-    name: str
-    version: str
-
-# --- Handler ---
-class ManagementAgentGetConfigHandler(BaseActionHandler):
-
-    @property
-    def action_data_model(self) -> Type[BaseModel]:
-        return AgentGetConfigData
-
-    @property
-    def response_data_model(self) -> Type[BaseModel]:
-        return AgentGetConfigResponse
-
-    async def handle(self, validated_data: AgentGetConfigData) -> AgentGetConfigResponse:
-        self._logger.info(f"Buscando config para agente {validated_data.agent_id}")
-        
-        # Lógica para buscar la configuración...
-        
-        # Devolvemos el objeto Pydantic directamente.
-        # La validación de salida la hace execute() por nosotros.
-        return AgentGetConfigResponse(
-            agent_id=validated_data.agent_id,
-            name="Agente de Prueba",
-            version="2.0.1"
-        )
-```
-
-### 3.3. `BaseContextHandler` (Para Lógica con Estado)
-
-Hereda de `BaseHandler`. Diseñado para acciones que necesitan leer, modificar y guardar un estado (un "contexto") en Redis.
+### **[Referencia Principal: Estándar de Workers (`standart_worker.md`)](./standart_worker.md)**
 
 -   **Ubicación**: `refactorizado/common/handlers/base_context_handler.py`
 -   **Propósito**: Abstraer el ciclo `GET -> MODIFY -> SET` de un objeto de estado en Redis.

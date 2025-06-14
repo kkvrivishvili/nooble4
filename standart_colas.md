@@ -1,103 +1,50 @@
-# Propuesta de Estandarización de Colas Redis en Nooble4
+# Estándar de Colas Redis en Nooble4
+
+> **Última Revisión:** 14 de Junio de 2024
+> **Estado:** Aprobado y en implementación.
+> **Clase de Referencia:** `common.utils.queue_manager.QueueManager`
 
 ## 1. Introducción
 
-Este documento detalla una propuesta para estandarizar el uso y la nomenclatura de las colas Redis en el ecosistema Nooble4. El objetivo es asegurar una comunicación inter-servicios eficiente, predecible y fácil de monitorear, eliminando inconsistencias como el uso de HTTP para comunicaciones internas y optimizando los patrones pseudo-asíncronos y asíncronos.
+Este documento establece el estándar para la nomenclatura de colas Redis en Nooble4. El objetivo es simple: **nadie debe construir nombres de colas manualmente**. Toda la lógica de nomenclatura está centralizada en la clase `QueueManager`.
 
-Se basa en el análisis de `inter_service_communication_v2.md`, `inter_service_flow_communications.md`, y la necesidad de migrar comunicaciones como la de `IngestionService` -> `EmbeddingService` (documentada en `ingestion_embedding_communication.md`) a un modelo basado en Redis.
+## 2. El `QueueManager`: La Única Fuente de Verdad
 
-## 2. Principios Fundamentales para las Colas Redis
+La clase `QueueManager`, ubicada en `common/utils/queue_manager.py`, es la responsable de generar todos los nombres de colas de manera consistente y predecible. Se inicializa con los settings de la aplicación (`CommonAppSettings`) para acceder a valores como el prefijo global (`nooble4`) y el entorno (`dev`, `prod`).
 
-1.  **Redis como Único Bus de Mensajes Interno**: Toda comunicación interna entre microservicios de Nooble4 debe realizarse a través de colas Redis. Se debe eliminar el uso de HTTP directo para interacciones servicio-a-servicio (ej. la llamada POST de `IngestionClient` a `EmbeddingService API`).
-2.  **Nomenclatura Consistente y Jerárquica**: Un esquema de nombres claro y predecible es crucial para la organización y el debugging.
-3.  **Separación de Intereses**: Colas distintas para tipos de mensajes diferentes (acciones, respuestas, callbacks, notificaciones).
-4.  **Soporte para Patrones de Comunicación**: La estructura de colas debe soportar eficientemente los patrones pseudo-síncrono, asíncrono fire-and-forget, y asíncrono con callbacks (si se mantiene este último).
+### 2.1. Uso en `BaseWorker` y `BaseRedisClient`
 
-## 3. Estandarización de Nomenclatura de Colas
+Tanto `BaseWorker` (para escuchar) como `BaseRedisClient` (para enviar) utilizan una instancia de `QueueManager` internamente. Esto garantiza que el servicio que envía un mensaje y el que lo recibe usen exactamente la misma convención para nombrar la cola.
 
-Se propone la siguiente estructura de nomenclatura, que expande y formaliza las convenciones ya parcialmente en uso, inspirándose en patrones observados en `inter_service_communication_v2.md`:
+## 3. Formato de las Colas Generadas
 
-`{prefijo_global}:{entorno}:{tipo_servicio_propietario_o_destino}:{nombre_instancia_o_contexto_especifico}:{tipo_cola}:{detalle_cola}`
+Aunque no necesitas construir estos nombres, es útil conocer el patrón para fines de depuración y monitoreo en Redis.
 
-*   **`{prefijo_global}`**: (Opcional, pero recomendado) Un prefijo global para todas las colas de Nooble4 (ej. `nooble4`). Ayuda a evitar colisiones si Redis se comparte con otras aplicaciones.
-*   **`{entorno}`**: (Opcional, pero recomendado) Identificador del entorno (ej. `dev`, `staging`, `prod`). Permite aislar flujos entre entornos.
-*   **`{tipo_servicio_propietario_o_destino}`**: Prefijo corto que identifica el servicio. 
-    *   Para colas de `actions`, es el servicio *destino* de la acción (ej. `management`, `embedding`).
-    *   Para colas de `responses` y `callbacks`, es el servicio *propietario* de la cola, es decir, el que la crea y escucha en ella (ej. el cliente que espera una respuesta o callback).
-*   **`{nombre_instancia_o_contexto_especifico}`**: (Opcional) Para escenarios de multi-tenancy, instancias específicas de workers, o contextos de ejecución particulares. Ejemplos:
-    *   `tenant_abc` (para colas específicas de un tenant)
-    *   `session_xyz` (para colas de callback ligadas a una sesión, como en AES)
-    *   `worker_instance_1` (si hay múltiples instancias especializadas)
-    *   Si no se usa, esta parte se omite o se usa un valor `default`.
-*   **`{tipo_cola}`**: Indica el propósito principal de la cola:
-    *   `actions`: Cola principal donde los workers de un servicio *destino* escuchan nuevas `DomainActions`.
-    *   `responses`: Usada para el patrón pseudo-síncrono. El nombre completo incluye el `correlation_id`. El *propietario* es el servicio cliente.
-    *   `callbacks`: Colas donde un servicio *propietario* (el que inició la operación asíncrona) escucha respuestas/eventos de otros servicios.
-    *   `notifications`: Para mensajes de eventos generales que no son respuestas directas a una solicitud (ej. `ingestion.document.processed`, `user.activity.logged`). El *propietario* es el servicio que emite la notificación, y los suscriptores la conocen.
-    *   `dead_letter`: (Recomendado) Para mensajes que no pudieron ser procesados después de varios intentos.
-*   **`{detalle_cola}`**: Información adicional específica del tipo de cola:
-    *   Para `actions`: Puede ser el nombre del worker si hay varios tipos de workers en un servicio, o simplemente `default` o nada (ej. `management:default:actions` o `management:actions`).
-    *   Para `responses`: `{action_name}:{correlation_id}` (ej. `execution_service:responses:get_agent_config:c1a2b3d4-e5f6-7890-1234-567890abcdef`). El servicio propietario es `execution_service`.
-    *   Para `callbacks`: `{servicio_que_envia_el_callback}:{evento_o_identificador_tarea}`. Ejemplos:
-        *   `ingestion_service:callbacks:embedding:batch_abc_completed` (Ingestion Service espera un callback de Embedding Service para el batch 'abc').
-        *   `execution_service:tenant_xyz:session_123:callbacks:query:rag_results` (Execution Service, para un tenant y sesión específicos, espera un callback de Query Service).
-    *   Para `notifications`: `{nombre_evento_o_topico}` (ej. `ingestion:notifications:document_processed`, `user_service:notifications:user_created`).
+### a) Colas de Acciones
 
-**Ejemplos Completos (suponiendo `nooble4:dev` como prefijo global y de entorno):**
+Son las colas donde los workers escuchan por trabajo nuevo. `BaseWorker` la usa para saber de dónde leer mensajes.
 
-*   **Cola de Acciones para AgentManagementService**:
-    `nooble4:dev:management:actions` (o `nooble4:dev:management:default:actions`)
-*   **Cola de Acciones para EmbeddingService (específica para un tenant si fuera necesario)**:
-    `nooble4:dev:embedding:tenant_xyz:actions`
-*   **Cola de Respuesta para una solicitud `get_agent_config` (cliente es ExecutionService, destino es ManagementService)**:
-    El cliente (ExecutionService) crea y escucha en: `nooble4:dev:execution_service:responses:get_agent_config:c1a2b3d4-e5f6-7890-1234-567890abcdef`
-    ManagementService envía la respuesta a esta cola.
-*   **Cola de Callbacks donde AgentExecutionService (AES) espera resultados de QueryService para una sesión específica**:
-    AES crea y escucha en: `nooble4:dev:execution_service:tenant_abc:session_123:callbacks:query:rag_results`
-    QueryService envía el callback a esta cola.
-*   **Cola de Callbacks donde IngestionService espera resultados de EmbeddingService para un `task_id` específico (reemplazando HTTP)**:
-    IngestionService crea y escucha en: `nooble4:dev:ingestion_service:callbacks:embedding:task_987efg`
-    EmbeddingService envía el callback a esta cola. El `task_id` (o `correlation_id`) debe viajar en el payload del mensaje de callback para la correlación final por parte de IngestionService.
-*   **Cola de Notificaciones de IngestionService sobre documentos procesados**:
-    `nooble4:dev:ingestion_service:notifications:document_processed`
+*   **Método**: `QueueManager.get_action_queue_name(service_name: str)`
+*   **Formato**: `{prefix}:{env}:{service_name}:actions`
+*   **Ejemplo**: `nooble4:dev:embedding:actions`
 
-## 4. Patrones de Comunicación y Colas Asociadas
+### b) Colas de Respuesta (Pseudo-Síncronas)
 
-### 4.1. Patrón Pseudo-Síncrono
+Son colas temporales creadas por `BaseRedisClient` para cada llamada pseudo-síncrona.
 
-*   **Flujo**:
-    1.  El **Cliente** (ej. `ServiceA` llamando a `ServiceB`):
-        *   Genera un `action_id` (nuevo UUID), `correlation_id` (nuevo UUID para este request-response), y `trace_id` (propagar si existe, o nuevo UUID).
-        *   Define su propia cola de respuesta única: `client_response_queue = "nooble4:dev:serviceA:responses:{action_type_short}:{correlation_id}"`.
-        *   Construye `DomainAction` con:
-            *   `action_id`, `action_type` (ej. `serviceB.entity.verb`)
-            *   `correlation_id`, `trace_id`
-            *   `origin_service` (nombre de `ServiceA`)
-            *   `callback_queue_name = client_response_queue` (para que `ServiceB` sepa dónde responder)
-            *   `data` (payload de la solicitud)
-        *   Envía esta `DomainAction` a la cola de acciones de `ServiceB` (ej. `nooble4:dev:serviceB:actions`).
-    2.  El **Cliente** (`ServiceA`) inmediatamente realiza `BLPOP` en su `client_response_queue` (con un timeout).
-    3.  El **Worker de `ServiceB`**:
-        *   Recibe la `DomainAction`.
-        *   Procesa la acción.
-        *   Construye `DomainActionResponse` con:
-            *   `success` (True/False)
-            *   `correlation_id` (copiado del `DomainAction` original)
-            *   `trace_id` (copiado del `DomainAction` original)
-            *   `action_type_response_to` (el `action_type` del `DomainAction` original)
-            *   `data` (payload de la respuesta) o `error` (modelo `ErrorDetail`).
-        *   Envía esta `DomainActionResponse` a la cola especificada en `original_action.callback_queue_name`.
-    4.  El **Cliente** (`ServiceA`) recibe la `DomainActionResponse` de su `BLPOP`.
-*   **Ventajas**: Comportamiento similar a una llamada de función síncrona para el cliente.
-*   **Consideraciones**: El cliente se bloquea. Es crucial usar timeouts en `BLPOP`.
+*   **Método**: `QueueManager.get_response_queue_name(correlation_id: str)`
+*   **Formato**: `{prefix}:{env}:responses:{correlation_id}`
+*   **Ejemplo**: `nooble4:dev:responses:a1b2c3d4-e5f6-7890-1234-567890abcdef`
 
-### 4.2. Patrón Asíncrono Fire-and-Forget
+`BaseRedisClient` asigna este nombre al campo `callback_queue_name` de la `DomainAction` antes de enviarla. El worker receptor simplemente usa ese campo para saber dónde enviar la `DomainActionResponse`.
 
-*   **Flujo**:
-    1.  El Cliente envía `DomainAction` a la cola `{prefijo}:{tipo_servicio_destino}:actions`.
-    2.  El Cliente no espera respuesta.
-*   **Uso**: Para tareas como `conversation.save_message` donde la confirmación inmediata no es crítica para el flujo principal del cliente.
-*   **Consideraciones**: El servicio destino debe tener un manejo robusto de errores y reintentos, ya que el cliente no sabrá directamente si la acción falló.
+### c) Colas de Callback (Asíncronas)
+
+Para los flujos asíncronos con callback, el servicio que inicia la acción es responsable de definir el nombre de la cola donde espera la respuesta y pasarlo en el campo `callback_queue_name` de la `DomainAction`. El `QueueManager` puede usarse para construir un nombre consistente si se desea.
+
+## 4. Conclusión
+
+La estandarización de colas se logra mediante la **centralización**, no mediante la documentación de un formato manual. Al usar `BaseWorker` y `BaseRedisClient`, te adhieres automáticamente al estándar de colas sin necesidad de conocer los detalles de implementación del `QueueManager`.
 
 ### 4.3. Patrón Asíncrono con Callbacks (Reemplazando HTTP y Estandarizando)
 
