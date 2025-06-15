@@ -29,6 +29,13 @@ class QueueManager:
         """
         return self._build_queue_name(service_name, "actions", "main")
 
+    def get_service_action_stream(self, service_name: str) -> str:
+        """
+        Obtiene el nombre del stream de acciones principal para un servicio.
+        Ej: nooble4:dev:embedding_service:streams:main
+        """
+        return self._build_queue_name(service_name, "streams", "main")
+
     def get_response_queue(self, client_service_name: str, action_type: str, correlation_id: str) -> str:
         """
         Obtiene el nombre de una cola de respuesta para una solicitud pseudo-síncrona.

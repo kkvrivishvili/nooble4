@@ -31,7 +31,7 @@ class BaseWorker(ABC):
     VERSIÓN: 8.0 - Alineado con el estándar de arquitectura v4.0.
     """
 
-    def __init__(self, app_settings: CommonAppSettings, async_redis_conn: redis_async.Redis):
+    def __init__(self, app_settings: CommonAppSettings, async_redis_conn: redis_async.Redis, consumer_id_suffix: Optional[str] = None):
         if not app_settings:
             raise ValueError("La configuración de la aplicación (app_settings) es obligatoria.")
         if not app_settings.service_name:
@@ -43,12 +43,19 @@ class BaseWorker(ABC):
         self.service_name = app_settings.service_name
         self.async_redis_conn = async_redis_conn
         
-        self.queue_manager = QueueManager(service_name=self.service_name)
-        self.action_queue_name = self.queue_manager.get_service_action_queue()
+        # Corregir inicialización de QueueManager y usar settings para environment
+        self.queue_manager = QueueManager(environment=self.app_settings.environment)
+        self.action_stream_name = self.queue_manager.get_service_action_stream(self.service_name) # MODIFIED: stream name
+
+        # Nombres para el grupo de consumidores y el consumidor
+        self.consumer_group_name = f"{self.service_name}-group"
+        worker_unique_id = consumer_id_suffix or str(uuid.uuid4()).split('-')[-1] # Corto UUID si no hay sufijo
+        self.consumer_name = f"{self.service_name}-worker-{worker_unique_id}"
 
         self.redis_client = BaseRedisClient(
-            app_settings=self.app_settings,
-            redis_conn=self.async_redis_conn,
+            service_name=self.service_name, # Pasar el nombre del servicio actual
+            redis_client=self.async_redis_conn,
+            settings=self.app_settings
         )
 
         self._running = False
@@ -77,72 +84,133 @@ class BaseWorker(ABC):
         """
         pass
 
+    async def _ensure_consumer_group_exists(self):
+        """Asegura que el grupo de consumidores exista en el stream, creándolo si es necesario."""
+        try:
+            # MKSTREAM crea el stream si no existe
+            await self.async_redis_conn.xgroup_create(
+                name=self.action_stream_name,
+                groupname=self.consumer_group_name,
+                id='0',  # Empezar desde el principio del stream si se crea nuevo
+                mkstream=True
+            )
+            logger.info(f"[{self.service_name}] Grupo de consumidores '{self.consumer_group_name}' creado/verificado para el stream '{self.action_stream_name}'.")
+        except redis_async.exceptions.ResponseError as e:
+            if "BUSYGROUP" in str(e):
+                logger.info(f"[{self.service_name}] Grupo de consumidores '{self.consumer_group_name}' ya existe para el stream '{self.action_stream_name}'.")
+            else:
+                logger.error(f"[{self.service_name}] Error al crear/verificar grupo de consumidores '{self.consumer_group_name}': {e}")
+                raise # Re-lanzar si es un error inesperado
+
     async def initialize(self):
         """
         Método de inicialización base. Los workers hijos deben sobreescribirlo para
         inicializar sus componentes (como la capa de servicio) y luego llamar a
         `await super().initialize()`.
         """
+        await self._ensure_consumer_group_exists() # MODIFIED: Asegurar grupo antes de inicializar
         self.initialized = True
-        logger.info(f"[{self.service_name}] BaseWorker inicializado.")
+        logger.info(f"[{self.service_name}] BaseWorker ({self.consumer_name}) inicializado. Escuchando en stream '{self.action_stream_name}', grupo '{self.consumer_group_name}'.")
 
     async def _process_action_loop(self):
-        """Bucle principal que escucha y procesa acciones de la cola Redis."""
-        logger.info(f"[{self.service_name}] Worker iniciando. Escuchando en cola: {self.action_queue_name}")
+        """Bucle principal que escucha y procesa acciones del stream Redis usando un grupo de consumidores."""
+        # El logger de inicialización ya está en el método initialize.
+        # logger.info(f"[{self.service_name}] Worker ({self.consumer_name}) iniciando. Escuchando en stream: {self.action_stream_name}, grupo: {self.consumer_group_name}")
         
         if not self.initialized:
-            await self.initialize()
+            await self.initialize() # Esto ahora también llama a _ensure_consumer_group_exists
 
         self._running = True
-        while self._running:
-            try:
-                message_data = await self.async_redis_conn.brpop(self.action_queue_name, timeout=1)
+        message_id_to_ack = None # Para asegurar el ACK incluso si hay error post-procesamiento
 
-                if message_data is None:
-                    await asyncio.sleep(0.01)
+        while self._running:
+            action = None # Asegurar que action está definida para el logging en caso de error temprano
+            try:
+                # Leer hasta 1 mensaje, bloquear por 1000ms (1 segundo)
+                # '>' significa solo nuevos mensajes no aún entregados a ningún consumidor en este grupo
+                stream_messages = await self.async_redis_conn.xreadgroup(
+                    groupname=self.consumer_group_name,
+                    consumername=self.consumer_name,
+                    streams={self.action_stream_name: '>'},
+                    count=1,
+                    block=1000  # Milliseconds
+                )
+
+                if not stream_messages: # Timeout, no message received
+                    await asyncio.sleep(0.01) # Opcional, para no hacer busy-loop tan agresivo
                     continue
 
-                _, message_json = message_data
+                # stream_messages = [ (b'stream_name', [ (b'message_id_1', {b'field_1': b'value_1'}), ... ]) ]
+                _stream_key_name, message_list = stream_messages[0]
+                if not message_list:
+                    continue
+                
+                message_id_bytes, message_payload_dict = message_list[0]
+                message_id_to_ack = message_id_bytes.decode('utf-8')
+
+                message_json_bytes = message_payload_dict.get(b'data')
+                if message_json_bytes is None:
+                    logger.error(f"[{self.service_name}][{self.consumer_name}] Mensaje {message_id_to_ack} del stream {self.action_stream_name} no tiene campo 'data'. Descartando y ACK.")
+                    await self.async_redis_conn.xack(self.action_stream_name, self.consumer_group_name, message_id_to_ack)
+                    message_id_to_ack = None
+                    continue
+                
+                message_json = message_json_bytes.decode('utf-8')
                 action = DomainAction.model_validate_json(message_json)
-                logger.info(f"[{self.service_name}] Acción recibida: {action.action_id} ({action.action_type})", extra=action.get_log_extra())
+                logger.info(f"[{self.service_name}][{self.consumer_name}] Acción {action.action_id} ({action.action_type}) recibida del stream (MsgID: {message_id_to_ack})", extra=action.get_log_extra())
 
                 try:
                     handler_result = await self._handle_action(action)
 
-                    if handler_result is None:
-                        continue # Acción fire-and-forget completada
+                    # Procesamiento de respuesta/callback se mantiene igual
+                    if handler_result is None and not (action.callback_queue_name and (action.callback_action_type or not action.callback_action_type)):
+                        logger.debug(f"[{self.service_name}][{self.consumer_name}] Acción fire-and-forget {action.action_id} completada.")
+                        # No hay más que hacer para fire-and-forget, se hará ACK abajo
+                    else:
+                        is_pseudo_sync = action.callback_queue_name and not action.callback_action_type
+                        is_async_callback = action.callback_queue_name and action.callback_action_type
 
-                    is_pseudo_sync = action.callback_queue_name and not action.callback_action_type
-                    is_async_callback = action.callback_queue_name and action.callback_action_type
+                        if is_pseudo_sync:
+                            response = self._create_success_response(action, handler_result or {})
+                            await self._send_response(response)
+                        elif is_async_callback:
+                            await self._send_callback(action, handler_result or {})
+                        # Si handler_result no es None pero no es ni pseudo-sync ni async_callback, es un fire-and-forget que devolvió algo. Se hace ACK.
 
-                    if is_pseudo_sync:
-                        response = self._create_success_response(action, handler_result)
-                        await self._send_response(response)
-                    elif is_async_callback:
-                        await self._send_callback(action, handler_result)
+                    # Si todo fue bien, ACK el mensaje
+                    await self.async_redis_conn.xack(self.action_stream_name, self.consumer_group_name, message_id_to_ack)
+                    logger.debug(f"[{self.service_name}][{self.consumer_name}] Mensaje {message_id_to_ack} ACKed.")
+                    message_id_to_ack = None # Reseteado después de ACK exitoso
 
                 except Exception as e:
-                    logger.error(f"[{self.service_name}] Error en handler para '{action.action_type}': {e}", extra=action.get_log_extra())
+                    # Error durante _handle_action o envío de respuesta/callback
+                    # NO HACER ACK. El mensaje permanecerá en PEL para ser reprocesado o reclamado.
+                    logger.error(f"[{self.service_name}][{self.consumer_name}] Error en handler para '{action.action_type}' (MsgID: {message_id_to_ack}): {e}", extra=action.get_log_extra() if action else None)
                     traceback.print_exc()
-                    if action.callback_queue_name:
+                    if action and action.callback_queue_name: # Solo intentar enviar error si es posible
                         error_code = "HANDLER_EXECUTION_ERROR"
                         error_response = self._create_error_response(action, str(e), error_code)
-                        await self._send_response(error_response)
+                        await self._send_response(error_response) # Este envío podría fallar también
+                    # No ACK aquí. message_id_to_ack no se resetea.
             
             except ValidationError as e:
-                logger.error(f"[{self.service_name}] Error de validación de DomainAction: {e}. Mensaje: {message_json}")
-                # No se puede enviar respuesta de error si la acción no es válida,
-                # ya que podríamos no tener un callback_queue_name.
+                logger.error(f"[{self.service_name}][{self.consumer_name}] Error de validación de DomainAction (MsgID: {message_id_to_ack}): {e}. Mensaje original: {message_json_bytes.decode('utf-8') if message_json_bytes else 'N/A'}")
+                if message_id_to_ack: # Si tenemos un ID, ACK para no reprocesar mensaje malformado
+                    await self.async_redis_conn.xack(self.action_stream_name, self.consumer_group_name, message_id_to_ack)
+                    logger.warning(f"[{self.service_name}][{self.consumer_name}] Mensaje malformado {message_id_to_ack} ACKed para evitar bucle.")
+                    message_id_to_ack = None
             
             except redis_async.RedisError as e:
-                logger.error(f"[{self.service_name}] Error de conexión con Redis: {e}. Reintentando en 5s...")
-                await asyncio.sleep(5)
+                # Errores de Redis como conexión perdida durante XREADGROUP o XACK
+                logger.error(f"[{self.service_name}][{self.consumer_name}] Error de conexión con Redis (MsgID: {message_id_to_ack}): {e}. Reintentando en 5s...")
+                await asyncio.sleep(5) # El mensaje (si se leyó) no será ACKed y debería ser reprocesado
             
             except Exception as e:
-                logger.critical(f"[{self.service_name}] Error crítico en el bucle del worker: {e}")
-                self._running = False
+                logger.critical(f"[{self.service_name}][{self.consumer_name}] Error crítico en el bucle del worker (MsgID: {message_id_to_ack}): {e}")
+                traceback.print_exc()
+                self._running = False # Detener el worker en caso de error muy grave
 
-        logger.info(f"[{self.service_name}] Worker detenido.")
+        logger.info(f"[{self.service_name}][{self.consumer_name}] Worker detenido.")
 
     def _create_success_response(self, action: DomainAction, data: Optional[Dict[str, Any]]) -> DomainActionResponse:
         """Crea una DomainActionResponse de éxito."""

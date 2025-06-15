@@ -48,17 +48,17 @@ class BaseRedisClient:
         try:
             # El servicio de destino se infiere del action_type. Ej: "management.agent.get" -> "management"
             target_service = action.action_type.split('.')[0]
-            # Use instance method of QueueManager
-            queue_name = self.queue_manager.get_action_queue(service_name=target_service)
+            # Use instance method of QueueManager to get stream name
+            stream_name = self.queue_manager.get_service_action_stream(service_name=target_service) # MODIFIED
             
             action.origin_service = self.service_name
             
-            message = action.model_dump_json()
+            message_payload = {'data': action.model_dump_json()} # MODIFIED: Payload for XADD
 
-            # Use the async client
-            await self.redis_client.lpush(queue_name, message)
+            # Use the async client to add to stream
+            message_id = await self.redis_client.xadd(stream_name, message_payload) # MODIFIED: XADD
             
-            logger.info(f"Acción asíncrona {action.action_id} ({action.action_type}) enviada a la cola {queue_name}.")
+            logger.info(f"Acción asíncrona {action.action_id} ({action.action_type}) enviada al stream {stream_name} con ID {message_id}.") # MODIFIED
 
         except (redis.RedisError, ValidationError) as e:
             logger.error(f"Error al enviar acción asíncrona {action.action_id}: {e}")
@@ -95,12 +95,12 @@ class BaseRedisClient:
 
         try:
             target_service = action.action_type.split('.')[0]
-            action_queue = self.queue_manager.get_action_queue(service_name=target_service)
+            action_stream_name = self.queue_manager.get_service_action_stream(service_name=target_service) # MODIFIED
             
-            message = action.model_dump_json()
+            message_payload = {'data': action.model_dump_json()} # MODIFIED: Payload for XADD
 
-            logger.info(f"Enviando acción pseudo-síncrona {action.action_id} a {action_queue}. Esperando respuesta en {response_queue}.")
-            await self.redis_client.lpush(action_queue, message)
+            logger.info(f"Enviando acción pseudo-síncrona {action.action_id} al stream {action_stream_name}. Esperando respuesta en {response_queue}.") # MODIFIED
+            message_id = await self.redis_client.xadd(action_stream_name, message_payload) # MODIFIED: XADD
             
             # Bloquear y esperar la respuesta con el cliente asíncrono
             response_data = await self.redis_client.brpop(response_queue, timeout=timeout)
@@ -155,16 +155,16 @@ class BaseRedisClient:
             # if callback_action_type and hasattr(action, 'callback_action_type'):
             #     action.callback_action_type = callback_action_type
             
-            # El resto es similar a send_action_async
+            # El resto es similar a send_action_async, enviando la acción principal a un stream
             target_service = action.action_type.split('.')[0]
-            queue_name = self.queue_manager.get_action_queue(service_name=target_service)
+            stream_name = self.queue_manager.get_service_action_stream(service_name=target_service) # MODIFIED
             
             action.origin_service = self.service_name
-            message = action.model_dump_json()
+            message_payload = {'data': action.model_dump_json()} # MODIFIED: Payload for XADD
 
-            await self.redis_client.lpush(queue_name, message)
+            message_id = await self.redis_client.xadd(stream_name, message_payload) # MODIFIED: XADD
             
-            logger.info(f"Acción asíncrona con callback {action.action_id} ({action.action_type}) enviada a {queue_name}. Callback en {action.callback_queue_name}.")
+            logger.info(f"Acción asíncrona con callback {action.action_id} ({action.action_type}) enviada al stream {stream_name} con ID {message_id}. Callback en {action.callback_queue_name}.") # MODIFIED
 
         except (redis.RedisError, ValidationError) as e:
             logger.error(f"Error al enviar acción asíncrona con callback {action.action_id}: {e}")
