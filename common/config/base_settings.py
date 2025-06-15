@@ -17,11 +17,6 @@ class CommonAppSettings(BaseSettings):
     max_retries: int = Field(3, description="Número máximo de reintentos para operaciones críticas.")
     worker_sleep_seconds: float = Field(0.1, description="Tiempo de espera para los workers entre ciclos de polling.")
 
-    # Configuración CORS
-    cors_origins: List[Union[AnyHttpUrl, str]] = Field(default_factory=lambda: ["*"], description="Orígenes permitidos para CORS.")
-    cors_allow_credentials: bool = Field(True, description="Permitir credenciales en CORS.")
-    cors_allow_methods: List[str] = Field(default_factory=lambda: ["*"], description="Métodos HTTP permitidos por CORS.")
-    cors_allow_headers: List[str] = Field(default_factory=lambda: ["*"], description="Cabeceras HTTP permitidas por CORS.")
 
     # Configuración de API Key (para proteger los propios endpoints del servicio)
     api_key_header_name: str = Field("X-API-Key", description="Nombre de la cabecera para la API key de acceso al servicio.")
@@ -36,6 +31,11 @@ class CommonAppSettings(BaseSettings):
     redis_socket_connect_timeout: int = Field(5, description="Timeout en segundos para la conexión del socket Redis.")
     redis_max_connections: Optional[int] = Field(None, description="Número máximo de conexiones en el pool de Redis.")
     redis_health_check_interval: int = Field(30, description="Intervalo en segundos para el health check de la conexión Redis.")
+    redis_socket_keepalive: bool = Field(True, description="Habilitar SO_KEEPALIVE en los sockets de Redis.")
+    redis_socket_keepalive_options: Optional[Dict[int, Union[int, bytes]]] = Field(
+        default_factory=dict, 
+        description="Opciones específicas de TCP Keepalive para los sockets de Redis (e.g., TCP_KEEPIDLE, TCP_KEEPINTVL, TCP_KEEPCNT). Dejar vacío para usar defaults del OS."
+    )
     redis_decode_responses: bool = Field(True, description="Decodificar automáticamente las respuestas de Redis a UTF-8.")
 
     # Configuración de Base de Datos (Opcional por servicio)

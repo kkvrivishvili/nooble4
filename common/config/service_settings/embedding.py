@@ -22,26 +22,6 @@ class EncodingFormats(str, Enum):
     BASE64 = "base64"
     # BINARY = "binary" # Binary no es directamente soportado por Pydantic para JSON, considerar alternativas
 
-# Información detallada de modelos específicos (puede ser útil para validaciones o información al usuario)
-# Esta estructura podría evolucionar o moverse a un archivo de "conocimiento de modelos" más grande.
-SUPPORTED_OPENAI_MODELS_INFO = {
-    "text-embedding-3-small": {
-        "dimensions": 1536,
-        "max_input_tokens": 8191,
-        "description": "Modelo de uso general con excelente balance costo/rendimiento"
-    },
-    "text-embedding-3-large": {
-        "dimensions": 3072,
-        "max_input_tokens": 8191,
-        "description": "Modelo de alta precisión para tareas complejas"
-    },
-    "text-embedding-ada-002": {
-        "dimensions": 1536,
-        "max_input_tokens": 8191,
-        "description": "Compatibilidad con sistemas legacy"
-    }
-}
-
 class EmbeddingServiceSettings(CommonAppSettings):
     """Configuración específica para Embedding Service."""
 
@@ -76,9 +56,9 @@ class EmbeddingServiceSettings(CommonAppSettings):
 
     default_dimensions_by_model: Dict[str, int] = Field(
         default_factory=lambda: {
-            "text-embedding-3-large": SUPPORTED_OPENAI_MODELS_INFO["text-embedding-3-large"]["dimensions"],
-            "text-embedding-3-small": SUPPORTED_OPENAI_MODELS_INFO["text-embedding-3-small"]["dimensions"],
-            "text-embedding-ada-002": SUPPORTED_OPENAI_MODELS_INFO["text-embedding-ada-002"]["dimensions"],
+            "text-embedding-3-large": 3072,
+            "text-embedding-3-small": 1536,
+            "text-embedding-ada-002": 1536,
             "embed-english-v3.0": 1024, # Cohere
             "all-mpnet-base-v2": 768    # Sentence Transformers
         },

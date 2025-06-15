@@ -1,5 +1,5 @@
 from typing import Optional, Dict, Any
-from pydantic import BaseModel, Field, root_validator
+from pydantic import BaseModel, Field, root_validator, ConfigDict
 import uuid
 from datetime import datetime, timezone
 
@@ -34,8 +34,7 @@ class DomainAction(BaseModel):
     data: Dict[str, Any] = Field(..., description="Payload específico de la acción, validado por un modelo Pydantic dedicado.")
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Metadatos adicionales no críticos para la lógica principal.")
 
-    class Config:
-        validate_assignment = True
+    model_config = ConfigDict(populate_by_name=True, extra='allow', validate_assignment=True)
 
 # Modelo de Respuesta, alineado con standart_payload.md
 class DomainActionResponse(BaseModel):

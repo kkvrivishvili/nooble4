@@ -3,7 +3,8 @@ Configuración específica para el Query Service.
 """
 from typing import Dict, Any
 from pydantic import Field
-from ..base_settings import CommonAppSettings # Ajustado para importar CommonAppSettings
+from pydantic_settings import SettingsConfigDict # BaseSettings se importa desde ..base_settings
+from ..base_settings import CommonAppSettings
 
 class QueryServiceSettings(CommonAppSettings):
     """
@@ -69,28 +70,4 @@ class QueryServiceSettings(CommonAppSettings):
         description="Habilitar el seguimiento de métricas de rendimiento para las consultas"
     )
     
-    # Modelos LLM disponibles y sus metadatos (podría moverse a un archivo de constantes si es estático)
-    llm_models_info: Dict[str, Dict[str, Any]] = Field(
-        default_factory=lambda: {
-            "llama3-8b-8192": {
-                "name": "Llama-3 8B",
-                "context_window": 8192,
-                "pricing_input_per_million_tokens": 0.20, # Ejemplo de precio
-                "pricing_output_per_million_tokens": 0.80, # Ejemplo de precio
-                "provider": "groq"
-            },
-            "llama3-70b-8192": {
-                "name": "Llama-3 70B",
-                "context_window": 8192,
-                "pricing_input_per_million_tokens": 0.70, # Ejemplo de precio
-                "pricing_output_per_million_tokens": 1.60, # Ejemplo de precio
-                "provider": "groq"
-            }
-        },
-        description="Información detallada de los modelos LLM disponibles, incluyendo proveedor y precios"
-    )
-
-    class Config:
-        env_prefix = "QUERY_" # Prefijo para variables de entorno
-        # env_file = ".env" # Descomentar si se usa un archivo .env específico para este servicio
-        # extra = "ignore"
+    model_config = SettingsConfigDict(extra='ignore', env_file='.env', env_prefix='QUERY_')
