@@ -6,36 +6,38 @@ Maneja búsquedas en el vector store con cache y optimizaciones.
 
 import logging
 import time
+import json
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
+from common.services import BaseService
 from query_service.clients.vector_store_client import VectorStoreClient
-from query_service.config.settings import get_settings
+from query_service.config.settings import QuerySettings
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
-class VectorSearchService:
+class VectorSearchService(BaseService):
     """
-    Servicio de búsqueda vectorial.
+    Servicio de búsqueda vectorial que hereda de BaseService.
     
     Proporciona búsqueda optimizada en vector stores
-    con cache y métricas.
+    con cache y métricas, utilizando dependencias inyectadas.
     """
-    
-    def __init__(self, redis_client=None):
+
+    def __init__(self, app_settings: QuerySettings, redis_client=None):
         """
-        Inicializa servicio.
-        
+        Inicializa el servicio.
+
         Args:
-            redis_client: Cliente Redis para cache y métricas
+            app_settings: Configuración de la aplicación (inyectada).
+            redis_client: Cliente Redis para cache y métricas.
         """
-        self.redis = redis_client
+        super().__init__(app_settings=app_settings, redis_client=redis_client)
         self.vector_store_client = VectorStoreClient()
-        
+
         # Cache TTL para búsquedas (5 minutos)
-        self.search_cache_ttl = 300
+        self.search_cache_ttl = self.app_settings.vector_search_cache_ttl or 300
     
     async def search_documents(
         self,
@@ -67,15 +69,14 @@ class VectorSearchService:
         try:
             # Generar cache key si se usa cache
             cache_key = None
-            if use_cache and self.redis:
+            if use_cache and self.redis_client:
                 cache_key = self._generate_search_cache_key(
                     collection_id, query_embedding, top_k, similarity_threshold
                 )
-                
+
                 # Verificar cache
-                cached_result = await self.redis.get(cache_key)
+                cached_result = await self.redis_client.get(cache_key)
                 if cached_result:
-                    import json
                     search_results = json.loads(cached_result)
                     logger.info(f"Búsqueda desde cache: {len(search_results)} docs")
                     await self._track_search_metrics(tenant_id, len(search_results), time.time() - start_time, True)
@@ -98,12 +99,11 @@ class VectorSearchService:
             ]
             
             # Cachear resultado si es apropiado
-            if use_cache and self.redis and cache_key and len(filtered_results) > 0:
-                import json
-                await self.redis.setex(
+            if use_cache and self.redis_client and cache_key and filtered_results:
+                await self.redis_client.set(
                     cache_key,
-                    self.search_cache_ttl,
-                    json.dumps(filtered_results)
+                    json.dumps(filtered_results),
+                    ex=self.search_cache_ttl,
                 )
             
             search_time = time.time() - start_time

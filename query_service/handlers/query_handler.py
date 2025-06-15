@@ -9,35 +9,44 @@ import time
 from typing import Dict, Any, Optional
 
 from common.models.execution_context import ExecutionContext
+from query_service.config.settings import QuerySettings
 from query_service.models.actions import QueryGenerateAction, SearchDocsAction
 from query_service.handlers.context_handler import QueryContextHandler
 from query_service.services.rag_processor import RAGProcessor
 from query_service.services.vector_search_service import VectorSearchService
-from query_service.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
+
 
 class QueryHandler:
     """
     Handler para procesar acciones de query y búsqueda.
     MODIFICADO: Usar nuevos servicios y context handler.
     """
-    
-    def __init__(self, context_handler: QueryContextHandler, redis_client=None):
+
+    def __init__(
+        self,
+        app_settings: QuerySettings,
+        context_handler: QueryContextHandler,
+        redis_client=None,
+    ):
         """
         Inicializa handler.
-        
+
         Args:
-            context_handler: Handler de contexto
-            redis_client: Cliente Redis (opcional)
+            app_settings: Configuración de la aplicación (inyectada).
+            context_handler: Handler de contexto.
+            redis_client: Cliente Redis (opcional).
         """
+        self.app_settings = app_settings
         self.context_handler = context_handler
-        self.redis = redis_client
-        
+        self.redis_client = redis_client
+
         # Inicializar servicios
-        self.vector_search_service = VectorSearchService(redis_client)
-        self.rag_processor = RAGProcessor(self.vector_search_service, redis_client)
+        self.vector_search_service = VectorSearchService(
+            app_settings=self.app_settings, redis_client=self.redis_client
+        )
+        self.rag_processor = RAGProcessor(self.vector_search_service, self.redis_client)
     
     async def handle_query_generate(self, action: QueryGenerateAction) -> Dict[str, Any]:
         """
@@ -186,17 +195,18 @@ class QueryHandler:
         processing_time: float
     ):
         """Registra métricas de consulta RAG."""
-        if not self.redis or not settings.enable_query_tracking:
+        if not self.redis_client or not self.app_settings.enable_query_tracking:
             return
-        
+
         try:
             from datetime import datetime
+
             today = datetime.now().date().isoformat()
-            
+
             # Métricas por tenant
             tenant_key = f"query_metrics:{context.tenant_id}:{today}"
-            await self.redis.hincrby(tenant_key, "total_queries", 1)
-            await self.redis.hincrby(tenant_key, "rag_queries", 1)
+            await self.redis_client.hincrby(tenant_key, "total_queries", 1)
+            await self.redis_client.hincrby(tenant_key, "rag_queries", 1)
             
             # Tokens utilizados
             if result.get("metadata", {}).get("tokens_used"):
@@ -219,27 +229,35 @@ class QueryHandler:
         processing_time: float
     ):
         """Registra métricas de búsqueda."""
-        if not self.redis or not settings.enable_query_tracking:
+        if not self.redis_client or not self.app_settings.enable_query_tracking:
             return
-        
+
         try:
             from datetime import datetime
+
             today = datetime.now().date().isoformat()
-            
+
             # Métricas por tenant
             tenant_key = f"query_metrics:{context.tenant_id}:{today}"
-            await self.redis.hincrby(tenant_key, "total_searches", 1)
-            await self.redis.hincrby(tenant_key, "total_search_results", len(result.get("documents", [])))
-            
-            # TTL
-            await self.redis.expire(tenant_key, 86400 * 7)  # 7 días
+            await self.redis_client.hincrby(tenant_key, "total_searches", 1)
+
+            # Métricas de resultados
+            found_docs = result.get("metadata", {}).get("found_documents", 0)
+            await self.redis_client.hincrby(
+                tenant_key, "total_search_results", found_docs
+            )
+
+            # Métricas de tiempo
+            await self.redis_client.rpush(
+                f"search_times:{context.tenant_id}", processing_time
+            )  # 7 días
             
         except Exception as e:
             logger.error(f"Error tracking search metrics: {str(e)}")
     
     async def get_query_stats(self, tenant_id: str) -> Dict[str, Any]:
         """Obtiene estadísticas de consultas para un tenant."""
-        if not self.redis:
+        if not self.redis_client:
             return {"metrics": "disabled"}
         
         try:

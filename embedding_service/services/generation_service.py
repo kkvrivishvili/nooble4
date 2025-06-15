@@ -18,33 +18,36 @@ from embedding_service.config.config import EmbeddingSettings
 from common.services import BaseService
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 class GenerationService(BaseService):
     """
     Servicio que encapsula la lógica de negocio para las acciones de embeddings.
+    Hereda de BaseService para asegurar un contrato común y recibir dependencias.
     """
 
-    def __init__(self, context_handler: EmbeddingContextHandler, redis_client=None):
+    def __init__(
+        self,
+        app_settings: EmbeddingSettings,
+        context_handler: EmbeddingContextHandler,
+        redis_client=None,
+    ):
         """
         Inicializa el servicio de generación.
 
         Args:
+            app_settings: Configuración de la aplicación (inyectada).
             context_handler: Handler de contexto para resolver y validar permisos.
             redis_client: Cliente Redis (opcional).
         """
+        super().__init__(app_settings=app_settings, redis_client=redis_client)
         self.context_handler = context_handler
-        self.redis = redis_client
 
-        # Inicializar sub-servicios
-        self.validation_service = ValidationService(redis_client)
-        super().__init__(app_settings=settings, redis_client=redis_client)
-        # self.settings ya está disponible como self.app_settings a través de BaseService, 
-        # pero mantenemos self.settings por ahora para minimizar cambios internos en esta clase.
-        # A futuro, se podría refactorizar para usar self.app_settings directamente.
-        self.settings = settings 
-        self.embedding_processor = EmbeddingProcessor(self.validation_service, redis_client)
+        # Inicializar sub-servicios utilizando las dependencias de la clase base
+        self.validation_service = ValidationService(self.redis_client)
+        self.embedding_processor = EmbeddingProcessor(
+            self.validation_service, self.redis_client
+        )
 
     async def generate_embeddings(self, action: EmbeddingGenerateAction) -> Dict[str, Any]:
         """
@@ -71,7 +74,7 @@ class GenerationService(BaseService):
             await self.context_handler.validate_embedding_permissions(
                 context=context,
                 texts=action.texts,
-                model=action.model or settings.default_embedding_model
+                model=action.model or self.app_settings.default_embedding_model,
             )
 
             # 3. Procesar embedding
@@ -84,12 +87,14 @@ class GenerationService(BaseService):
                 context, action, embedding_result, time.time() - start_time
             )
 
-            logger.info(f"Embedding completado: task_id={task_id}, tiempo={time.time() - start_time:.2f}s")
+            logger.info(
+                f"Embedding completado: task_id={task_id}, tiempo={time.time() - start_time:.2f}s"
+            )
 
             return {
                 "success": True,
                 "result": embedding_result,
-                "execution_time": time.time() - start_time
+                "execution_time": time.time() - start_time,
             }
 
         except Exception as e:
@@ -99,13 +104,13 @@ class GenerationService(BaseService):
                 "execution_time": time.time() - start_time,
                 "error": {
                     "type": type(e).__name__,
-                    "message": str(e)
-                }
+                    "message": str(e),
+                },
             }
 
     async def validate_embeddings(self, action: EmbeddingValidateAction) -> Dict[str, Any]:
         """
-        Procesa una solicitud de validación de embeddings.
+        Valida si un tenant puede procesar una solicitud de embedding.
 
         Args:
             action: Acción de validación con los datos necesarios.
@@ -117,50 +122,48 @@ class GenerationService(BaseService):
         task_id = action.task_id
 
         try:
-            logger.info(f"Procesando validación para tarea {task_id}")
+            logger.info(f"Procesando validación de embeddings para tarea {task_id}")
 
             # 1. Resolver contexto
             context = await self.context_handler.resolve_embedding_context(
                 action.execution_context
             )
 
-            # 2. Validar
-            validation_result = await self.validation_service.validate_texts(
-                texts=action.texts,
-                model=action.model or settings.default_embedding_model,
+            # 2. Validar permisos
+            await self.context_handler.validate_embedding_permissions(
                 context=context,
-                raise_error=False
+                texts=action.texts,
+                model=action.model or self.app_settings.default_embedding_model,
             )
 
-            # 3. Tracking
-            await self._track_validation_metrics(
-                context, action, validation_result, time.time() - start_time
-            )
-
-            logger.info(f"Validación completada: task_id={task_id}, tiempo={time.time() - start_time:.2f}s")
+            logger.info(f"Validación de embedding completada para tarea {task_id}")
 
             return {
                 "success": True,
-                "result": validation_result,
-                "execution_time": time.time() - start_time
+                "result": {"message": "Validation successful"},
+                "execution_time": time.time() - start_time,
             }
 
         except Exception as e:
-            logger.error(f"Error en validación {task_id}: {str(e)}")
+            logger.error(f"Error en validación de embedding {task_id}: {str(e)}")
             return {
                 "success": False,
                 "execution_time": time.time() - start_time,
                 "error": {
                     "type": type(e).__name__,
-                    "message": str(e)
-                }
+                    "message": str(e),
+                },
             }
 
-    async def _track_embedding_metrics(self, context: ExecutionContext, action: EmbeddingGenerateAction, result: Dict[str, Any], duration: float):
-        """Helper para tracking de métricas de generación."""
-        if not self.redis or not settings.enable_embedding_tracking:
-            return
-        
+    async def _track_embedding_metrics(
+        self, context, action, result, execution_time
+    ):
+        """Placeholder para tracking de métricas."""
+        logger.info(
+            f"Métricas de embedding: tenant={context.tenant.id}, "
+            f"model={action.model}, tokens={result.get('total_tokens', 0)}, "
+            f"tiempo={execution_time:.2f}s"
+        )
         try:
             from datetime import datetime
             today = datetime.now().date().isoformat()

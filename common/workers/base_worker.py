@@ -1,256 +1,232 @@
 import asyncio
-import importlib
 import logging
 import traceback
 import uuid
-from typing import Optional, Type, Dict, Any
+from abc import ABC, abstractmethod
+from typing import Optional, Dict, Any
 
-from pydantic import BaseModel
-
-import redis.asyncio as redis_async # Cambiado a redis.asyncio
 from pydantic import ValidationError
+import redis.asyncio as redis_async
 
-# from refactorizado.common.redis_pool import RedisPool # Eliminado, se usará conexión async directa
-from common.handlers.base_handler import BaseHandler # Ancestro común
-from common.handlers.base_context_handler import BaseContextHandler # Para isinstance
 from common.models.actions import DomainAction, DomainActionResponse, ErrorDetail
 from common.clients.queue_manager import QueueManager
-from common.config import CommonAppSettings # Para el constructor
-from common.clients import BaseRedisClient # Para el constructor y uso
+from common.config import CommonAppSettings
+from common.clients import BaseRedisClient
 
 logger = logging.getLogger(__name__)
 
 
-class HandlerNotFoundError(Exception):
-    """Excepción para cuando no se encuentra un handler para un action_type."""
-    pass
-
-
-class BaseWorker:
+class BaseWorker(ABC):
     """
-    Worker genérico que procesa acciones de Redis de forma dinámica.
+    Worker base abstracto (Arquitectura v4.0).
 
-    Descubre, instancia y ejecuta el handler apropiado para cada `DomainAction`
-    basándose en una convención de nombres y estructura de carpetas.
+    Este worker actúa como un componente de infraestructura. Su responsabilidad es
+    escuchar en una cola de Redis, recibir y deserializar acciones (`DomainAction`),
+    y delegar el procesamiento a una capa de servicio a través del método abstracto
+    `_handle_action`.
 
-    VERSIÓN: 7.0 - Refactorizado para Redis asíncrono y nueva instanciación de handlers.
+    También gestiona el ciclo de vida de la respuesta, enviando `DomainActionResponse`
+    para comunicaciones pseudo-síncronas o nuevos `DomainAction` para callbacks asíncronos.
+
+    VERSIÓN: 8.0 - Alineado con el estándar de arquitectura v4.0.
     """
 
-    def __init__(self, app_settings: CommonAppSettings, async_redis_conn: redis_async.Redis, handler_base_package_path: str):
+    def __init__(self, app_settings: CommonAppSettings, async_redis_conn: redis_async.Redis):
         if not app_settings:
             raise ValueError("La configuración de la aplicación (app_settings) es obligatoria.")
         if not app_settings.service_name:
             raise ValueError("El nombre del servicio (app_settings.service_name) es obligatorio.")
         if async_redis_conn is None:
             raise ValueError("La conexión Redis asíncrona (async_redis_conn) es obligatoria.")
-        if not handler_base_package_path:
-            raise ValueError("La ruta base del paquete de handlers (handler_base_package_path) es obligatoria.")
 
         self.app_settings = app_settings
-        self.service_name = app_settings.service_name # Tomado de app_settings
-        self.async_redis_conn = async_redis_conn # Conexión Redis asíncrona 'cruda'
-        self.handler_base_package_path = handler_base_package_path
+        self.service_name = app_settings.service_name
+        self.async_redis_conn = async_redis_conn
         
-        # QueueManager ahora podría tomar app_settings si necesita más config, o solo service_name
         self.queue_manager = QueueManager(service_name=self.service_name)
         self.action_queue_name = self.queue_manager.get_service_action_queue()
 
-        # Crear el BaseRedisClient para los handlers
         self.redis_client = BaseRedisClient(
             app_settings=self.app_settings,
-            redis_conn=self.async_redis_conn, # BaseRedisClient usa la conexión 'cruda'
-            # service_name es tomado de app_settings dentro de BaseRedisClient
+            redis_conn=self.async_redis_conn,
         )
 
         self._running = False
+        self.initialized = False
         self._worker_task: Optional[asyncio.Task] = None
 
-    def _get_handler_class(self, action_type: str) -> Type[BaseHandler]:
-        """Descubre y carga dinámicamente la clase del handler basada en el action_type."""
-        try:
-            parts = action_type.split('.')
-            handler_name_snake = parts[-1] + "_handler"
-            class_name_camel = "".join(part.capitalize() for part in parts[-1].split('_')) + "Handler"
-            
-            module_subpath_parts = parts[:-1] + [handler_name_snake]
-            module_relative_path = ".".join(module_subpath_parts)
-            
-            full_module_to_import = f"{self.handler_base_package_path}.{module_relative_path}"
+    @abstractmethod
+    async def _handle_action(self, action: DomainAction) -> Optional[Dict[str, Any]]:
+        """
+        Procesa una DomainAction delegando a la capa de servicio.
 
-            logger.debug(f"[{self.service_name}] Intentando importar handler: {full_module_to_import}.{class_name_camel}")
-            handler_module = importlib.import_module(full_module_to_import)
-            handler_class = getattr(handler_module, class_name_camel)
-            return handler_class
-        except (ImportError, AttributeError) as e:
-            logger.error(f"[{self.service_name}] No se pudo encontrar o cargar el handler para action_type='{action_type}'. Detalle: {e}")
-            raise HandlerNotFoundError(
-                f"No se pudo encontrar o cargar el handler para action_type='{action_type}'. "
-                f"Detalle: {e}"
-            )
+        Este es el método abstracto que cada worker hijo DEBE implementar. Actúa como
+        un enrutador que llama a la lógica de negocio apropiada basada en `action.action_type`.
 
-    async def _get_handler_instance(self, action: DomainAction) -> BaseHandler:
-        """Obtiene una instancia inicializada del handler para una acción."""
-        handler_class = self._get_handler_class(action.action_type)
-        
-        handler_args = {
-            "action": action,
-            "app_settings": self.app_settings,
-            "redis_client": self.redis_client
-            # service_name es parte de app_settings y BaseActionHandler lo usa desde allí.
-            # El logger también se configura en BaseActionHandler usando app_settings.
-        }
+        Args:
+            action: La `DomainAction` recibida.
 
-        if issubclass(handler_class, BaseContextHandler):
-            handler_args["context_redis_client"] = self.async_redis_conn
-        
-        # No se necesita un caso especial para BaseCallbackHandler ya que sus necesidades
-        # son cubiertas por los argumentos de BaseActionHandler.
+        Returns:
+            - Un `dict` con los datos de resultado si la acción requiere una respuesta o un callback.
+            - `None` para acciones "fire-and-forget" que no generan respuesta.
 
-        # El kwarg 'service_name' ya no se pasa directamente a BaseActionHandler si usa app_settings.
-        # Si BaseHandler (el ancestro más antiguo) lo necesitara explícitamente y no lo toma de app_settings,
-        # se podría añadir aquí, pero BaseActionHandler ya maneja service_name y logger desde app_settings.
-        handler_instance = handler_class(**handler_args)
-        
-        # El método initialize puede necesitar acceso a app_settings o redis_client si realiza
-        # operaciones asíncronas o de configuración que ahora dependen de estos.
-        # Por ahora, asumimos que initialize() no necesita cambios o los tomará de self.
-        await handler_instance.initialize() 
-        return handler_instance
+        Raises:
+            Exception: Si ocurre un error durante el procesamiento. La excepción será
+                       capturada por el bucle principal del worker, que se encargará de
+                       registrar el error y enviar una respuesta de error si corresponde.
+        """
+        pass
 
-    async def _handle_action(self, action: DomainAction) -> Optional[DomainActionResponse]:
-        """Orquesta el ciclo de vida completo de la ejecución de una acción."""
-        try:
-            handler = await self._get_handler_instance(action)
-            response_model = await handler.execute()  # Ahora devuelve Optional[BaseModel]
-            return self._create_success_response(action, response_model)
-
-        
-        except HandlerNotFoundError as e:
-            logger.error(f"[{self.service_name}] {e}", extra=action.get_log_extra())
-            return self._create_error_response(action, str(e), "HANDLER_NOT_FOUND")
-        
-        except ValidationError as e:
-            logger.error(f"[{self.service_name}] Error de validación de payload para '{action.action_type}': {e}", extra=action.get_log_extra())
-            return self._create_error_response(action, f"Payload inválido: {e}", "INVALID_PAYLOAD")
-        
-        except Exception as e:
-            logger.error(f"[{self.service_name}] Error inesperado en handler para '{action.action_type}': {e}", extra=action.get_log_extra())
-            traceback.print_exc()
-            return self._create_error_response(action, f"Error interno del handler: {e}", "HANDLER_EXECUTION_ERROR")
+    async def initialize(self):
+        """
+        Método de inicialización base. Los workers hijos deben sobreescribirlo para
+        inicializar sus componentes (como la capa de servicio) y luego llamar a
+        `await super().initialize()`.
+        """
+        self.initialized = True
+        logger.info(f"[{self.service_name}] BaseWorker inicializado.")
 
     async def _process_action_loop(self):
-        """Bucle principal que escucha y procesa acciones de la cola Redis de forma asíncrona."""
+        """Bucle principal que escucha y procesa acciones de la cola Redis."""
         logger.info(f"[{self.service_name}] Worker iniciando. Escuchando en cola: {self.action_queue_name}")
-        self._running = True
+        
+        if not self.initialized:
+            await self.initialize()
 
+        self._running = True
         while self._running:
             try:
-                # Usar la conexión Redis asíncrona para brpop
                 message_data = await self.async_redis_conn.brpop(self.action_queue_name, timeout=1)
 
                 if message_data is None:
-                    # No es necesario un sleep aquí si brpop tiene timeout, pero un pequeño sleep puede ser útil
-                    # para ceder control en caso de que el bucle esté muy activo sin mensajes.
-                    await asyncio.sleep(0.01) 
+                    await asyncio.sleep(0.01)
                     continue
 
                 _, message_json = message_data
-                action = None
+                action = DomainAction.model_validate_json(message_json)
+                logger.info(f"[{self.service_name}] Acción recibida: {action.action_id} ({action.action_type})", extra=action.get_log_extra())
+
                 try:
-                    action = DomainAction.model_validate_json(message_json)
-                    logger.info(f"[{self.service_name}] Acción recibida: {action.action_id} ({action.action_type})", extra=action.get_log_extra())
+                    handler_result = await self._handle_action(action)
 
-                    response = await self._handle_action(action)
+                    if handler_result is None:
+                        continue # Acción fire-and-forget completada
 
-                    if response and action.callback_queue_name:
-                        await self._send_response(response) # _send_response ahora es async
-                    
-                except ValidationError as e:
-                    logger.error(f"[{self.service_name}] Error de validación de DomainAction: {e}. Mensaje: {message_json}")
-                    if action and action.callback_queue_name:
-                        error_response = self._create_error_response(action, f"Error de validación: {e}", "VALIDATION_ERROR")
-                        await self._send_response(error_response) # _send_response ahora es async
-                
+                    is_pseudo_sync = action.callback_queue_name and not action.callback_action_type
+                    is_async_callback = action.callback_queue_name and action.callback_action_type
+
+                    if is_pseudo_sync:
+                        response = self._create_success_response(action, handler_result)
+                        await self._send_response(response)
+                    elif is_async_callback:
+                        await self._send_callback(action, handler_result)
+
                 except Exception as e:
-                    logger.error(f"[{self.service_name}] Error inesperado procesando acción {getattr(action, 'action_id', 'N/A')}: {e}", extra=getattr(action, 'get_log_extra', lambda: {})())
+                    logger.error(f"[{self.service_name}] Error en handler para '{action.action_type}': {e}", extra=action.get_log_extra())
                     traceback.print_exc()
-                    if action and action.callback_queue_name:
-                        error_response = self._create_error_response(action, f"Error interno del worker: {e}", "WORKER_EXECUTION_ERROR")
-                        await self._send_response(error_response) # _send_response ahora es async
-
-            except redis_async.RedisError as e: # Capturar excepciones de Redis asíncrono
+                    if action.callback_queue_name:
+                        error_code = "HANDLER_EXECUTION_ERROR"
+                        error_response = self._create_error_response(action, str(e), error_code)
+                        await self._send_response(error_response)
+            
+            except ValidationError as e:
+                logger.error(f"[{self.service_name}] Error de validación de DomainAction: {e}. Mensaje: {message_json}")
+                # No se puede enviar respuesta de error si la acción no es válida,
+                # ya que podríamos no tener un callback_queue_name.
+            
+            except redis_async.RedisError as e:
                 logger.error(f"[{self.service_name}] Error de conexión con Redis: {e}. Reintentando en 5s...")
                 await asyncio.sleep(5)
+            
             except Exception as e:
                 logger.critical(f"[{self.service_name}] Error crítico en el bucle del worker: {e}")
-                self._running = False # Considerar si detenerse o intentar recuperarse
+                self._running = False
 
         logger.info(f"[{self.service_name}] Worker detenido.")
 
+    def _create_success_response(self, action: DomainAction, data: Optional[Dict[str, Any]]) -> DomainActionResponse:
+        """Crea una DomainActionResponse de éxito."""
+        return DomainActionResponse(
+            action_id=str(uuid.uuid4()),
+            correlation_id=action.correlation_id,
+            trace_id=action.trace_id,
+            task_id=action.task_id,
+            origin_service=self.service_name,
+            success=True,
+            data=data,
+            error=None,
+            callback_queue_name=action.callback_queue_name
+        )
+
+    def _create_error_response(self, action: DomainAction, error_message: str, error_code: str) -> DomainActionResponse:
+        """Crea una DomainActionResponse de error."""
+        return DomainActionResponse(
+            action_id=str(uuid.uuid4()),
+            correlation_id=action.correlation_id,
+            trace_id=action.trace_id,
+            task_id=action.task_id,
+            origin_service=self.service_name,
+            success=False,
+            data=None,
+            error=ErrorDetail(code=error_code, message=error_message),
+            callback_queue_name=action.callback_queue_name
+        )
+
     async def _send_response(self, response: DomainActionResponse):
-        """Envía una DomainActionResponse a su cola de callback correspondiente de forma asíncrona."""
+        """Envía una DomainActionResponse a su cola de callback."""
         if not response.callback_queue_name:
             logger.warning(f"[{self.service_name}] Se intentó enviar respuesta para {response.correlation_id} sin callback_queue_name.")
             return
 
         try:
-            # Usar la conexión Redis asíncrona para lpush
             await self.async_redis_conn.lpush(response.callback_queue_name, response.model_dump_json())
             logger.info(f"[{self.service_name}] Respuesta {response.action_id} para {response.correlation_id} enviada a {response.callback_queue_name}.", extra=response.get_log_extra())
-        except redis_async.RedisError as e: # Capturar excepciones de Redis asíncrono
-            logger.error(f"[{self.service_name}] Error de Redis al enviar respuesta {response.action_id} a {response.callback_queue_name}: {e}", extra=response.get_log_extra())
+        except redis_async.RedisError as e:
+            logger.error(f"[{self.service_name}] Error de Redis al enviar respuesta a {response.callback_queue_name}: {e}", extra=response.get_log_extra())
 
-    def _create_success_response(self, original_action: DomainAction, response_model: Optional[BaseModel]) -> DomainActionResponse:
-        """Crea una DomainActionResponse estandarizada para éxito."""
-        payload_dict: Optional[Dict[str, Any]] = None
-        if response_model is not None:
-            payload_dict = response_model.model_dump(mode='json')
-
-        return DomainActionResponse(
+    async def _send_callback(self, original_action: DomainAction, callback_data: Dict[str, Any]):
+        """Crea y envía un nuevo DomainAction como callback."""
+        callback_action = DomainAction(
             action_id=str(uuid.uuid4()),
-            correlation_id=original_action.correlation_id,
+            action_type=original_action.callback_action_type,
             task_id=original_action.task_id,
+            correlation_id=original_action.correlation_id,
             trace_id=original_action.trace_id,
-            callback_queue_name=original_action.callback_queue_name,
-            action_type_response_to=original_action.action_type,
-            success=True,
-            data=payload_dict
+            session_id=original_action.session_id,
+            origin_service=self.service_name,
+            data=callback_data,
+            # Los callbacks no suelen tener callbacks a su vez.
+            callback_queue_name=None,
+            callback_action_type=None
         )
+        try:
+            await self.async_redis_conn.lpush(original_action.callback_queue_name, callback_action.model_dump_json())
+            logger.info(f"[{self.service_name}] Callback {callback_action.action_id} ({callback_action.action_type}) enviado a {original_action.callback_queue_name}.", extra=callback_action.get_log_extra())
+        except redis_async.RedisError as e:
+            logger.error(f"[{self.service_name}] Error de Redis al enviar callback a {original_action.callback_queue_name}: {e}", extra=callback_action.get_log_extra())
 
-    def _create_error_response(self, original_action: DomainAction, error_message: str, error_code: str) -> DomainActionResponse:
-        """Crea una DomainActionResponse estandarizada para errores."""
-        return DomainActionResponse(
-            action_id=str(uuid.uuid4()),
-            correlation_id=original_action.correlation_id,
-            task_id=original_action.task_id,
-            trace_id=original_action.trace_id,
-            callback_queue_name=original_action.callback_queue_name,
-            action_type_response_to=original_action.action_type,
-            success=False,
-            error=ErrorDetail(message=error_message, code=error_code)
-        )
+    async def run(self):
+        """Inicia el worker y su bucle de procesamiento."""
+        self._worker_task = asyncio.create_task(self._process_action_loop())
+        await self._worker_task
 
     async def start(self):
-        """Inicia el worker en una tarea de fondo."""
-        if self._running:
-            logger.warning(f"[{self.service_name}] El worker ya está en ejecución.")
-            return
-        self._worker_task = asyncio.create_task(self._process_action_loop())
+        """Método de conveniencia para iniciar el worker."""
+        if not self._running:
+            logger.info(f"[{self.service_name}] Iniciando worker...")
+            self._worker_task = asyncio.create_task(self.run())
 
     async def stop(self):
         """Detiene el worker de forma segura."""
-        if not self._running or not self._worker_task:
-            logger.warning(f"[{self.service_name}] El worker no está en ejecución.")
-            return
-
-        logger.info(f"[{self.service_name}] Deteniendo worker...")
-        self._running = False
-        try:
-            # Esperar a que la tarea del worker termine limpiamente
-            await asyncio.wait_for(self._worker_task, timeout=5.0)
-        except asyncio.TimeoutError:
-            logger.warning(f"[{self.service_name}] El worker no se detuvo a tiempo, forzando cancelación.")
-            self._worker_task.cancel()
-        except asyncio.CancelledError:
-            pass # La cancelación es esperada
-        logger.info(f"[{self.service_name}] El worker se ha detenido completamente.")
+        if self._running:
+            logger.info(f"[{self.service_name}] Deteniendo worker...")
+            self._running = False
+            if self._worker_task:
+                try:
+                    await asyncio.wait_for(self._worker_task, timeout=5.0)
+                except asyncio.TimeoutError:
+                    logger.warning(f"[{self.service_name}] El worker no se detuvo a tiempo, forzando cancelación.")
+                    self._worker_task.cancel()
+                except asyncio.CancelledError:
+                    pass # La tarea fue cancelada, es normal.
+            logger.info(f"[{self.service_name}] Worker detenido completamente.")

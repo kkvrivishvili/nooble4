@@ -16,14 +16,19 @@ from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
 from common.models.execution_context import ExecutionContext
 from common.services.domain_queue_manager import DomainQueueManager
-from embedding_service.models.actions import EmbeddingGenerateAction, EmbeddingValidateAction, EmbeddingCallbackAction
+from embedding_service.config.settings import EmbeddingSettings
+from embedding_service.models.actions import (
+    EmbeddingGenerateAction,
+    EmbeddingValidateAction,
+    EmbeddingCallbackAction,
+)
 from embedding_service.services.generation_service import GenerationService
 from embedding_service.handlers.context_handler import get_embedding_context_handler
-from embedding_service.handlers.embedding_callback_handler import EmbeddingCallbackHandler
-from embedding_service.config.settings import get_settings
+from embedding_service.handlers.embedding_callback_handler import (
+    EmbeddingCallbackHandler,
+)
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 class EmbeddingWorker(BaseWorker):
     """
@@ -38,21 +43,30 @@ class EmbeddingWorker(BaseWorker):
     - Sin registro de handlers obsoleto
     """
     
-    def __init__(self, redis_client, queue_manager=None):
+    def __init__(
+        self,
+        redis_client,
+        settings: EmbeddingSettings,
+        queue_manager: Optional[DomainQueueManager] = None,
+    ):
         """
         Inicializa worker con servicios necesarios.
-        
+
         Args:
-            redis_client: Cliente Redis configurado (requerido)
-            queue_manager: Gestor de colas por dominio (opcional)
+            redis_client: Cliente Redis configurado (requerido).
+            settings: Configuración de la aplicación (inyectada).
+            queue_manager: Gestor de colas por dominio (opcional).
         """
         queue_manager = queue_manager or DomainQueueManager(redis_client)
         super().__init__(redis_client, queue_manager)
-        
+
+        # Inyectar settings
+        self.settings = settings
+
         # Definir domain específico
-        self.domain = settings.domain_name  # "embedding"
-        
-        # Handlers que se inicializarán de forma asíncrona
+        self.domain = self.settings.domain_name  # "embedding"
+
+        # Componentes que se inicializarán de forma asíncrona
         self.context_handler = None
         self.embedding_callback_handler = None
         self.generation_service = None
@@ -81,19 +95,21 @@ class EmbeddingWorker(BaseWorker):
         """Inicializa todos los componentes necesarios sin registrar handlers."""
         # Context handler
         self.context_handler = await get_embedding_context_handler(self.redis_client)
-        
+
         # Embedding callback handler
         self.embedding_callback_handler = EmbeddingCallbackHandler(
             self.queue_manager, self.redis_client
         )
-        
+
         # Servicio de generación principal
         self.generation_service = GenerationService(
-            self.context_handler, self.redis_client
+            app_settings=self.settings,
+            context_handler=self.context_handler,
+            redis_client=self.redis_client,
         )
-        
+
         # Ya no registramos handlers en el queue_manager - todo se procesa vía _handle_action
-        
+
         logger.info("EmbeddingWorker: Componentes inicializados")
     
     async def _handle_action(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:

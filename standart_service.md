@@ -25,19 +25,23 @@ Una clase de servicio (ej: `GenerationService` en `embedding_service`) es una cl
 ```python
 # embedding_service/services/generation_service.py
 
-class GenerationService:
+from common.services.base_service import BaseService
+from common.config.base_settings import CommonAppSettings
+
+class GenerationService(BaseService):
     """
     Servicio que encapsula la lógica de negocio para las acciones de embeddings.
+    Hereda de BaseService para asegurar un contrato común.
     """
 
-    def __init__(self, context_handler: EmbeddingContextHandler, redis_client=None):
-        """Inyecta sus dependencias."""
+    def __init__(self, app_settings: CommonAppSettings, context_handler: EmbeddingContextHandler, redis_client=None):
+        """Inyecta sus dependencias y las pasa a la clase base."""
+        super().__init__(app_settings, redis_client)
         self.context_handler = context_handler
-        self.redis = redis_client
 
         # Inicializa y posee los componentes especializados
-        self.validation_service = ValidationService(redis_client)
-        self.embedding_processor = EmbeddingProcessor(self.validation_service, redis_client)
+        self.validation_service = ValidationService(self.redis_client)
+        self.embedding_processor = EmbeddingProcessor(self.validation_service, self.redis_client)
 
     async def generate_embeddings(self, action: EmbeddingGenerateAction) -> Dict[str, Any]:
         """

@@ -16,17 +16,18 @@ from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
 from common.models.execution_context import ExecutionContext
 from common.services.domain_queue_manager import DomainQueueManager
+from query_service.config.settings import QuerySettings
 from query_service.models.actions import (
-    QueryGenerateAction, SearchDocsAction, QueryCallbackAction
+    QueryGenerateAction,
+    SearchDocsAction,
+    QueryCallbackAction,
 )
 from query_service.handlers.query_handler import QueryHandler
 from query_service.handlers.context_handler import get_query_context_handler
 from query_service.handlers.query_callback_handler import QueryCallbackHandler
 from query_service.handlers.embedding_callback_handler import EmbeddingCallbackHandler
-from query_service.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 class QueryWorker(BaseWorker):
     """
@@ -40,20 +41,29 @@ class QueryWorker(BaseWorker):
     - Estadísticas avanzadas
     """
     
-    def __init__(self, redis_client, queue_manager=None):
+    def __init__(
+        self,
+        redis_client,
+        settings: QuerySettings,
+        queue_manager: Optional[DomainQueueManager] = None,
+    ):
         """
         Inicializa worker con servicios necesarios.
-        
+
         Args:
-            redis_client: Cliente Redis configurado (requerido)
-            queue_manager: Gestor de colas por dominio (opcional)
+            redis_client: Cliente Redis configurado (requerido).
+            settings: Configuración de la aplicación (inyectada).
+            queue_manager: Gestor de colas por dominio (opcional).
         """
         queue_manager = queue_manager or DomainQueueManager(redis_client)
         super().__init__(redis_client, queue_manager)
-        
+
+        # Inyectar settings
+        self.settings = settings
+
         # Definir domain específico
-        self.domain = settings.domain_name  # "query"
-        
+        self.domain = self.settings.domain_name  # "query"
+
         # Handlers que se inicializarán de forma asíncrona
         self.context_handler = None
         self.query_handler = None
@@ -80,7 +90,9 @@ class QueryWorker(BaseWorker):
         
         # Query handler principal
         self.query_handler = QueryHandler(
-            self.context_handler, self.redis_client
+            app_settings=self.settings,
+            context_handler=self.context_handler,
+            redis_client=self.redis_client,
         )
         
         self.initialized = True
