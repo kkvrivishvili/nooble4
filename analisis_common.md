@@ -1769,3 +1769,216 @@ El README es un documento valioso que establece las expectativas para `base_work
 
 ---
 
+### Archivo: `common/workers/base_worker.py`
+
+**Versión:** 8.0 (Alineado con el estándar de arquitectura v4.0)
+
+**Propósito General:**
+`BaseWorker` es una clase abstracta que sirve como componente de infraestructura fundamental para los workers de larga duración en Nooble4. Su responsabilidad principal es escuchar acciones (`DomainAction`) de una cola Redis, deserializarlas y delegar su procesamiento a la lógica específica implementada por las clases hijas a través del método abstracto `_handle_action`. También gestiona el ciclo de vida de las respuestas, ya sea enviando `DomainActionResponse` para comunicaciones pseudo-síncronas o nuevos `DomainAction` como callbacks asíncronos.
+
+**Componentes Clave y Flujo:**
+
+1.  **Inicialización (`__init__`)**:
+    *   **Parámetros Requeridos:**
+        *   `app_settings: CommonAppSettings`: Configuración de la aplicación, debe incluir `service_name`.
+        *   `async_redis_conn: redis.asyncio.Redis`: Una conexión Redis asíncrona ya establecida.
+    *   **Configuración Interna:**
+        *   Almacena `app_settings`, `service_name`, y `async_redis_conn`.
+        *   Instancia `QueueManager(service_name=self.service_name)` para determinar `self.action_queue_name` (la cola principal de acciones del servicio). Esto resuelve la inconsistencia sobre `QueueManager` mencionada en el README.
+        *   Instancia `BaseRedisClient(app_settings=self.app_settings, redis_conn=self.async_redis_conn)`. Este cliente (`self.redis_client`) está disponible para que las clases hijas lo utilicen si necesitan enviar acciones a otros servicios desde su lógica de `_handle_action`. `BaseWorker` mismo no usa `self.redis_client` para sus operaciones directas de respuesta/callback en el bucle principal.
+        *   Inicializa variables de estado como `_running`, `initialized`, y `_worker_task`.
+
+2.  **Método Abstracto `_handle_action(self, action: DomainAction) -> Optional[Dict[str, Any]]`**:
+    *   **Rol Central:** Este es el método que **cada worker hijo debe implementar**. Actúa como un enrutador principal donde la lógica de negocio específica del servicio se invoca basándose en `action.action_type`.
+    *   **Contrato:**
+        *   Recibe la `DomainAction` deserializada.
+        *   Debe devolver un `dict` con los datos de resultado si la acción procesada requiere una respuesta (pseudo-síncrona) o un callback (asíncrono).
+        *   Debe devolver `None` si la acción es "fire-and-forget" y no genera ninguna respuesta o callback.
+    *   **Manejo de Excepciones:** Las excepciones lanzadas dentro de `_handle_action` son capturadas por `_process_action_loop`, que se encarga de registrar el error y enviar una `DomainActionResponse` de error si es aplicable.
+    *   **Evolución:** Este método reemplaza el mecanismo de descubrimiento dinámico de handlers (`_handle_<action_type>`) descrito en el `README.md`, ofreciendo un punto de entrada más explícito y estructurado para la lógica del worker.
+
+3.  **Método de Inicialización de Componentes (`async def initialize(self)`)**:
+    *   Método base asíncrono que establece `self.initialized = True`.
+    *   Los workers hijos deben sobrescribirlo para inicializar sus propios componentes (ej. clientes de otros servicios, instancias de clases de lógica de negocio) y luego **deben llamar a `await super().initialize()`**.
+    *   Reemplaza el concepto de `_initialize_handlers()` o `_initialize_components()` del README con un nombre más genérico y un patrón claro de herencia.
+
+4.  **Bucle Principal de Procesamiento (`async def _process_action_loop(self)`)**:
+    *   Asegura que `self.initialize()` haya sido llamado.
+    *   Entra en un bucle `while self._running`:
+        *   **Escucha en Redis:** Espera mensajes en `self.action_queue_name` usando `await self.async_redis_conn.brpop(self.action_queue_name, timeout=1)`.
+        *   **Deserialización:** Si se recibe un mensaje, lo deserializa en un objeto `DomainAction` usando `DomainAction.model_validate_json()`.
+        *   **Delegación:** Llama a `handler_result = await self._handle_action(action)`.
+        *   **Lógica de Respuesta/Callback:**
+            *   Si `handler_result is None`, la acción se considera completada (fire-and-forget).
+            *   Determina el tipo de seguimiento:
+                *   `is_pseudo_sync = action.callback_queue_name and not action.callback_action_type`
+                *   `is_async_callback = action.callback_queue_name and action.callback_action_type`
+            *   Si `is_pseudo_sync`:
+                *   Crea una `DomainActionResponse` de éxito usando `_create_success_response(action, handler_result)`.
+                *   Envía la respuesta usando `await self._send_response(response)`.
+            *   Si `is_async_callback`:
+                *   Envía un nuevo `DomainAction` como callback usando `await self._send_callback(action, handler_result)`.
+        *   **Manejo de Errores Detallado:**
+            *   **Errores en `_handle_action`:** Captura `Exception`, registra el error y el traceback. Si `action.callback_queue_name` existe, crea y envía una `DomainActionResponse` de error usando `_create_error_response` y `_send_response`.
+            *   **Errores de Validación Pydantic:** Captura `ValidationError` durante la deserialización de `DomainAction`, registra el error. No intenta enviar una respuesta de error ya que la información de callback podría ser inválida.
+            *   **Errores de Redis:** Captura `redis_async.RedisError`, registra el error y reintenta la conexión/operación después de una pausa de 5 segundos.
+            *   **Errores Críticos en el Bucle:** Captura `Exception` genérica, la registra como crítica y detiene el worker (`self._running = False`).
+
+5.  **Creación de Respuestas (`_create_success_response`, `_create_error_response`)**:
+    *   `_create_success_response`: Construye un `DomainActionResponse` con `success=True`, propagando IDs relevantes (`correlation_id`, `trace_id`, `task_id`) y estableciendo `origin_service`.
+    *   `_create_error_response`: Construye un `DomainActionResponse` con `success=False` y un objeto `ErrorDetail` (con `code` y `message`), propagando IDs.
+
+6.  **Envío de Respuestas y Callbacks (`_send_response`, `_send_callback`)**:
+    *   `_send_response(self, response: DomainActionResponse)`:
+        *   Verifica que `response.callback_queue_name` exista.
+        *   Envía la `response` (serializada a JSON) a `response.callback_queue_name` usando `await self.async_redis_conn.lpush(...)`.
+    *   `_send_callback(self, original_action: DomainAction, callback_data: Dict[str, Any])`:
+        *   Crea un nuevo `DomainAction` para el callback, usando `original_action.callback_action_type` como el nuevo `action_type` y propagando IDs.
+        *   Envía la nueva `callback_action` (serializada a JSON) a `original_action.callback_queue_name` usando `await self.async_redis_conn.lpush(...)`.
+
+7.  **Métodos de Ciclo de Vida (`run`, `start`, `stop`)**:
+    *   `async def run(self)`: Crea una tarea `asyncio` para `_process_action_loop` y la espera. Es el punto de entrada principal para la ejecución del worker.
+    *   `async def start(self)`: Método de conveniencia para iniciar `run()` en una nueva tarea si el worker no está ya en ejecución.
+    *   `async def stop(self)`:
+        *   Establece `self._running = False` para señalar al bucle principal que debe detenerse.
+        *   Espera a que la tarea `_worker_task` finalice con un timeout (5 segundos).
+        *   Si hay timeout, cancela la tarea.
+        *   Maneja `asyncio.CancelledError` si la tarea ya fue cancelada.
+
+**Observaciones y Puntos Destacados:**
+
+*   **Alineación con Arquitectura v4.0:** La versión 8.0 de `BaseWorker` implementa un patrón más explícito y robusto para el manejo de acciones, como se ha visto en las refactorizaciones de otros workers (memorias sobre ConversationWorker, MigrationWorker, EmbeddingWorker, OrchestratorWorker, ExecutionWorker adaptándose a BaseWorker 4.0).
+*   **Claridad en el Manejo de Redis:**
+    *   El worker utiliza directamente la conexión `async_redis_conn` pasada para sus operaciones primarias de `BRPOP` y `LPUSH` en el bucle de procesamiento y envío de respuestas/callbacks.
+    *   La instancia `self.redis_client` (de tipo `BaseRedisClient`) está disponible para que las clases hijas la usen para realizar comunicaciones (pseudo-síncronas, asíncronas, con callback) hacia *otros* servicios dentro de su lógica de `_handle_action`. Esta separación de responsabilidades es clara.
+    *   El uso de `redis.asyncio` y `async/await` en todo el `BaseWorker` resuelve la preocupación del README sobre el uso síncrono de una librería asíncrona.
+*   **Manejo de Errores Robusto:** El `_process_action_loop` tiene múltiples bloques `try-except` para manejar diferentes tipos de errores de forma específica, mejorando la resiliencia del worker.
+*   **Documentación y Logging:** El código incluye docstrings informativas y un logging adecuado para el seguimiento de acciones y errores.
+*   **Desacople:** `BaseWorker` se enfoca en la infraestructura de recepción y respuesta, delegando la lógica de negocio completamente a `_handle_action`, lo que promueve un buen desacople.
+*   **El README.md está desactualizado:** La descripción en `common/workers/README.md` (sobre descubrimiento dinámico de `_handle_<action_type>` y `_initialize_handlers`) no refleja el funcionamiento de esta versión 8.0 de `BaseWorker`.
+
+**Posibles Inconsistencias o Puntos a Considerar (Menores):**
+
+*   Aunque `QueueManager` se usa para obtener la cola de acciones principal, el `BaseWorker` no lo utiliza para construir los `callback_queue_name` para respuestas o callbacks; estos nombres de cola se esperan directamente en el `DomainAction` entrante. Esto es consistente con el patrón donde el *solicitante* define dónde quiere recibir la respuesta/callback.
+*   El `BaseRedisClient` (`self.redis_client`) se inicializa pero no es usado por `BaseWorker` directamente. Su propósito es para las clases hijas. Esto no es una inconsistencia, sino una característica de diseño.
+
+**Conclusión Parcial para `common/workers/base_worker.py`:**
+`BaseWorker` v8.0 es una clase bien estructurada y robusta que proporciona una base sólida para todos los workers de servicios en Nooble4. Implementa un patrón claro para el procesamiento de acciones, manejo de respuestas/callbacks y gestión del ciclo de vida, utilizando `asyncio` y `redis.asyncio` de manera efectiva. La principal desviación es con respecto al `README.md` del módulo, que describe un mecanismo de manejo de acciones más antiguo. Esta versión 8.0 parece ser la implementación estándar actual ("BaseWorker 4.0") a la que otros workers han sido migrados.
+
+---
+
+## Inconsistencias y Observaciones del Módulo `workers`
+
+Tras analizar los archivos `__init__.py`, `README.md` y `base_worker.py` del módulo `common/workers`, se han identificado los siguientes puntos:
+
+1.  **`common/workers/README.md` Desactualizado:**
+    *   Esta es la principal inconsistencia interna del módulo. El `README.md` no refleja con precisión la implementación actual de `common/workers/base_worker.py` (versión 8.0, que se alinea con la "Arquitectura v4.0" del proyecto).
+    *   **Descubrimiento de Handlers:** El README describe un mecanismo de descubrimiento dinámico de handlers basado en la convención de nomenclatura `_handle_<action_type>()` y un método `_initialize_handlers()`. En contraste, `base_worker.py` v8.0 define un método abstracto `async def _handle_action(self, action: DomainAction)` que las clases hijas deben implementar explícitamente para enrutar y procesar todas las acciones entrantes. Este es un cambio fundamental en el patrón de manejo de acciones.
+    *   **Inicialización de Componentes:** El README menciona `_initialize_handlers()` o `_initialize_components()`. La implementación actual en `base_worker.py` v8.0 utiliza un método `async def initialize(self)` que las subclases deben sobrescribir (y llamar a `await super().initialize()`) para su configuración específica.
+    *   **Preocupaciones sobre `RedisPool` y `QueueManager`:** El README alertaba sobre un posible uso síncrono de `RedisPool` y una instanciación de `QueueManager` no alineada con su definición. La versión 8.0 de `base_worker.py` ha abordado estos puntos:
+        *   Utiliza `redis.asyncio` y el paradigma `async/await` de manera consistente y correcta.
+        *   Instancia `QueueManager` (importado de `common.clients.queue_manager.QueueManager`) apropiadamente para determinar la cola de acciones principal del servicio (`action_queue_name`).
+
+2.  **Consistencia de `base_worker.py` (v8.0) con el Ecosistema del Proyecto:**
+    *   La implementación de `base_worker.py` v8.0, con su método central `_handle_action`, es consistente con múltiples memorias del sistema que indican una refactorización de varios workers específicos de los servicios (como `ConversationWorker`, `ExecutionWorker`, `MigrationWorker`, `EmbeddingWorker`, `OrchestratorWorker`) para alinearse con un patrón denominado "BaseWorker 4.0". Esto refuerza la idea de que la versión 8.0 de `base_worker.py` es el estándar actual y que el `README.md` es el componente que ha quedado obsoleto.
+
+3.  **Interacción con Otros Módulos Comunes:**
+    *   `base_worker.py` utiliza `QueueManager` de `common.clients.queue_manager` de forma correcta. La inconsistencia previamente notada en `common/utils/__init__.py` (relacionada con la exportación de `QueueManager`) es un problema aislado de `common/utils` y no afecta directamente la funcionalidad o corrección del módulo `workers`.
+    *   `base_worker.py` instancia `BaseRedisClient` (de `common.clients`) y lo proporciona a las clases hijas como `self.redis_client` para que puedan realizar comunicaciones con otros servicios. El propio `BaseWorker` utiliza la conexión `async_redis_conn` (pasada en el constructor) para sus operaciones directas de escucha (`BRPOP`) y envío de respuestas/callbacks (`LPUSH`). Este diseño es coherente.
+
+**Recomendación Principal para el Módulo `workers`:**
+*   Actualizar el archivo `common/workers/README.md` para que describa con precisión la arquitectura, el funcionamiento y el patrón de uso de la clase `BaseWorker` v8.0, incluyendo el rol del método `_handle_action`, el método `initialize`, y el uso correcto de componentes asíncronos.
+
+No se han identificado archivos sin utilizar o código muerto dentro de los archivos analizados en `common/workers` (`__init__.py`, `README.md`, `base_worker.py`).
+
+---
+
+## Identificación de Archivos Potencialmente Sin Utilizar y Otras Observaciones Globales
+
+Tras una revisión de los archivos dentro de la carpeta `common` y búsquedas de sus usos en el proyecto, se han identificado los siguientes puntos:
+
+### 1. Archivos/Módulos Potencialmente Sin Utilizar o Obsoletos
+
+*   **Submódulo `common/tiers/` (Completo):**
+    *   **Archivos Incluidos:**
+        *   `common/tiers/README.md`
+        *   `common/tiers/__init__.py`
+        *   `common/tiers/clients/__init__.py`
+        *   `common/tiers/clients/tier_client.py`
+        *   `common/tiers/decorators/__init__.py`
+        *   `common/tiers/decorators/validate_tier.py`
+        *   `common/tiers/exceptions.py`
+        *   `common/tiers/models/__init__.py`
+        *   `common/tiers/models/tier_config.py`
+        *   `common/tiers/models/usage_models.py`
+        *   `common/tiers/repositories/__init__.py`
+        *   `common/tiers/repositories/tier_repository.py`
+        *   `common/tiers/services/__init__.py`
+        *   `common/tiers/services/usage_service.py`
+        *   `common/tiers/services/validation_service.py`
+    *   **Justificación:**
+        *   Una búsqueda (`grep_search`) de importaciones del tipo `common.tiers` en todos los archivos `.py` del proyecto no arrojó resultados.
+        *   La Memoria `8a7efe45-8356-4aef-bf75-c3cd58912ba7` indica que una investigación previa sobre artefactos de un sistema de "tiers" legado no encontró rastros en los servicios principales, sugiriendo que el código base ya fue limpiado de esta funcionalidad o que fue refactorizada significativamente.
+    *   **Recomendación:** Considerar la eliminación completa del directorio `common/tiers/` después de una confirmación final.
+
+*   **Archivo `common/inconsistencias.md`:**
+    *   **Justificación:** Este archivo Markdown parece ser un documento de análisis previo de inconsistencias. Dado que se está generando un nuevo documento de análisis más exhaustivo (`analisis_common.md` en la raíz del proyecto), `common/inconsistencias.md` podría considerarse obsoleto o archivado.
+    *   **Recomendación:** Evaluar si su contenido ya ha sido incorporado o superado por `analisis_common.md` y, en tal caso, considerar su eliminación o archivado.
+
+### 2. Inconsistencia Notable en la Gestión de Conexiones Redis
+
+*   **Archivo `common/redis_pool.py`:**
+    *   Este archivo define un singleton `RedisPool` y una función helper `get_redis_client` para proporcionar un cliente Redis global compartido.
+    *   **Observación:** Múltiples archivos, especialmente en las capas de API de los servicios (e.g., `query_service/main.py`, `conversation_service/main.py`, etc.), todavía importan y utilizan `get_redis_client` de `common.redis_pool`.
+    *   **Inconsistencia:** Componentes fundamentales más recientes o refactorizados dentro de `common`, como `common/workers/base_worker.py` (v8.0) y `common/clients/base_redis_client.py`, no utilizan este pool global. En su lugar, inicializan y gestionan sus propias conexiones/pools Redis directamente (usando `redis.asyncio.from_url()` con su configuración específica).
+    *   **Impacto:** Esto representa un doble enfoque para la gestión de conexiones Redis. Si bien `common/redis_pool.py` no está sin utilizar, su coexistencia con la gestión de conexiones localizadas en componentes clave sugiere una falta de estandarización que podría llevar a confusiones o a un manejo de recursos subóptimo.
+    *   **Recomendación:** Revisar la estrategia de gestión de conexiones Redis. Decidir si se debe migrar todo el uso a un pool centralizado y mejorado (posiblemente basado en `common/redis_pool.py` pero adaptado a las necesidades asíncronas y de configuración de todos los componentes) o si se prefiere que cada componente principal siga gestionando sus propias conexiones, en cuyo caso se debería evaluar la necesidad de `common/redis_pool.py` para los casos de uso restantes.
+
+---
+
+## Conclusiones Generales y Próximos Pasos Recomendados
+
+El análisis exhaustivo de la carpeta `common` del proyecto Nooble4 ha revelado una base de código que proporciona funcionalidades esenciales y compartidas para los diversos microservicios. Si bien muchos componentes son robustos y están bien diseñados (especialmente las versiones más recientes como `BaseWorker v8.0`), existen varias áreas clave que requieren atención para mejorar la coherencia, mantenibilidad y claridad del proyecto.
+
+### Hallazgos Clave y Resumen de Inconsistencias:
+
+1.  **Documentación Desactualizada:**
+    *   Varios archivos `README.md` (notablemente en `common/workers/`) no reflejan el estado actual de la implementación, lo que puede llevar a confusión a los desarrolladores.
+    *   El archivo `common/inconsistencias.md` parece haber sido reemplazado por este análisis actual (`analisis_common.md`) y podría ser archivado.
+
+2.  **Gestión de Dependencias y Estructura de Módulos:**
+    *   **Jerarquía de Handlers Incompleta/Confusa:** En `common/handlers/`, las clases `BaseCallbackHandler` y `BaseContextHandler` parecen depender de una clase `BaseActionHandler` que no está definida dentro de ese mismo módulo. Aunque existe una jerarquía deseada (documentada en memorias), la implementación actual en `common/handlers` es ambigua.
+    *   **Error de Importación Potencial en `common/utils/__init__.py`:** `QueueManager` se lista en `__all__` pero no se importa, lo que resultaría en un `ImportError` si se intenta importar `QueueManager` directamente desde `common.utils`.
+
+3.  **Código Heredado o Sin Utilizar:**
+    *   **Submódulo `common/tiers/`:** Existe una fuerte evidencia (ausencia de importaciones y memorias de refactorización) de que todo este submódulo es código heredado y ya no está en uso.
+
+4.  **Inconsistencias Arquitectónicas y de Diseño:**
+    *   **Gestión de Conexiones Redis:** Se observa un doble enfoque. Mientras `common/redis_pool.py` ofrece un pool de conexiones global (utilizado por varias capas de API de servicios), componentes centrales más nuevos o refactorizados como `common/workers/base_worker.py` y `common/clients/base_redis_client.py` gestionan sus propias conexiones Redis. Esto indica una falta de estandarización.
+    *   **Evolución de Patrones:** Se observa una evolución en los patrones de diseño, como el paso del descubrimiento dinámico de handlers en `BaseWorker` a un método `_handle_action` explícito. Esta evolución es positiva, pero la documentación y, en algunos casos, el código antiguo, no siempre la reflejan.
+
+### Próximos Pasos Recomendados:
+
+1.  **Actualización de Documentación:**
+    *   Priorizar la actualización de `common/workers/README.md` para que coincida con `BaseWorker v8.0`.
+    *   Revisar y actualizar otros `README.md` dentro de `common` según sea necesario.
+    *   Archivar o eliminar `common/inconsistencias.md` si se considera completamente reemplazado por `analisis_common.md`.
+
+2.  **Resolución de Problemas de Importación y Jerarquía:**
+    *   Corregir el `__init__.py` de `common/utils` para importar correctamente `QueueManager` o eliminarlo de `__all__`.
+    *   Clarificar y refactorizar la jerarquía de handlers en `common/handlers/`, asegurando que `BaseActionHandler` (si es parte de `common`) esté correctamente definido y referenciado, o ajustar las clases base de `BaseCallbackHandler` y `BaseContextHandler` según la arquitectura final deseada.
+
+3.  **Limpieza de Código:**
+    *   Realizar una confirmación final y, si procede, eliminar el submódulo completo `common/tiers/`.
+
+4.  **Estandarización Arquitectónica:**
+    *   Definir y aplicar un enfoque único y coherente para la gestión de conexiones Redis en todo el proyecto. Esto podría implicar mejorar `common/redis_pool.py` para que cumpla con todos los requisitos asíncronos y de configuración, o adoptar consistentemente el patrón de que los componentes gestionen sus propias conexiones.
+    *   Asegurar que todos los componentes relevantes sigan los patrones más recientes y robustos (e.g., `BaseWorker v8.0`).
+
+5.  **Revisión General de Inconsistencias Menores:**
+    *   Abordar las inconsistencias menores identificadas en cada submódulo (detalladas en las secciones correspondientes de este documento).
+
+La implementación de estos pasos contribuirá significativamente a la robustez, mantenibilidad y facilidad de comprensión del código común, sentando una base sólida para el desarrollo futuro de Nooble4.
+
+---
+
