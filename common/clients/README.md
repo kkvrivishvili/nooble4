@@ -115,6 +115,63 @@ El `BaseRedisClient` utiliza internamente un `QueueManager` (inicializado con `s
 # # await base_redis_client.send_action_async(action_to_send)
 ```
 
+### 3. `RedisStateManager`
+
+`RedisStateManager` es una utilidad genérica para gestionar la persistencia de objetos de estado (modelos Pydantic) en Redis. Facilita el ciclo de vida de cargar, guardar y eliminar datos estructurados, manejando la serialización JSON y la validación Pydantic.
+
+#### Propósito:
+-   Abstraer la lógica de interacción con Redis para la persistencia de estados de aplicación, contextos de usuario, etc.
+-   Asegurar que los datos se validen contra un modelo Pydantic al cargar y se serialicen correctamente al guardar.
+
+#### Configuración:
+-   Se inicializa con:
+    -   `redis_conn: redis.asyncio.Redis`: La conexión/pool Redis obtenida de `RedisManager`.
+    -   `state_model: Type[TStateModel]`: El modelo Pydantic (genérico `TStateModel`) que define la estructura del estado a gestionar.
+    -   `app_settings: CommonAppSettings`: Para la configuración del logger, utilizando `app_settings.service_name`.
+
+#### Métodos Principales y Uso:
+
+1.  **`async def load_state(self, state_key: str) -> Optional[TStateModel]`**
+    -   Carga y deserializa el estado desde Redis usando la `state_key` proporcionada.
+    -   Retorna una instancia del `state_model` si se encuentra y valida, o `None`.
+
+2.  **`async def save_state(self, state_key: str, state_data: TStateModel, expiration_seconds: Optional[int] = None)`**
+    -   Guarda la instancia `state_data` del `state_model` en Redis bajo la `state_key`.
+    -   Opcionalmente, puede establecer un tiempo de expiración (`expiration_seconds`).
+    -   Lanza `TypeError` si `state_data` es `None` (para borrados, se debe usar `delete_state`).
+
+3.  **`async def delete_state(self, state_key: str) -> bool`**
+    -   Elimina el estado de Redis para la `state_key` dada.
+    -   Retorna `True` si la clave fue eliminada, `False` si no existía.
+
+**Ejemplo de Instanciación y Uso (dentro de un `BaseService`):**
+
+```python
+# # En un servicio que gestiona el estado de una sesión de usuario
+# from common.clients import RedisStateManager
+# from common.models.user_session import UserSessionState # Modelo Pydantic para el estado
+# # Asumiendo que self.direct_redis_conn y self.app_settings están disponibles en el servicio
+
+# class UserSessionService(BaseService):
+#     async def __init__(self, app_settings, service_redis_client=None, direct_redis_conn=None):
+#         super().__init__(app_settings, service_redis_client, direct_redis_conn)
+#         if not direct_redis_conn:
+#             raise ValueError("UserSessionService requiere direct_redis_conn para RedisStateManager")
+#         self.session_state_manager = RedisStateManager[UserSessionState](
+#             redis_conn=direct_redis_conn,
+#             state_model=UserSessionState,
+#             app_settings=app_settings
+#         )
+
+#     async def get_user_session(self, user_id: str) -> Optional[UserSessionState]:
+#         session_key = f"user_session:{user_id}"
+#         return await self.session_state_manager.load_state(session_key)
+
+#     async def update_user_session(self, user_id: str, session_data: UserSessionState):
+#         session_key = f"user_session:{user_id}"
+#         await self.session_state_manager.save_state(session_key, session_data, expiration_seconds=3600)
+```
+
 ## Interacción y Flujo General
 
 1.  Un servicio, al iniciarse, crea y gestiona una instancia de `RedisManager`.

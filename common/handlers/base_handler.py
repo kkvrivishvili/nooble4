@@ -1,69 +1,52 @@
 import logging
-import asyncio
-from abc import ABC, abstractmethod
-from typing import Dict, Any
+from abc import ABC
+from typing import Optional
+
+from redis.asyncio import Redis as AIORedis
+from common.config.base_settings import CommonAppSettings
+
 
 class BaseHandler(ABC):
     """
-    Clase base abstracta para todos los handlers del sistema.
+    Clase base abstracta y mínima para Handlers de utilidad de dominio.
 
-    Proporciona funcionalidades comunes como:
-    - Un logger configurado con el nombre de la clase hija.
-    - Un patrón para inicialización asíncrona explícita (carga diferida).
-    - Un contrato de ejecución (`execute`) que los workers utilizarán.
+    Los Handlers son componentes que encapsulan lógica de negocio específica
+    o interacciones con otros sistemas (ej. una API externa, una base de datos específica)
+    y son utilizados por la Capa de Servicio para mantener su código limpio y organizado.
+
+    Esta clase base proporciona un logger configurado y acceso a la configuración
+    de la aplicación.
     """
-    def __init__(self, service_name: str, **kwargs):
+    def __init__(
+        self,
+        app_settings: CommonAppSettings,
+        # Opcional: pasar una conexión Redis directa si el handler la necesita.
+        # Es preferible que el Service gestione las interacciones Redis principales,
+        # pero algunos handlers podrían necesitar acceso directo para tareas muy específicas.
+        direct_redis_conn: Optional[AIORedis] = None,
+        # Opcional: pasar el nombre del servicio padre si se necesita para logging más específico
+        # o si app_settings no está disponible en el contexto de creación.
+        # Sin embargo, app_settings.service_name es preferible.
+        # parent_service_name: Optional[str] = None 
+    ):
         """
-        Inicialización básica síncrona del handler.
-        Establece el estado inicial para la carga diferida.
-        """
-        if not service_name:
-            raise ValueError("El parámetro 'service_name' no puede ser nulo o vacío.")
-        self.service_name = service_name
-        self._logger = logging.getLogger(f"{self.service_name}.{self.__class__.__name__}")
-        self._initialized = False
-        self._init_lock = asyncio.Lock()
+        Inicializa el handler base.
 
-    async def initialize(self) -> None:
+        Args:
+            app_settings: La configuración de la aplicación.
+            direct_redis_conn: (Opcional) Una conexión Redis asíncrona directa.
         """
-        Realiza la inicialización asíncrona del handler de forma segura.
+        if not app_settings.service_name:
+            raise ValueError("CommonAppSettings debe tener 'service_name' configurado para el logger del handler.")
 
-        Este método es idempotente y seguro para concurrencia. El worker
-        (o quien cree el handler) puede llamarlo para asegurarse de que el
-        handler está listo antes de usarse. La lógica de inicialización
-        real solo se ejecutará una vez.
-        """
-        if self._initialized:
-            return
-        
-        async with self._init_lock:
-            # Doble comprobación por si otra corrutina lo inicializó
-            # mientras se esperaba por el lock.
-            if self._initialized:
-                return
-            
-            await self._async_init()
-            self._initialized = True
+        self.app_settings = app_settings
+        self.direct_redis_conn = direct_redis_conn
+        # El logger se nombra usando el service_name de app_settings y el nombre de la clase del handler.
+        self._logger = logging.getLogger(f"{app_settings.service_name}.{self.__class__.__name__}")
+        self._logger.debug(f"Handler {self.__class__.__name__} inicializado.")
 
-    async def _async_init(self) -> None:
-        """
-        Método a ser sobreescrito por las subclases que necesiten
-        realizar operaciones asíncronas en su inicialización.
+    # Los Handlers ya no tienen un método 'execute' abstracto ni una inicialización asíncrona compleja.
+    # Si un handler necesita una inicialización asíncrona, puede implementar un método
+    # `async def setup(self)` que el Service llamará explícitamente después de instanciarlo.
+    # Los métodos de un handler serán específicos de su dominio y llamados directamente por el Service.
 
-        Por defecto, no hace nada.
-        """
-        pass
-
-    @abstractmethod
-    async def execute(self) -> Dict[str, Any]:
-        """
-        Punto de entrada principal para la ejecución de la lógica del handler.
-
-        Este método será llamado por el BaseWorker después de que el handler
-        haya sido instanciado e inicializado.
-
-        Debe ser implementado por las subclases para realizar la acción principal
-        y devolver un diccionario que represente el payload de la respuesta (si aplica).
-        Si no hay datos de respuesta, puede devolver un diccionario vacío.
-        """
-        raise NotImplementedError("Las subclases deben implementar 'execute'.")
