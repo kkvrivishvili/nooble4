@@ -19,16 +19,19 @@ from .models import (
 )
 
 # Handlers
-from .handlers import BaseActionHandler, HandlerNotFoundError
+from .handlers import BaseHandler
 
 # Workers
-from .workers import BaseWorker, WorkerError # WorkerError ya estaba en exceptions
+from .workers import BaseWorker
 
 # Clients
-from .clients import BaseRedisClient
+from .clients import BaseRedisClient, RedisManager, RedisStateManager, QueueManager
+
+# Services
+from .services import BaseService
 
 # Utils
-from .utils import QueueManager, init_logging
+from .utils import init_logging # QueueManager is now imported from .clients
 
 # Excepciones
 from .exceptions import (
@@ -39,7 +42,7 @@ from .exceptions import (
     ExternalServiceError,
     InvalidActionError,
     QueueManagerError,
-    WorkerError, # Duplicado, ya importado con .workers
+    WorkerError
 )
 
 __all__ = [
@@ -51,15 +54,17 @@ __all__ = [
     "ErrorDetail",
     "ExecutionContext",
     # Handlers
-    "BaseActionHandler",
-    "HandlerNotFoundError",
+    "BaseHandler",
     # Workers
     "BaseWorker",
-    # "WorkerError", # Ya está en la lista de excepciones abajo
     # Clients
     "BaseRedisClient",
-    # Utils
+    "RedisManager",
+    "RedisStateManager",
     "QueueManager",
+    # Services
+    "BaseService",
+    # Utils
     "init_logging",
     # Exceptions
     "BaseError",

@@ -1,6 +1,6 @@
 # Estándar de Payloads y Modelos de Datos en Nooble4
 
-> **Última Revisión:** 14 de Junio de 2024
+> **Última Revisión:** 15 de Junio de 2025
 > **Estado:** Aprobado y en implementación.
 > **Modelos Pydantic de Referencia:** `common/models/actions.py`
 
@@ -51,8 +51,9 @@ class DomainAction(BaseModel):
     data: Dict[str, Any] = Field(..., description="Payload específico de la acción, validado por un modelo Pydantic dedicado.")
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Metadatos adicionales no críticos para la lógica principal.")
 
-    class Config:
-        validate_assignment = True
+    model_config = {
+        "validate_assignment": True
+    }
     ```
 *   **`action_type`**: Debe ser una cadena estructurada que identifique claramente la intención. Se recomienda el formato `servicio_destino.entidad.verbo` para solicitudes directas, y `servicio_origen.evento_principal.detalle_evento` para notificaciones o callbacks. Ejemplos:
     *   Solicitudes: `management.agent.get_config`, `embedding.batch.generate`, `query.rag.execute_sync`.
@@ -257,7 +258,7 @@ La naturaleza del payload y los requisitos de la interacción influyen en si se 
 
 1.  **Crear Módulo Común de Mensajería**: Establecer `nooble4.common.messaging` (o similar) y definir `DomainAction`, `DomainActionResponse`, y `ErrorDetail`.
 2.  **Crear Repositorio de Schemas Pydantic**: Establecer `nooble4.common.schemas` y comenzar a definir los modelos Pydantic para los payloads `data` de las acciones y respuestas más comunes, empezando por un servicio piloto.
-3.  **Refactorizar Clientes y Handlers**: Modificar los clientes (ver `standart_client.md`) para que construyan `DomainActions` usando estos modelos. Modificar los handlers (ver `standart_handler.md`) para que esperen y validen `DomainActions` y sus payloads `data` con estos modelos.
+3.  **Refactorizar Clientes y Servicios**: Modificar los clientes (ver `standart_client.md`) para que construyan `DomainActions` usando estos modelos. Modificar los servicios (ver `standart_service.md`) para que esperen y validen `DomainActions` y sus payloads `data` con estos modelos.
 4.  **Actualizar Documentación**: Asegurar que `inter_service_communication_v2.md` refleje estas estructuras de payload estandarizadas.
 
 Al estandarizar los payloads y modelos de datos, Nooble4 mejorará significativamente la robustez, claridad y mantenibilidad de sus comunicaciones inter-servicios.
