@@ -1,47 +1,169 @@
-# Módulo de Workers Comunes (`refactorizado/common/workers/`)
+# Módulo de Workers Comunes (`common/workers/`)
 
-Este módulo define la capa de **Infraestructura de Workers** en la Arquitectura v4.0 de Nooble4. Los workers son procesos de larga duración que escuchan `DomainAction` de colas Redis y delegan la lógica de negocio a la Capa de Servicio.
+Este módulo define la **Infraestructura de Workers** para los microservicios. Los workers son componentes cruciales que procesan tareas de forma asíncrona, consumiendo `DomainAction` desde Redis Streams y delegando la lógica de negocio a la Capa de Servicio correspondiente.
 
 ## Componentes Principales
 
-### `BaseWorker`
+### `BaseWorker` (Versión 8.0+)
 
-`BaseWorker` es una clase abstracta diseñada para ser la superclase de todos los workers específicos de los servicios. Proporciona un ciclo de vida estandarizado y un mecanismo para procesar acciones (`DomainAction`) recibidas a través de colas de Redis.
+`BaseWorker` es una clase base abstracta (`ABC`) diseñada para ser la superclase de todos los workers específicos de los servicios. Implementa la lógica fundamental para interactuar con Redis Streams utilizando grupos de consumidores, asegurando un procesamiento de mensajes robusto y escalable.
 
 #### Características Clave:
 
--   **Ciclo de Vida:** Define métodos como `setup()`, `run()`, `_process_action_loop()`, y `cleanup()` para una gestión estructurada del worker.
--   **Manejo de Acciones:** Implementa un bucle principal (`_process_action_loop`) que continuamente escucha en una cola de acciones de Redis (definida por `action_queue_name`).
--   **Descubrimiento Dinámico de Handlers:**
-    -   Al recibir una `DomainAction`, `BaseWorker` utiliza el campo `action.action_type` (ej. "agent.run", "document.process") para encontrar dinámicamente un método handler apropiado dentro de la clase del worker que hereda de `BaseWorker`.
-    -   El método handler esperado debe seguir la convención de nomenclatura `_handle_<action_type_part1>_<action_type_part2>_...()`. Por ejemplo, para una acción con `action_type = "document.process"`, `BaseWorker` buscará un método llamado `_handle_document_process()`.
-    -   Si no se encuentra un handler específico, se lanza una excepción `HandlerNotFoundError`.
--   **Procesamiento de Acciones:** Una vez encontrado el handler, se invoca con la `DomainAction` como argumento. El resultado del handler (que puede ser una `DomainActionResponse` o datos para construir una) se utiliza para responder, si es necesario.
--   **Integración con Redis:** Utiliza una instancia de `RedisPool` para las conexiones a Redis y un `QueueManager` para la nomenclatura de colas (aunque existen inconsistencias actuales, ver abajo).
--   **Señal de Parada:** Escucha una señal de parada (`stop_event`) para terminar su ejecución de forma controlada.
+-   **Integración con Redis Streams:**
+    -   **Consumo de Mensajes:** Utiliza `XREADGROUP` para leer mensajes de un stream de acciones específico del servicio. Esto permite que múltiples instancias de workers (consumidores) dentro del mismo grupo compartan la carga de trabajo del stream.
+    -   **Grupos de Consumidores:** Automáticamente crea/verifica un grupo de consumidores (`consumer_group_name`, ej., `mi_servicio-group`) para el stream de acciones del servicio (`action_stream_name`) durante la inicialización.
+    -   **Nombres de Consumidor Únicos:** Cada instancia de `BaseWorker` tiene un `consumer_name` único (ej., `mi_servicio-worker-suffix-uuid`), permitiendo a Redis rastrear los mensajes procesados por cada consumidor.
+    -   **Confirmación de Mensajes (ACK):** Utiliza `XACK` para confirmar el procesamiento exitoso de un mensaje. Si el procesamiento falla, el mensaje no se confirma y puede ser reprocesado o reclamado por otro consumidor, asegurando la fiabilidad.
+-   **Ciclo de Vida Estándar:**
+    -   `__init__(app_settings, async_redis_conn, consumer_id_suffix=None)`: Constructor que inicializa el worker, configura nombres de stream/grupo/consumidor y el `BaseRedisClient` interno.
+    -   `initialize()`: Asegura la existencia del grupo de consumidores. Debe ser llamado (o invocado por `run()`) antes de procesar acciones.
+    -   `run()`: Inicia el bucle principal de procesamiento de acciones.
+    -   `_process_action_loop()`: El bucle que continuamente lee, procesa y confirma mensajes del stream.
+    -   `stop()`: Detiene el worker de forma segura.
+-   **Manejo de Acciones Delegado:**
+    -   Requiere la implementación del método abstracto `async def _handle_action(self, action: DomainAction) -> Optional[Dict[str, Any]]:` en las subclases. Este método contiene la lógica de negocio específica para procesar una `DomainAction`.
+    -   Gestiona automáticamente el envío de respuestas para acciones pseudo-síncronas y el envío de callbacks para acciones asíncronas con callback, utilizando el `BaseRedisClient` interno.
+-   **Configuración y Dependencias:**
+    -   Recibe `CommonAppSettings` (o las settings del servicio que las contienen) para la configuración del servicio (nombre, entorno) y Redis.
+    -   Recibe una conexión Redis asíncrona (`redis.asyncio.Redis`), que idealmente es gestionada y proporcionada por una instancia de `RedisManager` a nivel de servicio.
+    -   Utiliza `QueueManager` para generar nombres consistentes para streams y colas de respuesta/callback.
 
-### `HandlerNotFoundError`
+## Uso y Patrones de Implementación
 
-Una excepción personalizada que se lanza cuando `BaseWorker` no puede encontrar un método handler para un `action_type` específico.
+### 1. Crear un Worker Específico del Servicio
 
-## Inconsistencias y Puntos de Mejora
+Para implementar un worker para un servicio (ej., `UserServiceWorker`):
 
-Existen algunas inconsistencias y áreas de mejora identificadas para este módulo y su interacción con otros componentes comunes. Para más detalles, por favor consulte el archivo centralizado de inconsistencias:
+```python
+import logging
+from typing import Dict, Any, Optional
 
--   [`../../inconsistencias.md`](../../inconsistencias.md)
+from common.workers import BaseWorker
+from common.models.actions import DomainAction
+# from your_service_specific_logic import process_user_creation, process_user_update
 
-En particular, los puntos relevantes para `BaseWorker` incluyen:
+logger = logging.getLogger(__name__)
 
--   El uso síncrono de `RedisPool` (que es asíncrono).
--   La instanciación y uso de `QueueManager` que no se alinea con la definición actual de `QueueManager`.
+class UserServiceWorker(BaseWorker):
+    async def _handle_action(self, action: DomainAction) -> Optional[Dict[str, Any]]:
+        logger.info(f"[{self.service_name} - {self.consumer_name}] Procesando acción: {action.action_type}")
+        
+        # Ejemplo de enrutamiento basado en action_type
+        if action.action_type == "user.create":
+            # result_data = await process_user_creation(action.data)
+            # return result_data # Si la acción espera una respuesta/callback
+            pass # Para fire-and-forget
+        elif action.action_type == "user.update":
+            # await process_user_update(action.data)
+            pass
+        else:
+            logger.warning(f"Handler no implementado para {action.action_type}")
+            raise NotImplementedError(f"No handler for {action.action_type}")
+        
+        return None # Por defecto para acciones fire-and-forget o si ya se manejó la respuesta
+```
 
-## Uso
+### 2. Ejecutar Múltiples Workers Internos en un Servicio
 
-Para crear un nuevo worker para un servicio:
+Para escalar el procesamiento de mensajes *dentro* de una única instancia de servicio, puedes ejecutar múltiples instancias de tu worker específico (o `BaseWorker` directamente si es genérico) como tareas asyncio. Cada tarea actuará como un consumidor independiente dentro del mismo grupo.
 
-1.  Cree una nueva clase que herede de `BaseWorker`.
-2.  Implemente el método abstracto `_initialize_handlers()` (aunque la tendencia actual es hacia `_handle_action` y un registro más explícito o descubrimiento dinámico mejorado, este método aún puede ser parte del patrón heredado en algunos workers).
-3.  Defina métodos `_handle_<action_type>()` para cada tipo de acción que el worker deba procesar.
+Esto se gestiona típicamente en el ciclo de vida de la aplicación del servicio (ej., usando eventos `startup` y `shutdown` en FastAPI).
+
+**Ejemplo Conceptual (FastAPI `main.py`):**
+
+```python
+import asyncio
+import logging
+from typing import List, Optional
+from fastapi import FastAPI
+
+from common.clients.redis_manager import RedisManager
+# from common.config.your_service_settings import YourServiceSettings # Tu modelo de settings
+# from your_service.worker import YourServiceWorker # Tu worker específico
+
+logger = logging.getLogger(__name__)
+app = FastAPI()
+
+redis_manager: Optional[RedisManager] = None
+active_worker_tasks: List[asyncio.Task] = []
+active_worker_instances: List[BaseWorker] = [] # Para llamar a stop()
+
+NUM_INTERNAL_WORKERS = 4 # Configurable
+
+@app.on_event("startup")
+async def startup_event():
+    global redis_manager, active_worker_tasks, active_worker_instances
+    
+    # app_settings = YourServiceSettings()
+    # redis_manager = RedisManager(settings=app_settings.common_settings)
+    # await redis_manager.initialize()
+    # redis_connection = redis_manager.get_client()
+    
+    # --- Mock para el ejemplo --- 
+    from common.config import CommonAppSettings
+    from redis.asyncio import Redis
+    class MockServiceSettings:
+        service_name = "mock_service"
+        common_settings = CommonAppSettings(redis_url="redis://localhost", environment="dev", service_name="mock_service")
+    app_settings = MockServiceSettings()
+    redis_manager = RedisManager(settings=app_settings.common_settings)
+    await redis_manager.initialize()
+    redis_connection = redis_manager.get_client()
+    # --- Fin Mock ---
+
+    logger.info(f"Iniciando {NUM_INTERNAL_WORKERS} workers para '{app_settings.service_name}'...")
+    for i in range(NUM_INTERNAL_WORKERS):
+        consumer_suffix = f"internal-{i}"
+        # worker_instance = YourServiceWorker(
+        # Reemplazar BaseWorker con tu implementación específica (ej. UserServiceWorker)
+        worker_instance = BaseWorker(
+            app_settings=app_settings, # O app_settings.common_settings si BaseWorker solo necesita eso
+            async_redis_conn=redis_connection,
+            consumer_id_suffix=consumer_suffix
+        )
+        # El método run() de BaseWorker llama a initialize() si es necesario.
+        task = asyncio.create_task(worker_instance.run())
+        active_worker_tasks.append(task)
+        active_worker_instances.append(worker_instance)
+
+    logger.info(f"{len(active_worker_tasks)} workers iniciados.")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    global redis_manager, active_worker_tasks, active_worker_instances
+
+    if active_worker_instances:
+        logger.info(f"Deteniendo {len(active_worker_instances)} workers...")
+        for worker_instance in active_worker_instances:
+            await worker_instance.stop() # Señaliza a cada worker que se detenga
+        # Opcionalmente, esperar a que las tareas realmente terminen:
+        # await asyncio.gather(*active_worker_tasks, return_exceptions=True)
+        logger.info("Workers detenidos.")
+        active_worker_tasks.clear()
+        active_worker_instances.clear()
+        
+    if redis_manager:
+        await redis_manager.close()
+        logger.info("RedisManager cerrado.")
+
+# Resto de tu aplicación FastAPI...
+```
+
+#### Configuración Relevante:
+
+-   **`CommonAppSettings` (dentro de las settings de cada servicio):**
+    -   `service_name`: Usado para nombres de stream, grupo y consumidor.
+    -   `environment`: Usado por `QueueManager` para prefijar nombres de stream/cola.
+    -   `redis_url`, `redis_socket_keepalive`, etc.: Para la conexión Redis gestionada por `RedisManager`.
+-   **`NUM_INTERNAL_WORKERS`**: Número de workers concurrentes a ejecutar por instancia de servicio. Puede ser una variable de entorno o configuración fija.
+
+## Consideraciones Adicionales
+
+-   **Manejo de Errores en `_handle_action`:** Las excepciones lanzadas dentro de `_handle_action` son capturadas por `BaseWorker`. Si la acción tenía una `callback_queue_name`, se intentará enviar una respuesta de error. Importante: el mensaje **no** será confirmado (ACKed) en Redis si `_handle_action` falla, permitiendo que sea reprocesado.
+-   **Mensajes Malformados:** Si un mensaje en el stream no puede ser deserializado a `DomainAction` o le falta el campo `data`, `BaseWorker` lo registrará y lo confirmará (ACK) para evitar bucles de procesamiento con mensajes inválidos.
+-   **Escalabilidad Horizontal:** Este patrón de workers internos permite un uso eficiente de los recursos de una instancia de servicio. Para mayor escalabilidad, se pueden desplegar múltiples instancias del servicio (ej. en diferentes contenedores o VMs), y Redis Streams distribuirá la carga entre todas ellas.
+
 4.  En el punto de entrada de su servicio (ej. `main.py`), instancie su worker y llame a su método `run()`.
 
 ```python
