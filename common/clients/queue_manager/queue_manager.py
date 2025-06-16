@@ -22,13 +22,6 @@ class QueueManager:
         """Construye el nombre de la cola con el formato estandarizado."""
         return f"{self.prefix}:{self.environment}:{service_name}:{queue_type}:{context}"
 
-    def get_action_queue(self, service_name: str) -> str:
-        """
-        Obtiene el nombre de la cola de acciones principal para un servicio.
-        Ej: nooble4:dev:embedding_service:actions:main
-        """
-        return self._build_queue_name(service_name, "actions", "main")
-
     def get_service_action_stream(self, service_name: str) -> str:
         """
         Obtiene el nombre del stream de acciones principal para un servicio.

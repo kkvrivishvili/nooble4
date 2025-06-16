@@ -1,5 +1,5 @@
 from typing import Optional, Dict, Any
-from pydantic import BaseModel, Field, root_validator, ConfigDict
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 import uuid
 from datetime import datetime, timezone
 
@@ -68,22 +68,24 @@ class DomainActionResponse(BaseModel):
     data: Optional[Dict[str, Any]] = Field(None, description="Payload de respuesta si success=True. Su estructura puede ser validada por un modelo Pydantic dedicado.")
     error: Optional[ErrorDetail] = Field(None, description="Detalles del error si success=False. Ver modelo ErrorDetail.")
 
-    @root_validator(skip_on_failure=True)
-    def check_data_and_error(cls, values):
-        success, data, error = values.get('success'), values.get('data'), values.get('error')
+    @model_validator(mode='after')
+    def check_data_and_error(self) -> 'DomainActionResponse':
+        # En Pydantic V2 con mode='after', los campos ya están asignados a self
+        # No es necesario acceder a 'values' como un diccionario.
+        # success, data, error = self.success, self.data, self.error
         
-        if success:
-            if error is not None:
+        if self.success:
+            if self.error is not None:
                 raise ValueError("El campo 'error' debe ser nulo si 'success' es True.")
             # Opcional: Requerir 'data' en caso de éxito, o permitir que sea None/{}
             # if data is None: # Si quieres que data siempre exista, incluso como {}
             #     raise ValueError("El campo 'data' no puede ser nulo si 'success' es True. Usar {} si no hay datos.")
-        else: # not success
-            if error is None:
+        else: # not self.success
+            if self.error is None:
                 raise ValueError("El campo 'error' es obligatorio y no puede ser nulo si 'success' es False.")
             # Opcional: asegurar que data sea nulo si hay error
             # if data is not None:
             #     raise ValueError("El campo 'data' debe ser nulo si 'success' es False.")
-        return values
+        return self
 
     model_config = ConfigDict(populate_by_name=True, extra='allow', validate_assignment=True)

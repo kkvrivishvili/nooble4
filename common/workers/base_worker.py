@@ -28,7 +28,7 @@ class BaseWorker(ABC):
     También gestiona el ciclo de vida de la respuesta, enviando `DomainActionResponse`
     para comunicaciones pseudo-síncronas o nuevos `DomainAction` para callbacks asíncronos.
 
-    VERSIÓN: 8.0 - Alineado con el estándar de arquitectura v4.0.
+    VERSIÓN: 4.x - Alineado con el estándar de arquitectura v4.0.
     """
 
     def __init__(self, app_settings: CommonAppSettings, async_redis_conn: redis_async.Redis, consumer_id_suffix: Optional[str] = None):
@@ -52,6 +52,8 @@ class BaseWorker(ABC):
         worker_unique_id = consumer_id_suffix or str(uuid.uuid4()).split('-')[-1] # Corto UUID si no hay sufijo
         self.consumer_name = f"{self.service_name}-worker-{worker_unique_id}"
 
+        # self.redis_client es una instancia de BaseRedisClient, disponible para que las subclases
+        # puedan enviar acciones a otros servicios si es necesario.
         self.redis_client = BaseRedisClient(
             service_name=self.service_name, # Pasar el nombre del servicio actual
             redis_client=self.async_redis_conn,
@@ -163,7 +165,7 @@ class BaseWorker(ABC):
                     handler_result = await self._handle_action(action)
 
                     # Procesamiento de respuesta/callback se mantiene igual
-                    if handler_result is None and not (action.callback_queue_name and (action.callback_action_type or not action.callback_action_type)):
+                    if handler_result is None and not action.callback_queue_name:
                         logger.debug(f"[{self.service_name}][{self.consumer_name}] Acción fire-and-forget {action.action_id} completada.")
                         # No hay más que hacer para fire-and-forget, se hará ACK abajo
                     else:
@@ -171,8 +173,11 @@ class BaseWorker(ABC):
                         is_async_callback = action.callback_queue_name and action.callback_action_type
 
                         if is_pseudo_sync:
+                            if action.correlation_id is None:
+                                logger.error(f"[{self.service_name}][{self.consumer_name}] Error crítico: Acción {action.action_id} ({action.action_type}) requiere respuesta pseudo-síncrona pero no tiene correlation_id. No se enviará respuesta.")
+                                raise ValueError(f"Acción {action.action_id} ({action.action_type}) requiere respuesta pseudo-síncrona pero no tiene correlation_id.")
                             response = self._create_success_response(action, handler_result or {})
-                            await self._send_response(response)
+                            await self._send_response(response, action.callback_queue_name)
                         elif is_async_callback:
                             await self._send_callback(action, handler_result or {})
                         # Si handler_result no es None pero no es ni pseudo-sync ni async_callback, es un fire-and-forget que devolvió algo. Se hace ACK.
@@ -190,7 +195,16 @@ class BaseWorker(ABC):
                     if action and action.callback_queue_name: # Solo intentar enviar error si es posible
                         error_code = "HANDLER_EXECUTION_ERROR"
                         error_response = self._create_error_response(action, str(e), error_code)
-                        await self._send_response(error_response) # Este envío podría fallar también
+                        # Solo enviar respuesta de error si hay una cola de callback definida para respuestas pseudo-síncronas
+                        if action.callback_queue_name and not action.callback_action_type: # Es pseudo-síncrono
+                            if action.correlation_id is None:
+                                logger.error(f"[{self.service_name}][{self.consumer_name}] Error crítico al intentar enviar respuesta de error: Acción {action.action_id} ({action.action_type}) requiere respuesta pseudo-síncrona pero no tiene correlation_id. No se enviará respuesta de error.")
+                                # La excepción original 'e' ya está en curso y causará que el mensaje no sea ACKed.
+                                # No es necesario levantar otra excepción aquí, solo evitar el intento de _send_response.
+                            else:
+                                await self._send_response(error_response, action.callback_queue_name)
+                        else:
+                            logger.warning(f"[{self.service_name}][{self.consumer_name}] No se envió respuesta de error para {action.action_id} ({action.action_type}) porque no es pseudo-síncrona o no tiene callback_queue_name.")
                     # No ACK aquí. message_id_to_ack no se resetea.
             
             except ValidationError as e:
@@ -227,6 +241,10 @@ class BaseWorker(ABC):
         )
 
     def _create_error_response(self, action: DomainAction, error_message: str, error_code: str) -> DomainActionResponse:
+        """Crea una DomainActionResponse de error.
+        Nota: error_type se establece en "ProcessingError" como un valor genérico.
+        Los workers específicos pueden necesitar crear objetos ErrorDetail más detallados si es necesario.
+        """
         """Crea una DomainActionResponse de error."""
         return DomainActionResponse(
             action_id=uuid.uuid4(),
@@ -240,23 +258,33 @@ class BaseWorker(ABC):
             error=ErrorDetail(error_type="ProcessingError", error_code=error_code, message=error_message)
         )
 
-    async def _send_response(self, response: DomainActionResponse):
+    async def _send_response(self, response: DomainActionResponse, target_queue_name: str):
         """Envía una DomainActionResponse a su cola de callback."""
-        if not response.callback_queue_name:
-            logger.warning(f"[{self.service_name}] Se intentó enviar respuesta para {response.correlation_id} sin callback_queue_name.")
+        if not target_queue_name:
+            logger.warning(f"[{self.service_name}] Se intentó enviar respuesta para {response.correlation_id} (Acción: {response.action_id}) sin target_queue_name.")
             return
 
+        log_extra = {
+            "action_id": str(response.action_id),
+            "correlation_id": str(response.correlation_id),
+            "task_id": str(response.task_id),
+            "tenant_id": response.tenant_id,
+            "session_id": response.session_id,
+            "target_queue": target_queue_name
+        }
+
         try:
-            await self.async_redis_conn.lpush(response.callback_queue_name, response.model_dump_json())
-            logger.info(f"[{self.service_name}] Respuesta {response.action_id} para {response.correlation_id} enviada a {response.callback_queue_name}.", extra=response.get_log_extra())
+            await self.async_redis_conn.lpush(target_queue_name, response.model_dump_json())
+            logger.info(f"[{self.service_name}] Respuesta {response.action_id} para {response.correlation_id} enviada a {target_queue_name}.", extra=log_extra)
         except redis_async.RedisError as e:
-            logger.error(f"[{self.service_name}] Error de Redis al enviar respuesta a {response.callback_queue_name}: {e}", extra=response.get_log_extra())
+            logger.error(f"[{self.service_name}] Error de Redis al enviar respuesta a {target_queue_name}: {e}", extra=log_extra)
 
     async def _send_callback(self, original_action: DomainAction, callback_data: Dict[str, Any]):
         """Crea y envía un nuevo DomainAction como callback."""
         callback_action = DomainAction(
-            action_id=str(uuid.uuid4()),
+            action_id=uuid.uuid4(),
             action_type=original_action.callback_action_type,
+            tenant_id=original_action.tenant_id, # Campo requerido
             task_id=original_action.task_id,
             correlation_id=original_action.correlation_id,
             trace_id=original_action.trace_id,
