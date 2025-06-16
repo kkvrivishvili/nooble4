@@ -98,8 +98,8 @@ class BaseRedisClient:
             
             message_payload = {'data': action.model_dump_json()} # MODIFIED: Payload for XADD
 
-            logger.info(f"Enviando acción pseudo-síncrona {action.action_id} al stream {action_stream_name}. Esperando respuesta en {response_queue}.") # MODIFIED
             message_id = await self.redis_client.xadd(action_stream_name, message_payload) # MODIFIED: XADD
+            logger.info(f"Acción pseudo-síncrona {action.action_id} enviada al stream {action_stream_name} con ID de mensaje Redis: {message_id}. Esperando respuesta en {response_queue}.") # MODIFIED, Issue 9
             
             # Bloquear y esperar la respuesta con el cliente asíncrono
             response_data = await self.redis_client.brpop(response_queue, timeout=timeout)
