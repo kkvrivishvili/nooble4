@@ -63,5 +63,4 @@ Este módulo alberga clases y funciones de utilidad que son compartidas y utiliz
 -   `BaseWorker` también utiliza `QueueManager` para determinar el nombre del stream de acciones que debe escuchar.
 -   La correcta configuración del `environment` en `QueueManager` (derivada de `CommonAppSettings`) es crucial para asegurar que los componentes interactúen con los streams/colas correctos en el entorno de despliegue adecuado.
 
----
-*Este README puede expandirse para incluir otras utilidades comunes a medida que se identifiquen o refactoricen.*
+
