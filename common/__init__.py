@@ -34,7 +34,7 @@ from .services import BaseService
 from .utils import init_logging # QueueManager is now imported from .clients
 
 # Excepciones
-from .exceptions import (
+from .errors.exceptions import (
     BaseError,
     RedisClientError,
     MessageProcessingError,

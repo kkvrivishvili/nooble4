@@ -6,7 +6,6 @@ from typing import Optional
 import redis.asyncio as redis # Use asyncio version of redis
 from pydantic import ValidationError
 
-# Removed direct import of RedisPool class, will expect an initialized client
 from common.models.actions import DomainAction, DomainActionResponse
 from common.clients.queue_manager import QueueManager
 from common.config.base_settings import CommonAppSettings

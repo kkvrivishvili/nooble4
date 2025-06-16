@@ -58,3 +58,34 @@ class CalculationHandler(BaseHandler):
 ## Filosofía
 
 Los handlers deben ser vistos como componentes de apoyo al `Service`. El `Service` decide si los usa y cómo. Esta estructura promueve la cohesión dentro del `Service` y el bajo acoplamiento con los `Handlers`.
+
+**Interacción con la Validación de Datos:**
+
+Generalmente, la responsabilidad de deserializar y validar el `action.data` (proveniente de una `DomainAction`) en un modelo Pydantic específico recae en la capa de `Service`. Una vez que el `Service` ha validado exitosamente el payload, puede pasar la instancia del modelo Pydantic resultante a los métodos del `Handler`.
+
+Esto significa que los `Handlers` suelen operar con datos ya estructurados y validados, lo que simplifica su lógica interna y les permite centrarse en la tarea de negocio específica para la que fueron diseñados. Por ejemplo:
+
+```python
+# En el Service:
+# async def process_action(self, action: DomainAction) -> Optional[Dict[str, Any]]:
+#     if action.action_type == "feature.calculate":
+#         try:
+#             payload_model = CalculationPayload(**action.data) # Validación en el Service
+#         except ValidationError as e:
+#             # ... manejar error de validación ...
+#             return # o retornar error
+#
+#         # Pasar el modelo validado al handler
+#         calc_result = await self.calc_handler.perform_complex_calculation(payload_model)
+#         return {"calculation_result": calc_result}
+
+# En el Handler:
+# class CalculationHandler(BaseHandler):
+#     async def perform_complex_calculation(self, payload: CalculationPayload) -> float:
+#         # Aquí, 'payload' ya es una instancia validada de CalculationPayload
+#         self._logger.debug(f"Realizando cálculo complejo para: {payload}")
+#         result = sum(payload.values_to_sum) # Ejemplo
+#         return float(result)
+```
+
+Esta separación de responsabilidades (validación en el `Service`, lógica de negocio en el `Handler`) contribuye a un diseño más limpio y mantenible.

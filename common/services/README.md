@@ -70,6 +70,53 @@ class FeatureService(BaseService):
         return None # Por defecto, si ninguna condición se cumple
 ```
 
+## Validación de Payloads (`action.data`) y Manejo de Metadatos (`action.metadata`)
+
+Una responsabilidad crucial del `BaseService` (y sus implementaciones específicas) es la validación y el manejo adecuado del payload (`action.data`) y los metadatos (`action.metadata`) de la `DomainAction` entrante.
+
+### Validación de `action.data`
+
+1.  **Responsabilidad del Servicio:** El `action.data` llega como un diccionario (`Dict[str, Any]`). El servicio que procesa la acción es responsable de:
+    *   Identificar el modelo Pydantic específico que corresponde al `action.action_type` recibido.
+    *   Intentar parsear y validar el diccionario `action.data` contra este modelo Pydantic específico. Por ejemplo:
+        ```python
+        # Dentro de process_action en un servicio específico
+        if action.action_type == "my_service.do_task":
+            try:
+                payload = MyTaskPayloadModel(**action.data)
+            except ValidationError as e:
+                self._logger.error(f"Error de validación para {action.action_type}: {e}")
+                # Idealmente, levantar una excepción personalizada que BaseWorker pueda manejar
+                # para enviar una DomainActionResponse de error.
+                # Ejemplo: raise DataValidationError(details=e.errors())
+                return {"error": "ValidationError", "message": str(e), "details": e.errors()}
+        ```
+
+2.  **Manejo de Errores de Validación:**
+    *   Si la validación con Pydantic falla (se levanta una `pydantic.ValidationError`), el servicio debe manejar este error.
+    *   La estrategia recomendada es levantar una excepción personalizada (ej. `DataValidationError` que herede de `MessageProcessingError` definido en `common.errors.exceptions`) que contenga los detalles del error de validación.
+    *   `BaseWorker` está diseñado para capturar estas excepciones (si heredan de una base común) y construir una `DomainActionResponse` con `success=False` y los detalles del error, que luego se envía de vuelta si se proporcionó un `callback_queue_name`.
+    *   Si no se maneja explícitamente y se devuelve un diccionario de error, `BaseWorker` también puede usarlo para la respuesta.
+
+3.  **Ubicación de Modelos Pydantic:**
+    *   Cada servicio debe definir sus propios modelos Pydantic para los payloads de las acciones que maneja. Estos modelos pueden residir en un subdirectorio `models/` o `schemas/` dentro del directorio del servicio específico.
+
+### Uso de `action.data` vs. `action.metadata`
+
+La `DomainAction` proporciona dos campos para transportar información: `data` y `metadata`.
+
+*   **`action.data: Dict[str, Any]`**: 
+    *   **Propósito**: Contiene el **payload primario y esencial** para la ejecución de la acción. Su estructura es específica para cada `action_type` y **debe ser validada** por el servicio receptor contra un modelo Pydantic dedicado, como se describió anteriormente.
+    *   **Ejemplo**: Para una acción `user.create`, `action.data` contendría `{"username": "john.doe", "email": "john.doe@example.com"}`.
+
+*   **`action.metadata: Optional[Dict[str, Any]]`**: 
+    *   **Propósito**: Contiene **información auxiliar, opcional o de configuración** que puede influir en cómo se procesa la acción, pero no es parte del payload fundamental. Puede usarse para pasar parámetros como la selección de un modelo de IA específico para una tarea, flags de características para una solicitud particular, o información de contexto para logging avanzado.
+    *   **Valores Predeterminados del Servicio**: Los servicios deben estar diseñados para operar con sus propios valores predeterminados para cualquier configuración que `action.metadata` pueda anular. Si `action.metadata` no se proporciona, o si una clave específica dentro de `metadata` está ausente, el servicio debe recurrir a su configuración predeterminada.
+    *   **Validación**: La validación de `action.metadata` es generalmente menos estricta que la de `action.data`. El servicio puede optar por leer valores específicos de `metadata` según sea necesario, aplicando lógica de validación ad-hoc o simplemente ignorando claves desconocidas.
+    *   **Ejemplo**: Para una acción `query.generate_answer`, `action.data` podría tener `{"query_text": "What is AI?"}`, mientras que `action.metadata` podría ser `{"llm_model": "gpt-4-turbo", "temperature": 0.5}`. Si `metadata` no especifica `llm_model`, el servicio de consulta usaría su modelo LLM predeterminado.
+
+Esta distinción ayuda a mantener los payloads principales (`data`) limpios y estrictamente validados, mientras ofrece flexibilidad para pasar información contextual o de configuración (`metadata`) sin romper la compatibilidad si los servicios no la esperan o no la entienden.
+
 ## Responsabilidades del Servicio Específico
 
 *   Implementar `process_action` para manejar todos los `action_type` relevantes.
