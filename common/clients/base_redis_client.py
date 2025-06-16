@@ -84,8 +84,8 @@ class BaseRedisClient:
         
         # La cola de respuesta es única para esta solicitud específica.
         response_queue = self.queue_manager.get_response_queue(
-            origin_service=self.service_name, 
-            action_name=action.action_type, # Use full action_type for better specificity
+            client_service_name=self.service_name, 
+            action_type=action.action_type, # Use full action_type for better specificity
             correlation_id=str(action.correlation_id)
         )
 
@@ -146,24 +146,27 @@ class BaseRedisClient:
             # callback_action_type (Optional[str], optional): Tipo de acción esperada en el callback.
         """
         try:
-            action.callback_queue_name = self.queue_manager.get_callback_queue(
-                origin_service=self.service_name, 
-                event_name=callback_event_name,
-                context=callback_context
-            )
-            # if callback_action_type and hasattr(action, 'callback_action_type'):
-            #     action.callback_action_type = callback_action_type
-            
-            # El resto es similar a send_action_async, enviando la acción principal a un stream
-            target_service = action.action_type.split('.')[0]
-            stream_name = self.queue_manager.get_service_action_stream(service_name=target_service) # MODIFIED
-            
-            action.origin_service = self.service_name
-            message_payload = {'data': action.model_dump_json()} # MODIFIED: Payload for XADD
+            action.callback_action_type = callback_event_name # Asignar el tipo de acción del callback
 
-            message_id = await self.redis_client.xadd(stream_name, message_payload) # MODIFIED: XADD
+            if not action.correlation_id: # Asegurar correlation_id
+                action.correlation_id = uuid.uuid4()
+
+            action.callback_queue_name = self.queue_manager.get_callback_queue(
+                client_service_name=self.service_name,
+                action_type=action.callback_action_type, # Usar el action_type del callback
+                correlation_id=str(action.correlation_id)
+            )
+
+            action.origin_service = self.service_name # Asegurar que el servicio origen esté establecido
+            target_service = action.action_type.split('.')[0]
+            action_stream_name = self.queue_manager.get_service_action_stream(service_name=target_service)
             
-            logger.info(f"Acción asíncrona con callback {action.action_id} ({action.action_type}) enviada al stream {stream_name} con ID {message_id}. Callback en {action.callback_queue_name}.") # MODIFIED
+            message_payload = {'data': action.model_dump_json()}
+
+            logger.info(f"Enviando acción asíncrona con callback {action.action_id} al stream {action_stream_name}. Callback en {action.callback_queue_name}")
+            message_id = await self.redis_client.xadd(action_stream_name, message_payload)
+            
+            logger.info(f"Acción asíncrona con callback {action.action_id} ({action.action_type}) enviada al stream {action_stream_name} con ID {message_id}. Callback en {action.callback_queue_name}.") # MODIFIED
 
         except (redis.RedisError, ValidationError) as e:
             logger.error(f"Error al enviar acción asíncrona con callback {action.action_id}: {e}")

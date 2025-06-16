@@ -215,29 +215,29 @@ class BaseWorker(ABC):
     def _create_success_response(self, action: DomainAction, data: Optional[Dict[str, Any]]) -> DomainActionResponse:
         """Crea una DomainActionResponse de éxito."""
         return DomainActionResponse(
-            action_id=str(uuid.uuid4()),
+            action_id=uuid.uuid4(),
             correlation_id=action.correlation_id,
             trace_id=action.trace_id,
             task_id=action.task_id,
-            origin_service=self.service_name,
+            tenant_id=action.tenant_id,
+            session_id=action.session_id,
             success=True,
             data=data,
-            error=None,
-            callback_queue_name=action.callback_queue_name
+            error=None
         )
 
     def _create_error_response(self, action: DomainAction, error_message: str, error_code: str) -> DomainActionResponse:
         """Crea una DomainActionResponse de error."""
         return DomainActionResponse(
-            action_id=str(uuid.uuid4()),
+            action_id=uuid.uuid4(),
             correlation_id=action.correlation_id,
             trace_id=action.trace_id,
             task_id=action.task_id,
-            origin_service=self.service_name,
+            tenant_id=action.tenant_id,
+            session_id=action.session_id,
             success=False,
             data=None,
-            error=ErrorDetail(code=error_code, message=error_message),
-            callback_queue_name=action.callback_queue_name
+            error=ErrorDetail(error_type="ProcessingError", error_code=error_code, message=error_message)
         )
 
     async def _send_response(self, response: DomainActionResponse):

@@ -83,10 +83,12 @@ El `BaseRedisClient` utiliza internamente un `QueueManager` (inicializado con `s
 2.  **`async def send_action_pseudo_sync(self, action: DomainAction, timeout: int = 30) -> Optional[DomainActionResponse]`**
     -   Implementa un patrón de solicitud-respuesta pseudo-síncrono.
     -   **Solicitud:** La `DomainAction` inicial se envía a un **Redis Stream** del servicio destino (usando `XADD`, igual que `send_action_async`).
-    -   **Respuesta:** Espera una `DomainActionResponse` en una **lista Redis temporal y única** (usando `BRPOP`). El nombre de esta cola de respuesta se genera con `QueueManager.get_response_queue_for_action()` y se pasa en `action.callback_queue_name`.
+    -   **Respuesta:** Espera una `DomainActionResponse` en una **lista Redis temporal y única** (usando `BRPOP`). El nombre de esta cola de respuesta se genera con `QueueManager.get_response_queue()` y se pasa en `action.callback_queue_name`.
 
-3.  **`async def send_action_async_with_callback(self, action: DomainAction)`**
+3.  **`async def send_action_async_with_callback(self, action: DomainAction, callback_event_name: str, callback_context: Optional[str] = None)`**
     -   Envía una `DomainAction` y espera un callback (otra `DomainAction`) en una cola específica.
+    -   `callback_event_name` (str): El tipo de acción que se espera como callback (se asigna a `action.callback_action_type`).
+    -   `callback_context` (Optional[str]): Un contexto opcional para el callback (actualmente no influye en la generación del nombre de la cola de callback por `QueueManager` pero está presente en la firma).
     -   **Solicitud Inicial:** La `DomainAction` se envía a un **Redis Stream** del servicio destino (usando `XADD`).
     -   **Callback:** El servicio que envía la acción espera que el servicio destino, una vez procesada la solicitud, envíe una nueva `DomainAction` (el callback) a la cola especificada en `action.callback_queue_name`. Esta cola de callback sigue siendo una lista Redis simple.
 
