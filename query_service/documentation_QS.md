@@ -11,11 +11,7 @@ Principales Funcionalidades:
 - Búsqueda vectorial de documentos (`query.search`).
 - Integración con LLMs (actualmente Groq) para la generación de respuestas.
 - Soporte para múltiples colecciones de documentos vectorizados.
-- Validación de permisos y límites basada en el tier del tenant.
-- Control de calidad de la información recuperada mediante umbrales de similitud.
-- Sistema de callbacks asíncronos para notificar los resultados.
-- Cache de resultados de búsqueda y configuraciones de colección para optimizar el rendimiento.
-- Recolección de métricas básicas de uso y rendimiento.
+- Control de calidad de la información recuperada mediante umbrales de similitud. RAGProcessor
 
 ## 2. Arquitectura y Componentes Principales
 
@@ -35,7 +31,6 @@ graph TD
     H -- Redis --> K[Redis Cache: Search Results / Metrics];
     G -- LLM Generation --> L[GroqClient];
     L -- HTTP --> M[Groq API];
-    C -- Callback --> N[Callback Queue via DomainQueueManager];
 
     subgraph Query Service Internals
         B;
@@ -60,32 +55,7 @@ graph TD
 
 **Componentes Clave:**
 
-*   **`main.py`**: Punto de entrada de la aplicación. Inicializa el `QueryWorker`, el cliente Redis, y gestiona el ciclo de vida del worker.
-*   **`workers/query_worker.py` (`QueryWorker`)**: Hereda de `BaseWorker`. Escucha las colas de acciones Redis (`query.generate`, `query.search`) asignadas a su tier. Procesa las acciones utilizando el `QueryHandler` y envía respuestas o callbacks a través de `DomainQueueManager`.
-*   **`handlers/query_handler.py` (`QueryHandler`)**: Orquesta la lógica de negocio principal. Delega la validación de contexto y permisos al `QueryContextHandler`. Para acciones `query.generate`, utiliza `RAGProcessor`. Para acciones `query.search`, utiliza `VectorSearchService`. Gestiona el tracking de métricas en Redis.
-*   **`handlers/context_handler.py` (`QueryContextHandler`)**: Responsable de:
-    *   Resolver `ExecutionContext` a partir de los datos de la acción.
-    *   Obtener y cachear configuraciones de colecciones (actualmente simulado para la BD, con `TODO` para Supabase).
-    *   Validar permisos de consulta basados en el tier del tenant y la configuración de la colección.
-    *   Aplicar rate limiting (e.g., consultas por hora) utilizando Redis.
-*   **`services/rag_processor.py` (`RAGProcessor`)**: Implementa el flujo RAG completo:
-    *   Utiliza `VectorSearchService` para obtener documentos relevantes.
-    *   Evalúa la relevancia de los documentos.
-    *   Implementa lógica de fallback (e.g., usar conocimiento general del agente si los documentos no son suficientemente relevantes).
-    *   Construye prompts y utiliza `GroqClient` para generar la respuesta final.
-    *   Formatea las fuentes (documentos de referencia) si se solicitan.
-*   **`services/vector_search_service.py` (`VectorSearchService`)**: Encapsula la lógica de búsqueda vectorial:
-    *   Utiliza `VectorStoreClient` para interactuar con la base de datos vectorial externa.
-    *   Implementa caching de resultados de búsqueda en Redis.
-    *   Filtra los resultados por umbral de similitud.
-    *   Registra métricas detalladas de búsqueda (tiempos, cache hits/misses) en Redis.
-*   **`clients/vector_store_client.py` (`VectorStoreClient`)**: Cliente HTTP de bajo nivel para comunicarse con la API del vector store externo. Envía `tenant_id` y `collection_id` para búsquedas específicas.
-*   **`clients/groq_client.py` (`GroqClient`)**: Cliente HTTP para interactuar con la API de Groq (LLM). Maneja la construcción de prompts, envío de solicitudes, y procesamiento de respuestas, incluyendo reintentos con `tenacity`.
-*   **`models/actions.py`**: Define los modelos Pydantic para las `DomainAction`s (`QueryGenerateAction`, `SearchDocsAction`, `QueryCallbackAction`) y sus payloads, asegurando la validación y estructura de los datos.
-*   **`config/settings.py` (`QueryServiceSettings`)**: Define la configuración del servicio, incluyendo URLs de dependencias (Redis, Vector DB, Groq), parámetros de LLM, TTLs de cache, y límites por tier. Cargada desde variables de entorno.
-*   **`config/constants.py`**: Define constantes globales y valores por defecto, aunque algunos pueden ser reemplazados por `settings.py`.
-*   **`common.utils.DomainQueueManager`**: Utilizado por `QueryWorker` para gestionar la suscripción a colas de acciones y el envío de respuestas/callbacks a las colas correctas, respetando la nomenclatura y el tiering.
-
+*   
 ## 3. Comunicaciones del Servicio
 
 Query Service se comunica con otros servicios y sistemas principalmente de forma asíncrona a través de colas Redis y, para dependencias externas como Groq o el Vector DB, mediante HTTP.
@@ -161,8 +131,8 @@ query_service/
 
 ## 5. Integración con Otros Servicios
 
-*   **Agent Execution Service (o similar)**: Es el principal solicitante de consultas. Envía acciones `query.generate` o `query.search` y espera respuestas/callbacks en colas que él mismo gestiona.
-*   **Embedding Service**: Query Service espera recibir los embeddings de las consultas (`query_embedding`) como parte de las acciones. Sin embargo, la presencia de `EmbeddingRequestAction` en `models/actions.py` sugiere que Query Service podría tener la capacidad de solicitar la generación de embeddings al Embedding Service si fuera necesario (aunque este flujo no está explícitamente implementado en los handlers revisados).
+*   **Agent Execution Service (o similar)**: Es el principal solicitante de consultas. Envía acciones `query.generate` o `query.search` y espera respuestas/pseudo asyncronas en colas que él mismo gestiona.
+*   **Embedding Service**: Query Service solicita los embeddings de las consultas (`query_embedding`) como parte de las acciones. Sin embargo, la presencia de `EmbeddingRequestAction` en `models/actions.py` sugiere que Query Service podría tener la capacidad de solicitar la generación de embeddings al Embedding Service si fuera necesario (aunque este flujo no está explícitamente implementado en los handlers revisados).
 *   **Servicios de Persistencia (PostgreSQL - Futuro)**: El `README.md` y las memorias indican que hay un plan para migrar ciertos almacenamientos temporales de Redis (e.g., configuraciones de colección, potencialmente métricas más detalladas) a PostgreSQL para persistencia a largo plazo. Actualmente, esta integración no está implementada.
 
 ## 6. Inconsistencias, Código Muerto o Duplicado, y Puntos de Mejora

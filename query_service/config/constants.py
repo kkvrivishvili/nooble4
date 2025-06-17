@@ -9,10 +9,6 @@ QueryServiceSettings en la configuración centralizada.
 # Constantes de Proveedores de LLM (usado para identificar proveedores soportados)
 class LLMProviders:
     GROQ = "groq"
-    OPENAI = "openai"
-    ANTHROPIC = "anthropic"
-    AZURE_OPENAI = "azure_openai"
-    OLLAMA = "ollama"
     # Añadir otros proveedores según sea necesario
 
 # Nombres de colas
