@@ -90,12 +90,11 @@ query_service/
 ├── __init__.py
 ├── main.py                 # Punto de entrada, inicializa y corre el worker
 |
-├── workers/
+├── workers/                # Toma la base_worker de common y la extiende para el query_service
 │   ├── __init__.py
 │   └── query_worker.py     # QueryWorker, consume acciones de Redis
 |
-├── handlers/
-│   ├── __init__.py
+├── handlers/               # Funciones soporte para services
 │   ├── query_handler.py    # QueryHandler, lógica de negocio principal
 │   └── context_handler.py  # QueryContextHandler, validación y contexto
 |
@@ -107,22 +106,20 @@ query_service/
 ├── clients/
 │   ├── __init__.py
 │   ├── groq_client.py          # Cliente para Groq API (LLM)
-│   └── vector_store_client.py  # Cliente para Vector DB externo
+│   └── qdrant_client.py        # Cliente para Vector DB externo qdrant 
 |
 ├── models/
 │   ├── __init__.py
 │   └── actions.py            # Modelos Pydantic para DomainActions y payloads
 |
-├── config/
+├── config/                   # Configuración del servicio usando configuracion centralizada del modulo common
 │   ├── __init__.py
-│   ├── constants.py          # Constantes globales y defaults
-│   └── settings.py           # QueryServiceSettings, configuración del servicio
+│   ├── constants.py          # Constantes globales y defaults especificas del servicio query
+│   └── settings.py           # Deberia leer la configuracion proporcionada por el servicio agent_execution_service
 |
 ├── routes/                   # (Actualmente vacío o no relevante para el flujo principal)
 │   └── __init__.py
 |
-├── tests/                    # (No revisado en este análisis)
-│
 ├── Dockerfile
 ├── README.md
 ├── requirements.txt
@@ -132,21 +129,5 @@ query_service/
 ## 5. Integración con Otros Servicios
 
 *   **Agent Execution Service (o similar)**: Es el principal solicitante de consultas. Envía acciones `query.generate` o `query.search` y espera respuestas/pseudo asyncronas en colas que él mismo gestiona.
-*   **Embedding Service**: Query Service solicita los embeddings de las consultas (`query_embedding`) como parte de las acciones. Sin embargo, la presencia de `EmbeddingRequestAction` en `models/actions.py` sugiere que Query Service podría tener la capacidad de solicitar la generación de embeddings al Embedding Service si fuera necesario (aunque este flujo no está explícitamente implementado en los handlers revisados).
+*   **Embedding Service**: Query Service solicita los embeddings de las consultas (`query_embedding`) como parte de las acciones. La presencia de `EmbeddingRequestAction` en `models/actions.py` hace que Query Service debe solicitar la generación de embeddings al Embedding Service.
 *   **Servicios de Persistencia (PostgreSQL - Futuro)**: El `README.md` y las memorias indican que hay un plan para migrar ciertos almacenamientos temporales de Redis (e.g., configuraciones de colección, potencialmente métricas más detalladas) a PostgreSQL para persistencia a largo plazo. Actualmente, esta integración no está implementada.
-
-## 6. Inconsistencias, Código Muerto o Duplicado, y Puntos de Mejora
-
-*   **Configuración de Colecciones desde DB (TODO)**: `QueryContextHandler` simula la obtención de configuraciones de colección desde una base de datos (Supabase). Esto es un **TODO crítico** para la funcionalidad completa y personalización por colección/tenant.
-*   **Cache de Búsqueda - Hash de Embedding**: `VectorSearchService` utiliza un hash de una muestra del embedding para la clave de caché. Si bien es una optimización, introduce una pequeña posibilidad teórica de colisiones. Considerar si el riesgo/beneficio es adecuado o si se puede usar un hash completo de forma eficiente.
-*   **Superposición de Constantes y Settings**: Existe cierta superposición en la definición de constantes (e.g., TTLs, límites por tier) entre `config/constants.py` y `config/settings.py`. Se debe asegurar que `settings.py` (configurable por entorno) sea la fuente autoritativa y que las constantes solo definan valores por defecto no configurables o valores que no cambian.
-*   **Error Handling en Clientes**: Los clientes HTTP (`VectorStoreClient`, `GroqClient`) podrían beneficiarse de un manejo de errores más granular (basado en códigos de estado HTTP específicos o errores de API) en lugar de re-lanzar excepciones genéricas. Los `TODO` en los propios archivos de cliente ya lo señalan.
-*   **Abstracción de Clientes**: Los `TODO` en los clientes sugieren la posibilidad de abstraerlos para soportar múltiples backends (e.g., diferentes Vector DBs, diferentes LLMs). Esto sería una mejora significativa para la flexibilidad.
-*   **Métricas y Observabilidad**: Aunque hay tracking básico de métricas en Redis, una integración más profunda con un sistema de monitoreo y observabilidad (e.g., Prometheus, Grafana, OpenTelemetry) sería beneficiosa, como se indica en los `TODO`s.
-*   **Streaming de Respuestas LLM**: `GroqClient` tiene `stream: False` hardcodeado. Implementar streaming podría mejorar la latencia percibida por el usuario para respuestas largas.
-*   **Endpoints HTTP Legacy/No Usados**: El directorio `routes/` parece no ser relevante para el flujo principal basado en colas. Si contiene endpoints HTTP, verificar si son necesarios, están actualizados o son código muerto.
-*   **Flujo de `EmbeddingRequestAction`**: Si bien el modelo existe, el flujo donde Query Service solicita activamente embeddings no está implementado en los handlers principales. Si esta funcionalidad es necesaria, requerirá desarrollo adicional.
-*   **Persistencia en PostgreSQL**: Como se menciona en el `README.md` y memorias, la migración de datos de Redis a PostgreSQL para persistencia a largo plazo es un punto pendiente importante.
-*   **Robustez de `VectorStoreClient`**: Falta de reintentos y validación avanzada, como se indica en sus `TODO`s.
-
-Este análisis proporciona una visión detallada del Query Service. La documentación se ha estructurado para ser exhaustiva y cubrir los aspectos clave solicitados.

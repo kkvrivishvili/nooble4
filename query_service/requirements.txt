@@ -1,4 +1,6 @@
 # MODIFICADO: Dependencias actualizadas para sistema de colas
+pydantic-settings
+
 fastapi==0.115.12
 uvicorn==0.34.0
 pydantic==2.10.6
