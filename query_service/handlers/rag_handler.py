@@ -46,8 +46,8 @@ class RAGHandler(BaseHandler):
         # Inicializar clientes
         self.groq_client = GroqClient(
             api_key=app_settings.groq_api_key,
-            base_url=app_settings.groq_api_base_url,
-            timeout=app_settings.llm_timeout_seconds
+            timeout=app_settings.llm_timeout_seconds,
+            max_retries=app_settings.groq_max_retries
         )
         self.vector_client = VectorClient(
             base_url=app_settings.vector_db_url,

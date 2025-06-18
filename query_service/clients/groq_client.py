@@ -1,202 +1,187 @@
 """
-Cliente para interactuar con la API de Groq.
+Cliente para interactuar con la API de Groq usando el SDK oficial.
 
-Proporciona una interfaz limpia para generar respuestas usando
-los modelos de lenguaje de Groq, con manejo de errores y reintentos.
+Proporciona una interfaz limpia y robusta para generar respuestas usando
+los modelos de lenguaje de Groq, aprovechando los reintentos nativos del SDK
+y funcionalidades avanzadas como el modo JSON.
 """
 
 import logging
 import time
+import json
 from typing import Optional, Dict, Any, List, Tuple, Union
 
-import httpx
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception_type
-)
+# SDK oficial de Groq
+from groq import AsyncGroq, APIConnectionError, RateLimitError, APIStatusError
 
-from common.clients.base_http_client import BaseHTTPClient
+# Ya no se necesita tenacity
 from common.errors.http_errors import ServiceUnavailableError
 
 
-class GroqClient(BaseHTTPClient):
+class GroqClient:
     """
-    Cliente asíncrono para la API de Groq.
+    Cliente asíncrono para la API de Groq, utilizando el SDK oficial.
     
-    Extiende BaseHTTPClient para proporcionar funcionalidad
-    específica para la generación de texto con LLMs de Groq.
+    Este cliente está configurado para usar los reintentos nativos del SDK,
+    lo que lo hace más robusto ante errores transitorios de red o de la API.
     """
     
-    def __init__(self, api_key: str, base_url: str = "https://api.groq.com/openai/v1", timeout: int = 30):
+    def __init__(self, api_key: str, timeout: int = 60, max_retries: int = 3):
         """
-        Inicializa el cliente con la API key.
+        Inicializa el cliente con la API key y configuración de reintentos.
         
         Args:
-            api_key: API key de Groq
-            base_url: URL base de la API
-            timeout: Timeout en segundos para las peticiones
+            api_key: API key de Groq.
+            timeout: Timeout en segundos para las peticiones.
+            max_retries: Número máximo de reintentos para errores recuperables.
         """
         if not api_key:
             raise ValueError("API key de Groq es requerida")
         
-        # Headers con autenticación
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        # Inicializar cliente base
-        super().__init__(
-            base_url=base_url,
-            headers=headers
+        # Inicializar cliente asíncrono del SDK de Groq con configuración de reintentos
+        self.client = AsyncGroq(
+            api_key=api_key,
+            timeout=timeout,
+            max_retries=max_retries
         )
         
-        self.timeout = timeout
         self.logger = logging.getLogger(__name__)
     
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type(ServiceUnavailableError)
-    )
     async def generate(
         self,
         prompt: str,
         system_prompt: Optional[str] = None,
-        model: str = "llama-3.3-70b-versatile",
+        model: str = "llama3-70b-8192",
         temperature: float = 0.3,
-        max_tokens: int = 1024,
+        max_tokens: int = 2048,
         top_p: float = 1.0,
         frequency_penalty: float = 0.0,
         presence_penalty: float = 0.0,
-        n: int = 1,
-        stream: bool = False,
         stop: Optional[Union[str, List[str]]] = None,
         user: Optional[str] = None
-    ) -> Tuple[str, Dict[str, int]]:
+    ) -> Tuple[str, Dict[str, Any]]:
         """
-        Genera una respuesta usando el modelo especificado.
+        Genera una respuesta de texto plano usando el modelo especificado.
         
-        Args:
-            prompt: Prompt principal del usuario
-            system_prompt: Prompt de sistema (opcional)
-            model: Modelo a usar
-            temperature: Controla la aleatoriedad (0-2)
-            max_tokens: Máximo de tokens en la respuesta
-            top_p: Nucleus sampling
-            frequency_penalty: Penalización de frecuencia (-2 a 2)
-            presence_penalty: Penalización de presencia (-2 a 2)
-            n: Número de respuestas a generar
-            stream: Si usar streaming (no implementado)
-            stop: Secuencias donde parar la generación
-            user: Identificador único del usuario
-            
+        Utiliza los reintentos nativos del SDK para manejar errores transitorios.
+        
         Returns:
             Tupla de (respuesta_generada, uso_de_tokens)
-            
-        Raises:
-            ServiceUnavailableError: Si el servicio no está disponible
-            Exception: Para otros errores
         """
-        start_time = time.time()
-        
-        # Construir mensajes
-        messages = []
-        if system_prompt:
-            messages.append({
-                "role": "system",
-                "content": system_prompt
-            })
-        
-        messages.append({
-            "role": "user",
-            "content": prompt
-        })
-        
-        # Preparar payload según la documentación de Groq
-        payload = {
-            "model": model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "top_p": top_p,
-            "frequency_penalty": frequency_penalty,
-            "presence_penalty": presence_penalty,
-            "n": n,
-            "stream": stream
-        }
-        
-        # Agregar parámetros opcionales si están presentes
-        if stop is not None:
-            payload["stop"] = stop
-        
-        if user is not None:
-            payload["user"] = user
-        
-        self.logger.debug(
-            f"Generando respuesta con {model}, "
-            f"temp={temperature}, max_tokens={max_tokens}"
+        return await self._create_completion(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            top_p=top_p,
+            frequency_penalty=frequency_penalty,
+            presence_penalty=presence_penalty,
+            stop=stop,
+            user=user,
+            json_mode=False
+        )
+
+    async def generate_json(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = "Responde únicamente con un objeto JSON válido.",
+        model: str = "llama3-70b-8192",
+        temperature: float = 0.1, # Más bajo para respuestas más deterministas
+        max_tokens: int = 2048,
+        user: Optional[str] = None
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """
+        Genera una respuesta en formato JSON garantizado por la API.
+
+        Args:
+            prompt: Prompt que describe la estructura JSON deseada.
+            system_prompt: Instrucción para asegurar la salida en JSON.
+            ...
+
+        Returns:
+            Tupla de (respuesta_json_parseada, uso_de_tokens)
+        """
+        response_text, usage = await self._create_completion(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            user=user,
+            json_mode=True
         )
         
         try:
-            # Hacer petición
-            response = await self.post(
-                "/chat/completions",
-                json=payload,
-                timeout=self.timeout
-            )
+            # Aunque la API garantiza un JSON válido, parsearlo es buena práctica
+            json_response = json.loads(response_text)
+            return json_response, usage
+        except json.JSONDecodeError:
+            self.logger.error("La API de Groq no devolvió un JSON válido a pesar del modo JSON.")
+            raise ValueError("La respuesta no pudo ser decodificada como JSON.")
+
+    async def _create_completion(
+        self, 
+        prompt: str, 
+        system_prompt: Optional[str], 
+        model: str, 
+        json_mode: bool, 
+        **kwargs
+    ) -> Tuple[str, Dict[str, Any]]:
+        """
+        Método privado para centralizar la lógica de llamada a la API de Groq.
+        """
+        start_time = time.time()
+        
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        
+        request_params = {
+            "messages": messages,
+            "model": model,
+            **kwargs
+        }
+
+        if json_mode:
+            request_params["response_format"] = {"type": "json_object"}
+        
+        self.logger.debug(f"Enviando petición a Groq con modelo {model} (JSON mode: {json_mode})...")
+
+        try:
+            chat_completion = await self.client.chat.completions.create(**request_params)
             
-            # Parsear respuesta
-            data = response.json()
+            content = chat_completion.choices[0].message.content
+            token_usage = chat_completion.usage.model_dump() if chat_completion.usage else {}
             
-            # Validar estructura de respuesta
-            if "choices" not in data or not data["choices"]:
-                raise ValueError("Respuesta inválida de Groq API: sin choices")
-            
-            # Extraer respuesta principal
-            choice = data["choices"][0]
-            content = choice.get("message", {}).get("content", "")
-            finish_reason = choice.get("finish_reason")
-            
-            # Verificar si se truncó
-            if finish_reason == "length":
-                self.logger.warning(
-                    f"Respuesta truncada por límite de tokens ({max_tokens})"
-                )
-            
-            # Extraer uso de tokens
-            usage = data.get("usage", {})
-            token_usage = {
-                "prompt_tokens": usage.get("prompt_tokens", 0),
-                "completion_tokens": usage.get("completion_tokens", 0),
-                "total_tokens": usage.get("total_tokens", 0),
-                "queue_time": usage.get("queue_time", 0),
-                "prompt_time": usage.get("prompt_time", 0),
-                "completion_time": usage.get("completion_time", 0),
-                "total_time": usage.get("total_time", 0)
-            }
-            
-            # Log métricas
+            if chat_completion.choices[0].finish_reason == "length":
+                self.logger.warning(f"Respuesta truncada por límite de tokens ({kwargs.get('max_tokens')})")
+
             elapsed = time.time() - start_time
             self.logger.info(
                 f"Generación completada en {elapsed:.2f}s. "
-                f"Tokens: {token_usage['total_tokens']} "
-                f"(prompt: {token_usage['prompt_tokens']}, "
-                f"completion: {token_usage['completion_tokens']})"
+                f"Tokens: {token_usage.get('total_tokens', 0)}"
             )
             
             return content, token_usage
-            
-        except httpx.TimeoutException:
-            self.logger.error(f"Timeout en llamada a Groq API después de {self.timeout}s")
-            raise ServiceUnavailableError(
-                f"Groq API timeout después de {self.timeout} segundos"
-            )
+
+        except APIConnectionError as e:
+            self.logger.error(f"Error de conexión con Groq API: {e.__cause__}")
+            raise ServiceUnavailableError("Error de conexión con la API de Groq.")
         
+        except RateLimitError as e:
+            self.logger.error(f"Límite de peticiones de Groq API excedido: {e}")
+            raise ServiceUnavailableError("Límite de peticiones de Groq API excedido.")
+
+        except APIStatusError as e:
+            self.logger.error(f"Error de API de Groq (status {e.status_code}): {e.response}")
+            if 400 <= e.status_code < 500:
+                raise ValueError(f"Error en la petición a Groq API: {e.message}")
+            raise ServiceUnavailableError(f"Error en el servidor de Groq API: {e.message}")
+
         except Exception as e:
-            self.logger.error(f"Error en llamada a Groq API: {str(e)}")
+            self.logger.error(f"Error inesperado en llamada a Groq API: {e}", exc_info=True)
             raise
     
     async def generate_with_messages(
