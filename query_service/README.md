@@ -33,7 +33,28 @@ El servicio sigue una arquitectura de microservicios limpia y desacoplada, organ
 
 - **`common` (Módulo Externo)**: Proporciona clases base, modelos y utilidades compartidas entre todos los microservicios, asegurando consistencia y reutilización de código.
 
-## 3. Flujo de una Solicitud RAG (`query.generate`)
+## 3. Interacción con Otros Microservicios
+
+El `Query Service` se integra con otros microservicios de la plataforma de la siguiente manera:
+
+- **`Embedding Service`**: 
+    - **Comunicación**: Directa y Asíncrona.
+    - **Mecanismo**: El `Query Service` utiliza su `EmbeddingClient` para enviar solicitudes de generación de embeddings al `Embedding Service` a través de Redis Streams (usando objetos `DomainAction`). Espera una respuesta (también vía Redis) que contiene los vectores de embedding.
+    - **Propósito**: Obtener los embeddings vectoriales para las preguntas de los usuarios, necesarios para la búsqueda semántica.
+
+- **`Ingestion Service`** (o cualquier servicio que popule la base de datos vectorial):
+    - **Comunicación**: Indirecta.
+    - **Mecanismo**: El `Ingestion Service` es responsable de procesar documentos, generar sus embeddings (posiblemente usando el `Embedding Service`), y almacenarlos en la base de datos vectorial. El `Query Service` no se comunica directamente con el `Ingestion Service` para las operaciones de consulta. En su lugar, accede a los datos ya procesados y almacenados por el `Ingestion Service` a través de su `VectorClient`.
+    - **Propósito**: El `Query Service` consume los datos que el `Ingestion Service` ha preparado y almacenado en la base de datos vectorial.
+
+- **`Agent Execution Service`** (y otros servicios que necesiten realizar consultas):
+    - **Comunicación**: Asíncrona, iniciada por el servicio externo.
+    - **Mecanismo**: Cualquier servicio, como el `Agent Execution Service`, que necesite realizar una búsqueda semántica o una consulta RAG, debe construir un objeto `DomainAction` y publicarlo en el stream de Redis designado para el `Query Service` (definido por la variable de entorno `REDIS_STREAM_QUERY_SERVICE` o similar, procesado por `QueryWorker`).
+    - **Propósito**: Permitir que otros servicios deleguen tareas de búsqueda y generación de respuestas al `Query Service`.
+
+## 4. Flujo de una Solicitud RAG (`query.generate`)
+
+El flujo típico para una solicitud de generación aumentada por recuperación es el siguiente:
 
 1.  Un servicio externo publica una `DomainAction` con `action_type='query.generate'` en el stream de Redis.
 2.  Uno de los `QueryWorker` consume el mensaje.
@@ -44,9 +65,111 @@ El servicio sigue una arquitectura de microservicios limpia y desacoplada, organ
     b. Llama al `VectorClient` con ese vector para recuperar chunks de contexto.
     c. Construye un prompt enriquecido con el contexto y la pregunta.
     d. Llama al `GroqClient` para generar la respuesta.
-6.  La respuesta final se empaqueta en un `DomainActionResponse` y se devuelve a través de Redis (si se solicitó un callback).
+6.  La respuesta final (por ejemplo, `QueryGenerateResponse`) se empaqueta en un `DomainActionResponse` y se publica en una cola de respuesta de Redis si se especificó un `callback_queue` y `callback_action_type` en la `DomainAction` original. Si no, la acción se considera "fire-and-forget" por parte del `Query Service`.
 
-## 4. Cómo Ejecutar el Servicio
+## 5. Cómo Interactuar con Query Service (Para Otros Microservicios)
+
+Para que otros microservicios (como `Agent Execution Service` o cualquier otro productor de tareas) interactúen con el `Query Service`, deben enviar mensajes a través de Redis Streams utilizando un formato estandarizado: el objeto `DomainAction`.
+
+### a. El Objeto `DomainAction`
+
+Este objeto es la unidad de trabajo estándar. Se recomienda utilizar la clase `DomainAction` definida en el módulo `common` (o una estructura compatible).
+
+Campos clave de `DomainAction`:
+
+- **`action_id` (UUID)**: ID único para la acción (generado por el solicitante).
+- **`action_type` (str)**: Tipo de acción a realizar. Para `Query Service`:
+    - `"query.generate"`: Para una consulta RAG completa (búsqueda + generación LLM).
+    - `"query.search"`: Para una búsqueda vectorial únicamente.
+- **`data` (dict)**: Payload específico de la acción. Ver `models/payloads.py` para las estructuras esperadas (`QueryGeneratePayload`, `QuerySearchPayload`).
+- **`source_service` (str)**: Nombre del servicio que origina la acción (e.g., `"agent_execution_service"`).
+- **`target_service` (str)**: Debe ser `"query_service"`.
+- **`timestamp` (datetime)**: Momento de creación de la acción.
+- **`trace_id` (UUID, opcional)**: ID para trazar la solicitud a través de múltiples servicios.
+- **`correlation_id` (UUID, opcional)**: ID para correlacionar esta acción con otras.
+- **`metadata` (dict, opcional)**: Metadatos adicionales, como configuraciones de override para la consulta (e.g., `top_k`, `model_name`).
+- **`callback_queue` (str, opcional)**: Nombre del stream de Redis donde `Query Service` debe enviar la respuesta (`DomainActionResponse`).
+- **`callback_action_type` (str, opcional)**: El `action_type` que se usará en el `DomainActionResponse` de vuelta (e.g., `"query.generate.result"`).
+
+### b. Payloads de Solicitud (`data`)
+
+Consulte los modelos Pydantic en `query_service/models/payloads.py` para la estructura detallada:
+
+- **Para `action_type='query.generate'`**: Usar `QueryGeneratePayload`.
+    - Campos clave: `query_text`, `collection_ids` (opcional), `tenant_id`, `session_id`, `user_id` (opcional), `llm_config` (opcional), `search_config` (opcional), `conversation_history` (opcional).
+- **Para `action_type='query.search'`**: Usar `QuerySearchPayload`.
+    - Campos clave: `query_text`, `collection_ids` (opcional), `tenant_id`, `session_id`, `top_k` (opcional), `similarity_threshold` (opcional).
+
+### c. Publicación en Redis Streams
+
+1.  **Conexión a Redis**: Utilizar un cliente Redis compatible con streams (e.g., `redis-py` con soporte asíncrono si es necesario).
+2.  **Stream de Destino**: El `QueryWorker` escucha en un stream cuyo nombre se configura mediante una variable de entorno (e.g., `REDIS_STREAM_QUERY_SERVICE`, consultar la configuración del `Query Service` desplegado para el valor exacto). Típicamente sigue el formato `[nombre_servicio]:actions` o `domain_actions:[nombre_servicio]`.
+3.  **Serialización**: El objeto `DomainAction` (con su `data` payload) debe ser serializado (e.g., a JSON, y luego a bytes) antes de ser añadido al stream.
+
+### d. Recepción de Respuestas (Callbacks)
+
+Si se especifican `callback_queue` y `callback_action_type` en la `DomainAction`:
+
+1.  El `Query Service` procesará la solicitud.
+2.  Al finalizar, construirá un objeto `DomainActionResponse`.
+    - `success` (bool): Indica si la operación fue exitosa.
+    - `data` (dict): Contiene la respuesta (`QueryGenerateResponse`, `QuerySearchResponse`) o detalles del error (`QueryErrorResponse`).
+    - `original_action_id` (UUID): El `action_id` de la solicitud original.
+    - `trace_id`, `correlation_id`, etc.
+3.  Este `DomainActionResponse` será publicado en el `callback_queue` especificado, con el `action_type` indicado en `callback_action_type`.
+4.  El servicio solicitante debe tener un worker escuchando en esa `callback_queue` para consumir la respuesta.
+
+### Ejemplo (Conceptual - Python usando una librería común `common.redis`)
+
+```python
+# Asumiendo que tienes una instancia de RedisManager y modelos comunes
+from common.redis.redis_manager import RedisManager
+from common.models.domain_action import DomainAction, DomainActionResponse # Asumiendo que existen
+from query_service.models.payloads import QueryGeneratePayload # O una versión común
+import uuid
+import asyncio
+
+async def send_query_to_query_service(redis_manager: RedisManager, user_query: str):
+    query_payload = QueryGeneratePayload(
+        query_text=user_query,
+        tenant_id="some-tenant",
+        session_id=str(uuid.uuid4()),
+        # ... otros campos necesarios ...
+    )
+
+    action = DomainAction(
+        action_id=uuid.uuid4(),
+        action_type="query.generate",
+        data=query_payload.model_dump(), # Serializar el payload Pydantic
+        source_service="my_calling_service",
+        target_service="query_service",
+        callback_queue="my_calling_service:responses", # Donde espero la respuesta
+        callback_action_type="query.generate.result"
+    )
+
+    # El nombre del stream debe ser el que QueryService está escuchando
+    query_service_stream_name = "query_service:actions" # Ejemplo, verificar config
+
+    await redis_manager.publish_action(query_service_stream_name, action)
+    print(f"Acción {action.action_id} enviada a Query Service.")
+
+    # ... (lógica para escuchar en 'my_calling_service:responses' no mostrada) ...
+
+# Para ejecutar (ejemplo)
+# async def main():
+#     redis_url = "redis://localhost:6379"
+#     redis_manager = RedisManager(redis_url)
+#     await redis_manager.initialize()
+#     await send_query_to_query_service(redis_manager, "¿Qué es RAG?")
+#     await redis_manager.close()
+# 
+# if __name__ == "__main__":
+#     asyncio.run(main())
+```
+
+**Nota Importante**: Es crucial que los modelos de datos (`DomainAction`, payloads, respuestas) estén estandarizados y sean consistentes entre los servicios. Idealmente, estos modelos deberían provenir de una librería `common` compartida.
+
+## 6. Cómo Ejecutar el Servicio
 
 ### Requisitos
 - Python 3.9+
@@ -91,7 +214,7 @@ python -m query_service.main
 
 Esto iniciará el servidor `uvicorn` con la aplicación FastAPI y lanzará los `QueryWorker` en segundo plano para empezar a procesar tareas de la cola de Redis.
 
-## 5. Endpoints HTTP
+## 7. Endpoints HTTP
 
 El servicio expone algunos endpoints HTTP a través de FastAPI, principalmente para monitoreo:
 
@@ -100,7 +223,7 @@ El servicio expone algunos endpoints HTTP a través de FastAPI, principalmente p
 - `GET /health/detailed`: Health check detallado que verifica la conexión con Redis y el estado de los workers.
 - `GET /docs`: Documentación interactiva de la API (Swagger UI).
 
-## 6. Inconsistencias y Mejoras Pendientes
+## 8. Inconsistencias y Mejoras Pendientes
 
 Durante el análisis del código, se identificaron los siguientes puntos a mejorar:
 
