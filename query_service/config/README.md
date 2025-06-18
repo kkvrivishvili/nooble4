@@ -2,48 +2,53 @@
 
 ## 1. Propósito General
 
-El módulo `config` centraliza la gestión de toda la configuración del `Query Service`. Su objetivo es proporcionar un único punto de acceso a todos los parámetros necesarios para que el servicio funcione correctamente, desde credenciales de API hasta configuraciones de comportamiento y rendimiento.
+El módulo `config` es el responsable de cargar y proporcionar acceso a toda la configuración necesaria para el `Query Service`. Esto incluye desde información sensible como API keys, hasta parámetros de comportamiento como timeouts, umbrales de similitud, y configuraciones de modelos de lenguaje. La meta es permitir que el servicio se adapte a diferentes entornos (desarrollo, staging, producción) sin modificar el código fuente, utilizando un sistema de configuración centralizado y validado.
 
-Utiliza un enfoque basado en `Pydantic` y `pydantic-settings`, lo que permite una configuración fuertemente tipada, validada y cargada de manera jerárquica desde múltiples fuentes (variables de entorno, archivos `.env`).
+## 2. Implementación y Conexión con `common`
 
-## 2. Patrones y Conexión con `common`
+La configuración del `Query Service` se gestiona a través de la clase `QueryServiceSettings`. Aunque esta clase se instancia localmente en `query_service.config.settings`, su definición reside en el módulo `common` (`common.config.service_settings.query.QueryServiceSettings`).
 
-La gestión de la configuración sigue un patrón de herencia y especialización, dependiendo en gran medida del módulo `common` para mantener la consistencia en todo el ecosistema de microservicios.
+### `QueryServiceSettings` (Definida en `common`)
 
-- **`common/config/base_settings.py`**: Define `CommonAppSettings`, una clase base que contiene configuraciones compartidas por todos los servicios (ej. `redis_url`, `log_level`, `service_name`).
-- **`common/config/service_settings/query.py`**: Aquí se define `QueryServiceSettings`, que hereda de `CommonAppSettings`. Esta clase especializada añade y/o sobrescribe las configuraciones que son exclusivas del `Query Service`.
-- **`query_service/config/settings.py`**: Este es el punto de entrada final. Importa `QueryServiceSettings` y la instancia a través de una función `get_settings()` cacheada con `lru_cache`. Esto asegura que la configuración se carga una sola vez y se reutiliza como un singleton en toda la aplicación, optimizando el rendimiento.
+-   **Tecnología**: Utiliza [Pydantic](https://docs.pydantic.dev/) con `pydantic-settings` para la validación de datos y gestión de configuración basada en type hints.
+-   **Herencia y Centralización**: `QueryServiceSettings` hereda de `CommonAppSettings` (definida en `common.config.base_settings`). Esto asegura que todas las configuraciones base comunes a los microservicios (como `service_name`, `log_level`, `redis_url`, `http_timeout_seconds`, etc.) se gestionan de forma consistente y centralizada en `common`.
+-   **Carga de Configuración**: `pydantic-settings` carga valores con la siguiente precedencia:
+    1.  Variables de entorno (con el prefijo `QUERY_` para evitar colisiones, ej. `QUERY_GROQ_API_KEY`).
+    2.  Valores de un archivo `.env` en la raíz del proyecto (si existe y está configurado en `SettingsConfigDict`).
+    3.  Valores por defecto definidos directamente en la clase `QueryServiceSettings`.
+-   **Validación Automática**: Pydantic realiza validación automática de tipos al instanciar la clase. Si una variable de entorno no se puede castear al tipo esperado (ej. un string donde se espera un `int`), Pydantic lanzará un error al inicio, previniendo problemas en tiempo de ejecución.
 
-Este patrón es una excelente práctica de diseño, ya que promueve la reutilización (DRY - Don't Repeat Yourself) y mantiene una clara separación entre la configuración base y la específica del servicio.
+### `settings.py` (En `query_service.config`)
 
-## 3. Implementación Técnica
+-   Este archivo es un simple punto de acceso. Su función principal es instanciar `QueryServiceSettings` (la definida en `common`) mediante la función `get_settings()`. Esta función está decorada con `@lru_cache(maxsize=1)`, lo que garantiza que la configuración se carga una sola vez (patrón Singleton) y se reutiliza en todo el servicio, optimizando el rendimiento y la consistencia.
 
-La clase `QueryServiceSettings` utiliza `pydantic-settings` para cargar automáticamente los valores desde:
+## 3. Parámetros de Configuración Clave
 
-1.  **Variables de entorno**: Busca variables con el prefijo `QUERY_`. Por ejemplo, `QUERY_GROQ_API_KEY` se mapeará al campo `groq_api_key`.
-2.  **Archivo `.env`**: Si existe un archivo `.env` en la raíz del proyecto, cargará las variables definidas allí.
-3.  **Valores por defecto**: Si no se encuentra ninguna de las anteriores, se utilizan los valores definidos en la clase.
+`QueryServiceSettings` define una amplia gama de parámetros, incluyendo:
 
-La función `get_settings()` en `query_service/config/settings.py` asegura que solo haya una instancia de esta clase de configuración en toda la aplicación.
+-   **Conexiones a Servicios Externos**: `groq_api_key`, `groq_api_base_url`, `vector_db_url`.
+-   **Parámetros de LLM**: `default_llm_model`, `available_llm_models`, `llm_temperature`, `llm_max_tokens`, `llm_timeout_seconds`.
+-   **Búsqueda Vectorial**: `similarity_threshold`, `default_top_k`, `max_search_results`, `search_timeout_seconds`.
+-   **RAG**: `rag_context_window`, `rag_system_prompt_template`.
+-   **Workers y Rendimiento**: `worker_count`, `parallel_search_enabled`, `enable_query_tracking`.
+-   **Reintentos**: `max_retries`, `retry_delay_seconds`, `retry_backoff_factor` (política genérica para clientes).
+-   **Logging y Nombres**: `log_level` (heredado), `domain_name` (para colas específicas del servicio).
 
-## 4. Parámetros de Configuración Clave
+## 4. Análisis Detallado y Puntos de Interés
 
-La configuración se puede agrupar en las siguientes categorías:
+-   **Fortalezas del Diseño**:
+    -   **Robustez y Claridad**: El uso de Pydantic con type hints y valores por defecto hace que la configuración sea muy clara, autodocumentada y robusta contra errores de tipo o formato.
+    -   **Centralización y Reutilización (`common`)**: La herencia de `CommonAppSettings` y la definición de `QueryServiceSettings` en `common` (aunque instanciada localmente) es una excelente práctica para mantener la consistencia entre múltiples servicios.
+    -   **Seguridad**: Cargar datos sensibles (API keys) desde variables de entorno es una práctica de seguridad estándar. Es crucial que los archivos `.env` (si se usan en desarrollo) que contengan secretos estén en `.gitignore`.
+    -   **Flexibilidad**: El sistema permite una fácil adaptación a diferentes entornos (dev, staging, prod) mediante el uso de distintos archivos `.env` o variables de entorno.
 
-- **Configuración del Servicio**: `domain_name`, `worker_count`.
-- **API de Groq**: `groq_api_key`, `groq_api_base_url`.
-- **Parámetros de LLM**: `default_llm_model`, `llm_temperature`, `llm_max_tokens`, `llm_timeout_seconds`, y los parámetros de penalización. También incluye `available_llm_models` para validar los modelos solicitados.
-- **Vector Store**: `vector_db_url`, `similarity_threshold`, `default_top_k`.
-- **RAG (Retrieval-Augmented Generation)**: `rag_context_window`, `rag_system_prompt_template`.
-- **Rendimiento y Resiliencia**: `max_retries`, `retry_delay_seconds`, `enable_query_tracking`.
+-   **Posibles Mejoras y Consideraciones Avanzadas**:
+    -   **Validación Personalizada Avanzada**: Pydantic permite validadores personalizados (usando `@validator` o, en Pydantic V2, `@field_validator`). **Mejora Sugerida**: Para campos críticos, se podrían añadir validadores para asegurar condiciones más complejas. Ejemplos:
+        -   Verificar que `default_llm_model` sea uno de los `available_llm_models`.
+        -   Asegurar que `similarity_threshold` esté dentro de un rango lógico (ej., 0.0 a 1.0).
+        -   Validar el formato de URLs como `vector_db_url`.
+    -   **Agrupación de Configuraciones**: Para clases de configuración muy grandes, Pydantic permite anidar modelos (ej. `LLMSettings` como un campo dentro de `QueryServiceSettings`). Para el tamaño actual, la estructura plana es manejable, pero es una opción para el futuro si la complejidad crece.
+    -   **Configuración de Reintentos por Cliente**: Actualmente, hay una política de reintentos genérica (`max_retries`, etc.). **Consideración**: Si diferentes clientes (Groq, VectorDB) requieren políticas de reintento muy dispares, se podría considerar tener secciones de configuración de reintentos específicas por cliente (ej. `groq_retry_settings: RetryConfig`, `vector_db_retry_settings: RetryConfig`).
+    -   **Consistencia en Nombres de Timeouts**: Los timeouts como `llm_timeout_seconds`, `embedding_service_timeout`, `search_timeout_seconds` son claros. Mantener esta consistencia es bueno.
 
-## 5. Opinión de la Implementación
-
-La implementación de la configuración es **excepcional** y sigue las mejores prácticas modernas para aplicaciones en Python:
-
-- **Fuertemente Tipada**: El uso de Pydantic previene errores comunes al forzar los tipos de datos correctos (ej. `int`, `float`, `str`).
-- **Validación Automática**: Pydantic se encarga de validar que los valores cumplan con las restricciones definidas.
-- **Centralizada y Jerárquica**: La herencia desde `CommonAppSettings` es limpia y escalable.
-- **Segura**: Fomenta el uso de variables de entorno para información sensible como las API keys, evitando que se guarden en el código fuente.
-
-No se observan inconsistencias ni debilidades en este módulo. Es un ejemplo claro de cómo debe gestionarse la configuración en un microservicio moderno.
+En general, el sistema de configuración es un punto fuerte del `Query Service`, proporcionando una base sólida, segura y flexible para su operación.

@@ -6,8 +6,8 @@ independientemente del proveedor específico (Qdrant, Pinecone, etc.).
 """
 
 import logging
-from typing import List, Optional, Dict, Any
 import time
+from typing import List, Optional, Dict, Any
 
 from common.clients.base_http_client import BaseHTTPClient
 from common.errors.http_errors import NotFoundError, ServiceUnavailableError

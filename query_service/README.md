@@ -4,7 +4,7 @@
 
 El **Query Service** es un microservicio asíncrono diseñado para manejar consultas de búsqueda semántica y generación de respuestas mediante RAG (Retrieval-Augmented Generation). Su principal responsabilidad es recibir una pregunta de un usuario, buscar información relevante en una base de datos vectorial y, opcionalmente, usar un Modelo de Lenguaje Grande (LLM) para generar una respuesta coherente basada en el contexto encontrado.
 
-El servicio está construido en Python utilizando FastAPI para la interfaz HTTP (principalmente para health checks) y se comunica a través de Redis Streams para el procesamiento de tareas asíncronas.
+El servicio está construido en Python (3.9+) utilizando FastAPI para la interfaz HTTP (principalmente para health checks, métricas y gestión del ciclo de vida) y se comunica a través de Redis Streams para el procesamiento de tareas asíncronas, que es donde reside la lógica de negocio principal.
 
 ## 2. Arquitectura
 
@@ -12,7 +12,7 @@ El servicio sigue una arquitectura de microservicios limpia y desacoplada, organ
 
  <!-- Reemplazar con un diagrama real si es posible -->
 
-- **`main.py` (Punto de Entrada)**: Inicia la aplicación FastAPI y los workers. Gestiona el ciclo de vida de los recursos (como la conexión a Redis).
+- **`main.py` (Punto de Entrada)**: Configura e inicia la aplicación FastAPI. Utiliza el gestor de ciclo de vida (`lifespan`) de FastAPI para inicializar y detener de forma ordenada los recursos críticos, incluyendo el `RedisManager` (para la conexión a Redis) y múltiples instancias de `QueryWorker`. También expone endpoints HTTP para health checks y monitoreo.
 
 - **`workers`**: El motor del servicio. Los `QueryWorker` escuchan constantemente en una cola de Redis (`DomainAction` stream). Cuando llega una nueva tarea, la recogen y la pasan a la capa de servicio.
 
@@ -105,4 +105,4 @@ El servicio expone algunos endpoints HTTP a través de FastAPI, principalmente p
 Durante el análisis del código, se identificaron los siguientes puntos a mejorar:
 
 1.  **Typo en Nombre de Archivo (Solucionado)**: El archivo `clients/vectror_client.py` ha sido renombrado a `clients/vector_client.py`.
-2.  **Fallback de Embedding**: El `SearchHandler` utiliza un embedding simulado si falla la comunicación con el `Embedding Service`. Esto puede llevar a resultados de búsqueda incorrectos y debería ser revisado. Se recomienda que falle la operación si no se puede obtener un embedding real.
+2.  **Fallback de Embedding en Handlers**: Tanto `SearchHandler` como `RAGHandler` implementan mecanismos de fallback para generar embeddings simulados (determinístico basado en hash para búsqueda, aleatorio para RAG) si la llamada al `Embedding Service` falla. Si bien esto permite que el servicio continúe operando, **puede llevar a resultados de búsqueda semánticamente incorrectos o a respuestas RAG engañosas**. Esta decisión de diseño fue tomada para mantener una cierta operatividad incluso con fallos en dependencias, pero se debe ser consciente de sus implicaciones. Para entornos de producción críticos, se recomienda enfáticamente configurar el sistema para que falle la operación si no se puede obtener un embedding real, o implementar una estrategia de reintento más robusta antes de recurrir al fallback.
