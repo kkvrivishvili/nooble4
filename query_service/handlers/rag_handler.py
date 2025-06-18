@@ -15,18 +15,14 @@ from uuid import UUID
 import json
 
 from common.handlers import BaseHandler
-from common.clients import BaseRedisClient
-from common.models import DomainAction
 from common.errors.exceptions import ExternalServiceError
 
 from ..models.payloads import (
     QueryGenerateResponse,
-    SearchResult,
-    EmbeddingRequest
+    SearchResult
 )
 from ..clients.groq_client import GroqClient
 from ..clients.vector_client import VectorClient
-from ..utils.cache_manager import QueryCacheManager
 
 
 class RAGHandler(BaseHandler):
@@ -37,30 +33,21 @@ class RAGHandler(BaseHandler):
     usando LLMs para proporcionar respuestas contextualizadas.
     """
     
-    def __init__(self, app_settings, direct_redis_conn, service_redis_client: Optional[BaseRedisClient] = None):
+    def __init__(self, app_settings, direct_redis_conn=None):
         """
         Inicializa el handler con sus dependencias.
         
         Args:
             app_settings: QueryServiceSettings
-            direct_redis_conn: Conexión Redis para caché
-            service_redis_client: Cliente para comunicarse con otros servicios
+            direct_redis_conn: Conexión Redis para operaciones directas
         """
         super().__init__(app_settings, direct_redis_conn)
-        
-        self.service_redis_client = service_redis_client
         
         # Inicializar clientes
         self.groq_client = GroqClient(api_key=app_settings.groq_api_key)
         self.vector_client = VectorClient(
             base_url=app_settings.vector_db_url,
             timeout=app_settings.http_timeout_seconds
-        )
-        
-        # Cache manager
-        self.cache_manager = QueryCacheManager(
-            redis_conn=direct_redis_conn,
-            app_settings=app_settings
         )
         
         # Configuración
@@ -86,7 +73,9 @@ class RAGHandler(BaseHandler):
         system_prompt: Optional[str] = None,
         conversation_history: Optional[List[Dict[str, str]]] = None,
         trace_id: Optional[UUID] = None,
-        correlation_id: Optional[UUID] = None
+        correlation_id: Optional[UUID] = None,
+        embedding_client=None,
+        task_id: Optional[UUID] = None
     ) -> QueryGenerateResponse:
         """
         Procesa una consulta RAG completa.
@@ -105,6 +94,8 @@ class RAGHandler(BaseHandler):
             conversation_history: Historial de conversación
             trace_id: ID de traza
             correlation_id: ID de correlación
+            embedding_client: Cliente para obtener embeddings
+            task_id: ID de la tarea
             
         Returns:
             QueryGenerateResponse con la respuesta generada
@@ -135,7 +126,9 @@ class RAGHandler(BaseHandler):
                 query_text, 
                 tenant_id, 
                 session_id,
-                trace_id
+                trace_id,
+                embedding_client,
+                task_id
             )
             
             # 2. Buscar documentos relevantes
@@ -190,10 +183,6 @@ class RAGHandler(BaseHandler):
                 }
             )
             
-            # 6. Cachear resultado si está habilitado
-            if self.app_settings.search_cache_ttl > 0:
-                await self._cache_result(query_id, response)
-            
             self._logger.info(
                 f"Consulta RAG completada en {total_time_ms}ms",
                 extra={
@@ -218,20 +207,32 @@ class RAGHandler(BaseHandler):
         query_text: str, 
         tenant_id: str, 
         session_id: str,
-        trace_id: Optional[UUID]
+        trace_id: Optional[UUID],
+        embedding_client,
+        task_id: Optional[UUID]
     ) -> List[float]:
         """
         Obtiene el embedding de la consulta.
-        
-        Por ahora simulamos el embedding, pero en producción
-        esto llamaría al Embedding Service.
         """
-        # TODO: Implementar llamada real al Embedding Service
-        # usando self.service_redis_client
-        
-        self._logger.debug("Generando embedding simulado para la consulta")
+        # Si tenemos un cliente de embedding, usarlo
+        if embedding_client:
+            try:
+                self._logger.debug("Solicitando embedding al Embedding Service")
+                response = await embedding_client.request_query_embedding(
+                    query_text=query_text,
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    task_id=task_id,
+                    trace_id=trace_id
+                )
+                # Asumiendo que la respuesta tiene un campo 'embedding' en data
+                return response.data.get("embedding", [])
+            except Exception as e:
+                self._logger.warning(f"Error obteniendo embedding del servicio: {e}")
+                # Continuar con embedding simulado
         
         # Simulación: generar un vector aleatorio normalizado
+        self._logger.debug("Generando embedding simulado para la consulta")
         import random
         embedding_dim = 1536  # Dimensión típica de embeddings
         embedding = [random.gauss(0, 1) for _ in range(embedding_dim)]
@@ -256,16 +257,6 @@ class RAGHandler(BaseHandler):
         Busca documentos relevantes en las colecciones especificadas.
         """
         try:
-            # Intentar obtener del caché primero
-            cache_key = self.cache_manager.get_search_cache_key(
-                query_text, collection_ids, top_k, similarity_threshold
-            )
-            cached_results = await self.cache_manager.get_cached_search(cache_key)
-            
-            if cached_results:
-                self._logger.debug(f"Resultados de búsqueda obtenidos del caché")
-                return cached_results
-            
             # Buscar en vector store
             results = await self.vector_client.search(
                 query_embedding=query_embedding,
@@ -274,14 +265,6 @@ class RAGHandler(BaseHandler):
                 similarity_threshold=similarity_threshold,
                 tenant_id=tenant_id
             )
-            
-            # Cachear resultados
-            if results and self.app_settings.search_cache_ttl > 0:
-                await self.cache_manager.cache_search_results(
-                    cache_key, 
-                    results, 
-                    ttl=self.app_settings.search_cache_ttl
-                )
             
             return results
             
@@ -379,17 +362,3 @@ class RAGHandler(BaseHandler):
                 f"Error al generar respuesta con {model}",
                 original_exception=e
             )
-    
-    async def _cache_result(self, query_id: str, response: QueryGenerateResponse):
-        """
-        Cachea el resultado completo de la consulta RAG.
-        """
-        try:
-            await self.cache_manager.cache_rag_result(
-                query_id,
-                response,
-                ttl=self.app_settings.search_cache_ttl
-            )
-        except Exception as e:
-            # No fallar si el caché falla
-            self._logger.warning(f"Error cacheando resultado RAG: {e}")

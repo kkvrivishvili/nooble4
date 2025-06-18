@@ -1,88 +1,229 @@
 """
-Punto de entrada principal para el Query Service.
+Punto de entrada principal del Query Service.
 
-Este módulo configura y ejecuta la aplicación FastAPI,
-expone un endpoint de health check y maneja la lógica de
-inicio y apagado del servicio.
+Configura y ejecuta el servicio con FastAPI y el QueryWorker.
 """
 
+import asyncio
 import logging
+from contextlib import asynccontextmanager
+from typing import Optional, List
+
 import uvicorn
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
-from common.logging import setup_logging
-from common.redis import RedisClientManager
-from common.services import ServiceManager
+from common.clients import RedisManager
+from common.utils import init_logging
 
-from .config import settings
-from .services import QueryService
+from .config.settings import get_settings
+from .workers.query_worker import QueryWorker
 
-# --- Configuración de Logging ---
-setup_logging(service_name=settings.service_name, log_level=settings.log_level)
+
+# Variables globales para el ciclo de vida
+redis_manager: Optional[RedisManager] = None
+query_workers: List[QueryWorker] = []
+worker_tasks: List[asyncio.Task] = []
+
+# Configuración
+settings = get_settings()
 logger = logging.getLogger(__name__)
 
-# --- Aplicación FastAPI ---
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Gestiona el ciclo de vida de la aplicación.
+    
+    Inicializa recursos al inicio y los limpia al finalizar.
+    """
+    global redis_manager, query_workers, worker_tasks
+    
+    try:
+        # Inicializar logging
+        init_logging(
+            log_level=settings.log_level,
+            service_name=settings.service_name
+        )
+        
+        logger.info(f"Iniciando {settings.service_name} v{settings.service_version}")
+        
+        # Inicializar Redis Manager
+        redis_manager = RedisManager(settings=settings)
+        redis_conn = await redis_manager.get_client()
+        logger.info("Redis Manager inicializado")
+        
+        # Crear workers según configuración
+        num_workers = getattr(settings, 'worker_count', 2)
+        
+        for i in range(num_workers):
+            worker = QueryWorker(
+                app_settings=settings,
+                async_redis_conn=redis_conn,
+                consumer_id_suffix=f"worker-{i}"
+            )
+            query_workers.append(worker)
+            
+            # Inicializar y ejecutar worker
+            await worker.initialize()
+            task = asyncio.create_task(worker.run())
+            worker_tasks.append(task)
+        
+        logger.info(f"{num_workers} QueryWorkers iniciados")
+        
+        # Hacer disponibles las referencias en app.state
+        app.state.redis_manager = redis_manager
+        app.state.query_workers = query_workers
+        
+        yield
+        
+    finally:
+        logger.info("Deteniendo Query Service...")
+        
+        # Detener workers
+        for worker in query_workers:
+            await worker.stop()
+        
+        # Cancelar tareas
+        for task in worker_tasks:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        
+        # Cerrar Redis Manager
+        if redis_manager:
+            await redis_manager.close()
+        
+        logger.info("Query Service detenido completamente")
+
+
+# Crear aplicación FastAPI
 app = FastAPI(
-    title="Query Service",
-    version="1.0.0",
-    description="Servicio para búsqueda vectorial y generación RAG"
+    title=settings.service_name,
+    description="Servicio de búsqueda vectorial y generación RAG",
+    version=settings.service_version,
+    lifespan=lifespan
 )
 
-# --- Gestores de Clientes y Servicios ---
-redis_manager = RedisClientManager(settings.redis_url)
-service_manager = ServiceManager()
+# Configurar CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # En producción, especificar orígenes permitidos
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# --- Eventos de Ciclo de Vida --- 
-@app.on_event("startup")
-async def startup_event():
-    """Lógica de inicio del servicio."""
-    logger.info("Iniciando Query Service...")
-    
-    # Conectar a Redis
-    await redis_manager.connect()
-    logger.info("Conectado a Redis.")
-    
-    # Registrar el servicio
-    query_service = QueryService(
-        app_settings=settings,
-        service_redis_client=redis_manager.get_client(),
-        direct_redis_conn=redis_manager.get_direct_connection()
-    )
-    service_manager.register_service("query", query_service)
-    
-    logger.info("Query Service iniciado y listo para recibir acciones.")
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Lógica de apagado del servicio."""
-    logger.info("Apagando Query Service...")
-    await redis_manager.disconnect()
-    logger.info("Desconectado de Redis. Adiós.")
+# --- Health Check Endpoints ---
 
-# --- Endpoints de la API ---
-@app.get("/health", status_code=200)
+@app.get("/health")
 async def health_check():
-    """Endpoint de Health Check."""
-    return {"status": "ok", "service": "Query Service"}
+    """
+    Health check básico del servicio.
+    """
+    return {
+        "status": "healthy",
+        "service": settings.service_name,
+        "version": settings.service_version,
+        "environment": settings.environment
+    }
 
-# --- Middleware (opcional) ---
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """Middleware para loguear cada petición."""
-    logger.debug(f"Request: {request.method} {request.url}")
-    response = await call_next(request)
-    logger.debug(f"Response: {response.status_code}")
-    return response
 
-# --- Función para ejecutar con uvicorn ---
-def start():
-    """Inicia el servidor uvicorn."""
+@app.get("/health/detailed")
+async def detailed_health_check():
+    """
+    Health check detallado con estado de componentes.
+    """
+    health_status = {
+        "service": settings.service_name,
+        "version": settings.service_version,
+        "environment": settings.environment,
+        "components": {}
+    }
+    
+    # Verificar Redis
+    try:
+        if redis_manager:
+            client = await redis_manager.get_client()
+            await client.ping()
+            health_status["components"]["redis"] = {"status": "healthy"}
+        else:
+            health_status["components"]["redis"] = {"status": "unhealthy", "error": "Not initialized"}
+    except Exception as e:
+        health_status["components"]["redis"] = {"status": "unhealthy", "error": str(e)}
+    
+    # Verificar Workers
+    workers_status = []
+    for i, worker in enumerate(query_workers):
+        worker_status = {
+            "id": i,
+            "running": worker._running,
+            "initialized": worker.initialized
+        }
+        workers_status.append(worker_status)
+    
+    health_status["components"]["workers"] = {
+        "status": "healthy" if all(w["running"] for w in workers_status) else "degraded",
+        "details": workers_status
+    }
+    
+    # Estado general
+    all_healthy = all(
+        comp.get("status") == "healthy" 
+        for comp in health_status["components"].values()
+    )
+    health_status["status"] = "healthy" if all_healthy else "degraded"
+    
+    return health_status
+
+
+# --- Metrics Endpoints ---
+
+@app.get("/metrics")
+async def get_metrics():
+    """
+    Obtiene métricas del servicio.
+    """
+    metrics = {
+        "service": settings.service_name,
+        "workers": []
+    }
+    
+    # Por ahora no tenemos métricas específicas implementadas
+    # pero podríamos agregar contadores de acciones procesadas, etc.
+    
+    return metrics
+
+
+# --- API Info ---
+
+@app.get("/")
+async def root():
+    """
+    Información básica del servicio.
+    """
+    return {
+        "service": settings.service_name,
+        "version": settings.service_version,
+        "description": "Query Service - Búsqueda vectorial y generación RAG",
+        "endpoints": {
+            "health": "/health",
+            "health_detailed": "/health/detailed",
+            "metrics": "/metrics",
+            "docs": "/docs",
+            "redoc": "/redoc"
+        }
+    }
+
+
+if __name__ == "__main__":
     uvicorn.run(
         "query_service.main:app",
         host="0.0.0.0",
-        port=settings.service_port,
-        reload=True if settings.environment == "development" else False
+        port=8002,
+        reload=False,  # En producción debe ser False
+        log_level=settings.log_level.lower()
     )
-
-if __name__ == "__main__":
-    start()

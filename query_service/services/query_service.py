@@ -7,8 +7,7 @@ delegando operaciones específicas a los handlers correspondientes.
 
 import logging
 from typing import Optional, Dict, Any
-from datetime import datetime
-import uuid
+from uuid import uuid4
 
 from pydantic import ValidationError
 
@@ -47,21 +46,22 @@ class QueryService(BaseService):
         """
         super().__init__(app_settings, service_redis_client, direct_redis_conn)
         
-        # Validar dependencias requeridas
-        if not direct_redis_conn:
-            raise ValueError("QueryService requiere direct_redis_conn para caché y estado")
-        
         # Inicializar handlers
         self.rag_handler = RAGHandler(
             app_settings=app_settings,
-            direct_redis_conn=direct_redis_conn,
-            service_redis_client=service_redis_client
+            direct_redis_conn=direct_redis_conn
         )
         
         self.search_handler = SearchHandler(
             app_settings=app_settings,
             direct_redis_conn=direct_redis_conn
         )
+        
+        # Si necesitamos comunicarnos con otros servicios
+        self.embedding_client = None
+        if service_redis_client:
+            from ..clients.embedding_client import EmbeddingClient
+            self.embedding_client = EmbeddingClient(service_redis_client)
         
         self._logger.info("QueryService inicializado correctamente")
     
@@ -129,13 +129,8 @@ class QueryService(BaseService):
             
         except Exception as e:
             self._logger.exception(f"Error inesperado procesando {action.action_type}")
-            error_response = QueryErrorResponse(
-                query_id=str(action.action_id),
-                error_type="InternalError",
-                error_message="Error interno del servicio",
-                error_details={"error": str(e)}
-            )
-            return error_response.model_dump()
+            # Re-lanzar para que BaseWorker maneje el error
+            raise
     
     async def _handle_generate(self, action: DomainAction) -> Dict[str, Any]:
         """
@@ -153,7 +148,7 @@ class QueryService(BaseService):
         # Obtener configuración de metadata si existe
         config_overrides = action.metadata or {}
         
-        # Delegar al RAG handler
+        # Pasar embedding_client si está disponible
         response = await self.rag_handler.process_rag_query(
             query_text=payload.query_text,
             collection_ids=payload.collection_ids,
@@ -169,7 +164,10 @@ class QueryService(BaseService):
             conversation_history=payload.conversation_history,
             # Contexto de trazabilidad
             trace_id=action.trace_id,
-            correlation_id=action.correlation_id
+            correlation_id=action.correlation_id,
+            # Cliente de embedding si está disponible
+            embedding_client=self.embedding_client,
+            task_id=action.task_id
         )
         
         return response.model_dump()
@@ -200,7 +198,11 @@ class QueryService(BaseService):
             similarity_threshold=payload.similarity_threshold or config_overrides.get("similarity_threshold"),
             filters=payload.filters,
             # Contexto
-            trace_id=action.trace_id
+            trace_id=action.trace_id,
+            # Cliente de embedding si está disponible
+            embedding_client=self.embedding_client,
+            session_id=action.session_id,
+            task_id=action.task_id
         )
         
         return response.model_dump()

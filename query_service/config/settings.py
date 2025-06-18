@@ -16,5 +16,5 @@ def get_settings() -> QueryServiceSettings:
     """
     return QueryServiceSettings()
 
-# Exportar para acceso directo si es necesario
+# Para facilitar el acceso directo
 settings = get_settings()

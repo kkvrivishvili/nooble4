@@ -8,6 +8,7 @@ para cada tipo de acción que maneja el servicio.
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
+from uuid import UUID
 
 # --- Modelos de Request (para action.data) ---
 
@@ -153,7 +154,7 @@ class EmbeddingRequest(BaseModel):
     
 
 class CollectionConfig(BaseModel):
-    """Configuración de una colección (desde caché o Agent Management)."""
+    """Configuración de una colección."""
     
     collection_id: str
     collection_name: str

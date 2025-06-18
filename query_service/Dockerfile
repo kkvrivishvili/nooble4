@@ -1,20 +1,22 @@
-# Usa una imagen base de Python
 FROM python:3.11-slim
 
-# Establece el directorio de trabajo
 WORKDIR /app
 
-# Copia los archivos de requerimientos
-COPY requirements.txt requirements.txt
+# Instalar dependencias del sistema
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
 
-# Instala las dependencias
+# Copiar archivos de requirements
+COPY requirements.txt .
+
+# Instalar dependencias de Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia el código de la aplicación
-COPY ./query_service /app/query_service
+# Copiar código de la aplicación
+COPY . .
 
-# Copia el módulo común (asumiendo que está en el directorio padre)
-# En un entorno real, esto podría manejarse como un paquete instalable
+# Copiar módulo common (asumiendo estructura de monorepo)
 COPY ../common /app/common
 
 # Variables de entorno por defecto
