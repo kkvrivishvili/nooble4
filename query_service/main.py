@@ -1,128 +1,88 @@
 """
-Punto de entrada principal para Query Service.
+Punto de entrada principal para el Query Service.
 
-MODIFICADO: Integración completa con sistema de colas por tier.
+Este módulo configura y ejecuta la aplicación FastAPI,
+expone un endpoint de health check y maneja la lógica de
+inicio y apagado del servicio.
 """
 
-import asyncio
 import logging
-from contextlib import asynccontextmanager
+import uvicorn
+from fastapi import FastAPI, Request, Response
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from common.logging import setup_logging
+from common.redis import RedisClientManager
+from common.services import ServiceManager
 
-from common.errors import setup_error_handling
-from common.utils.logging import init_logging
-from common.helpers.health import register_health_routes
-from common.redis_pool import get_redis_client
-from common.services.domain_queue_manager import DomainQueueManager
-from query_service.workers.query_worker import QueryWorker
-from query_service.config.settings import get_settings
+from .config import settings
+from .services import QueryService
 
-settings = get_settings()
+# --- Configuración de Logging ---
+setup_logging(service_name=settings.service_name, log_level=settings.log_level)
 logger = logging.getLogger(__name__)
 
-# Worker global
-query_worker = None
-queue_manager = None
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Gestiona el ciclo de vida de la aplicación."""
-    global query_worker, queue_manager
-    
-    logger.info("Iniciando Query Service")
-    
-    try:
-        # Inicializar Redis y Queue Manager
-        redis_client = await get_redis_client()
-        queue_manager = DomainQueueManager(redis_client)
-        
-        # Verificar conexión Redis
-        await redis_client.ping()
-        logger.info("Conexión a Redis establecida")
-        
-        # Inicializar worker con queue_manager
-        query_worker = QueryWorker(redis_client, queue_manager)
-        
-        # Iniciar worker en background
-        worker_task = asyncio.create_task(query_worker.start())
-        logger.info("QueryWorker iniciado")
-        
-        # Hacer queue_manager disponible para la app
-        app.state.queue_manager = queue_manager
-        app.state.redis_client = redis_client
-        
-        yield
-        
-    finally:
-        logger.info("Deteniendo Query Service")
-        
-        # Detener worker
-        if query_worker:
-            await query_worker.stop()
-        
-        # Cancelar task
-        if 'worker_task' in locals():
-            worker_task.cancel()
-            try:
-                await worker_task
-            except asyncio.CancelledError:
-                pass
-        
-        # Cerrar conexiones Redis
-        if queue_manager and hasattr(queue_manager, 'redis'):
-            await queue_manager.redis.close()
-
-# Crear aplicación
+# --- Aplicación FastAPI ---
 app = FastAPI(
     title="Query Service",
-    description="Servicio RAG para búsqueda y generación de respuestas con colas por tier",
-    version=settings.service_version,
-    lifespan=lifespan
+    version="1.0.0",
+    description="Servicio para búsqueda vectorial y generación RAG"
 )
 
-# Configurar CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # En producción, especificar orígenes permitidos
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# --- Gestores de Clientes y Servicios ---
+redis_manager = RedisClientManager(settings.redis_url)
+service_manager = ServiceManager()
 
-# Configurar manejo de errores
-setup_error_handling(app)
+# --- Eventos de Ciclo de Vida --- 
+@app.on_event("startup")
+async def startup_event():
+    """Lógica de inicio del servicio."""
+    logger.info("Iniciando Query Service...")
+    
+    # Conectar a Redis
+    await redis_manager.connect()
+    logger.info("Conectado a Redis.")
+    
+    # Registrar el servicio
+    query_service = QueryService(
+        app_settings=settings,
+        service_redis_client=redis_manager.get_client(),
+        direct_redis_conn=redis_manager.get_direct_connection()
+    )
+    service_manager.register_service("query", query_service)
+    
+    logger.info("Query Service iniciado y listo para recibir acciones.")
 
-# Registrar health routes
-register_health_routes(app)
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Lógica de apagado del servicio."""
+    logger.info("Apagando Query Service...")
+    await redis_manager.disconnect()
+    logger.info("Desconectado de Redis. Adiós.")
 
-# Health checks específicos del query service
-@app.get("/metrics/overview")
-async def get_metrics_overview():
-    """Métricas generales del query service."""
-    if query_worker:
-        return await query_worker.get_query_stats()
-    else:
-        return {"error": "Worker no inicializado"}
+# --- Endpoints de la API ---
+@app.get("/health", status_code=200)
+async def health_check():
+    """Endpoint de Health Check."""
+    return {"status": "ok", "service": "Query Service"}
 
-@app.get("/metrics/queues")
-async def get_queue_metrics():
-    """Métricas específicas de colas."""
-    if queue_manager:
-        return await queue_manager.get_queue_stats(settings.domain_name)
-    else:
-        return {"error": "Queue manager no inicializado"}
+# --- Middleware (opcional) ---
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Middleware para loguear cada petición."""
+    logger.debug(f"Request: {request.method} {request.url}")
+    response = await call_next(request)
+    logger.debug(f"Response: {response.status_code}")
+    return response
 
-# Configurar logging
-init_logging(settings.log_level, service_name="query-service")
+# --- Función para ejecutar con uvicorn ---
+def start():
+    """Inicia el servidor uvicorn."""
+    uvicorn.run(
+        "query_service.main:app",
+        host="0.0.0.0",
+        port=settings.service_port,
+        reload=True if settings.environment == "development" else False
+    )
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "main:app", 
-        host="0.0.0.0", 
-        port=8002,
-        reload=True,
-        log_level="info"
-    )
+    start()

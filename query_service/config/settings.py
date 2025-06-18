@@ -1,11 +1,20 @@
-from pydantic_settings import BaseSettings
+"""
+Configuración para Query Service.
 
-class Settings(BaseSettings):
-    GROQ_API_KEY: str
-    GROQ_API_URL: str = "https://api.groq.com/openai/v1"
+Este módulo carga la configuración del servicio usando QueryServiceSettings
+definido en common.config.service_settings.query
+"""
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+from functools import lru_cache
+from common.config import QueryServiceSettings
 
-settings = Settings()
+@lru_cache()
+def get_settings() -> QueryServiceSettings:
+    """
+    Retorna la instancia de configuración para Query Service.
+    Usa lru_cache para asegurar que solo se crea una instancia.
+    """
+    return QueryServiceSettings()
+
+# Exportar para acceso directo si es necesario
+settings = get_settings()
