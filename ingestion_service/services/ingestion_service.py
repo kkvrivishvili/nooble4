@@ -206,16 +206,35 @@ class IngestionService(BaseService):
         
         # Process embeddings
         chunks_to_store = []
-        for chunk_id, embedding in zip(chunk_ids, embeddings):
+        if len(chunk_ids) != len(embeddings):
+            self._logger.error(
+                f"Task {task_id}: Mismatch between chunk_ids ({len(chunk_ids)}) and embeddings ({len(embeddings)}) count."
+            )
+            # Potentially mark task as failed or handle error appropriately
+            return
+
+        for i, chunk_id in enumerate(chunk_ids):
+            embedding_result_dict = embeddings[i] # This is a dict like {"text_index": N, "embedding": [...], ...}
+            actual_embedding_vector = embedding_result_dict.get("embedding")
+
+            if actual_embedding_vector is None:
+                self._logger.warning(f"Task {task_id}, Chunk {chunk_id}: No 'embedding' key in embedding_result_dict: {embedding_result_dict}")
+                continue # Or handle as a failed chunk
+
             # Load chunk
             chunk_data = await self.direct_redis_conn.get(f"chunk:{chunk_id}")
             if chunk_data:
-                chunk = ChunkModel.model_validate_json(chunk_data)
-                chunk.embedding = embedding
-                chunks_to_store.append(chunk)
-                
-                # Clean up temp storage
-                await self.direct_redis_conn.delete(f"chunk:{chunk_id}")
+                try:
+                    chunk = ChunkModel.model_validate_json(chunk_data)
+                    chunk.embedding = actual_embedding_vector
+                    chunks_to_store.append(chunk)
+                    
+                    # Clean up temp storage
+                    await self.direct_redis_conn.delete(f"chunk:{chunk_id}")
+                except Exception as e:
+                    self._logger.error(f"Task {task_id}, Chunk {chunk_id}: Failed to process chunk after embedding: {e}", exc_info=True)
+            else:
+                self._logger.warning(f"Task {task_id}: Chunk {chunk_id} not found in Redis for embedding result.")
         
         # Store in Qdrant
         if chunks_to_store:

@@ -53,14 +53,18 @@ class EmbeddingGenerateQueryPayload(BaseModel):
 class EmbeddingBatchPayload(BaseModel):
     """Payload para embedding.batch_process - Procesamiento por lotes."""
     
-    batch_id: str = Field(..., description="ID único del lote")
+    batch_id: Optional[str] = Field(None, description="ID único del lote, puede ser opcional si no lo usa el cliente") # ingestion_service doesn't send this
     texts: List[str] = Field(..., description="Lista de textos del lote")
     model: Optional[str] = Field(None, description="Modelo de embedding")
     
+    # Campos para propagar desde ingestion_service
+    task_id: Optional[str] = Field(None, description="ID de la tarea de origen en ingestion_service")
+    chunk_ids: Optional[List[str]] = Field(None, description="IDs de los chunks originales de ingestion_service")
+    
     # Metadatos del lote
     collection_id: Optional[UUID] = Field(None)
-    document_ids: Optional[List[str]] = Field(None)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    document_ids: Optional[List[str]] = Field(None) # No usado actualmente por ingestion_service
+    metadata: Dict[str, Any] = Field(default_factory=dict) # Para metadata original de ingestion_service
 
 
 class EmbeddingValidatePayload(BaseModel):
@@ -113,11 +117,15 @@ class EmbeddingQueryResponse(BaseModel):
 class EmbeddingBatchResponse(BaseModel):
     """Respuesta para embedding.batch_process."""
     
-    batch_id: str = Field(..., description="ID del lote procesado")
+    batch_id: Optional[str] = Field(None, description="ID del lote procesado") # Mantener por si es útil, aunque ingestion_service no lo use para identificar
     status: str = Field(..., description="Estado: 'completed', 'partial', 'failed'")
     
+    # Campos para ingestion_service callback
+    task_id: Optional[str] = Field(None, description="ID de la tarea de origen en ingestion_service")
+    chunk_ids: Optional[List[str]] = Field(None, description="IDs de los chunks originales, en el mismo orden que los embeddings")
+    
     # Resultados
-    embeddings: List[EmbeddingResult] = Field(..., description="Embeddings procesados")
+    embeddings: List[EmbeddingResult] = Field(..., description="Embeddings procesados, cada item es EmbeddingResult")
     successful_count: int = Field(..., description="Número de embeddings exitosos")
     failed_count: int = Field(..., description="Número de embeddings fallidos")
     
@@ -127,7 +135,7 @@ class EmbeddingBatchResponse(BaseModel):
     
     # Errores si los hay
     errors: Optional[List[Dict[str, Any]]] = Field(None)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict) # Metadata original de ingestion_service
 
 
 class EmbeddingValidationResponse(BaseModel):

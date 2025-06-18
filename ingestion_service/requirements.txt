@@ -1,0 +1,27 @@
+# Core FastAPI and Pydantic
+fastapi==0.115.12
+uvicorn[standard]==0.34.0
+pydantic==2.10.6
+pydantic-settings==2.6.0
+
+# Redis client
+redis==5.0.0
+
+# HTTP client for document fetching
+requests==2.32.4
+
+# Vector Database client
+qdrant-client==1.14.3
+
+# Document Processing and NLP
+llama-index-core==0.12.42
+numpy==2.3.0 # Often a dependency for NLP/ML libraries
+spacy==3.8.7
+nltk==3.9.1
+
+# Asynchronous file operations
+aiofiles==24.1.0
+
+# Utilities (often used with common package structure)
+python-dotenv==1.0.1
+python-json-logger==2.0.7

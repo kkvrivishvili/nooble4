@@ -233,67 +233,83 @@ class EmbeddingService(BaseService):
         Returns:
             Diccionario con EmbeddingBatchResponse
         """
-        # Por ahora, implementación básica que delega a generate
+        # Validar y parsear payload. action.data ya debería tener task_id y chunk_ids
+        # gracias a que IngestionService los envía y EmbeddingBatchPayload ahora los define.
         payload = EmbeddingBatchPayload(**action.data)
         
         try:
-            # Procesar como generate normal
-            generate_action = DomainAction(
-                action_id=action.action_id,
-                action_type="embedding.generate",
+            # Crear una acción interna para _handle_generate.
+            # _handle_generate espera un EmbeddingGeneratePayload en su action.data.
+            # Nota: _handle_generate también espera chunk_ids en su payload.metadata si se quieren propagar.
+            #       Para simplificar, pasamos solo lo esencial para la generación de embeddings aquí.
+            generate_action_data = {
+                "texts": payload.texts,
+                "model": payload.model,
+                "collection_id": payload.collection_id # Opcional, pero _handle_generate lo maneja
+                # Si _handle_generate necesitara chunk_ids, se pasarían aquí o en metadata
+            }
+            
+            internal_generate_action = DomainAction(
+                action_id=action.action_id, # Reutilizar IDs para trazabilidad
+                action_type="embedding.generate", # Tipo interno para _handle_generate
                 tenant_id=action.tenant_id,
                 session_id=action.session_id,
-                task_id=action.task_id,
+                task_id=action.task_id, # Propagar task_id original de la acción
                 user_id=action.user_id,
                 origin_service=action.origin_service,
                 trace_id=action.trace_id,
-                data={
-                    "texts": payload.texts,
-                    "model": payload.model,
-                    "collection_id": payload.collection_id
-                }
+                data=generate_action_data,
+                metadata=action.metadata # Propagar metadata original (que podría tener batch_index, etc.)
             )
             
-            result = await self._handle_generate(generate_action)
+            # result es un dict serializado de EmbeddingResponse
+            result_from_generate = await self._handle_generate(internal_generate_action)
             
             # Convertir a batch response
             from ..models.payloads import EmbeddingBatchResponse, EmbeddingResult
             
-            embedding_results = []
-            for i, embedding in enumerate(result["embeddings"]):
-                embedding_results.append(
+            embedding_results_list = []
+            # result_from_generate["embeddings"] es List[List[float]]
+            for i, embedding_vector in enumerate(result_from_generate.get("embeddings", [])):
+                embedding_results_list.append(
                     EmbeddingResult(
                         text_index=i,
-                        embedding=embedding,
-                        dimensions=result["dimensions"]
+                        embedding=embedding_vector,
+                        dimensions=result_from_generate.get("dimensions", 0)
                     )
                 )
             
             response = EmbeddingBatchResponse(
-                batch_id=payload.batch_id,
+                # batch_id=payload.batch_id, # ingestion_service no envía batch_id, así que puede ser None
                 status="completed",
-                embeddings=embedding_results,
-                successful_count=len(embedding_results),
+                task_id=payload.task_id,  # Propagar task_id del payload original
+                chunk_ids=payload.chunk_ids, # Propagar chunk_ids del payload original
+                embeddings=embedding_results_list,
+                successful_count=len(embedding_results_list),
                 failed_count=0,
-                total_tokens=result.get("total_tokens", 0),
-                processing_time_ms=result.get("processing_time_ms", 0),
-                metadata=payload.metadata
+                total_tokens=result_from_generate.get("total_tokens", 0),
+                processing_time_ms=result_from_generate.get("processing_time_ms", 0),
+                metadata=action.metadata # Propagar metadata original de la acción entrante
             )
             
             return response.model_dump()
             
         except Exception as e:
-            # En caso de error, devolver respuesta parcial
+            self._logger.error(f"Error en _handle_batch_process para task {payload.task_id}: {e}", exc_info=True)
             from ..models.payloads import EmbeddingBatchResponse
+            # En caso de error, devolver respuesta parcial con identificadores si es posible
             response = EmbeddingBatchResponse(
-                batch_id=payload.batch_id,
+                # batch_id=payload.batch_id,
                 status="failed",
+                task_id=payload.task_id, # Intentar incluir task_id si está disponible
+                chunk_ids=payload.chunk_ids, # Intentar incluir chunk_ids si están disponibles
                 embeddings=[],
                 successful_count=0,
-                failed_count=len(payload.texts),
+                failed_count=len(payload.texts) if payload and payload.texts else 0,
                 total_tokens=0,
                 processing_time_ms=0,
-                errors=[{"error": str(e)}]
+                errors=[{"error_message": str(e), "error_type": type(e).__name__}],
+                metadata=action.metadata # Propagar metadata original
             )
             return response.model_dump()
     
