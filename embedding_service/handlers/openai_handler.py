@@ -36,13 +36,14 @@ class OpenAIHandler(BaseHandler):
         
         # Inicializar cliente OpenAI
         self.openai_client = OpenAIClient(
-            api_key=app_settings.openai_api_key,
-            timeout=app_settings.provider_timeout_seconds,
-            max_retries=app_settings.provider_max_retries
+            api_key=self.app_settings.openai_api_key,
+            base_url=self.app_settings.openai_base_url,
+            timeout=self.app_settings.openai_timeout_seconds,
+            max_retries=self.app_settings.openai_max_retries
         )
         
         # Configuración
-        self.default_model = app_settings.default_models_by_provider.get("openai", "text-embedding-3-small")
+        self.default_model = self.app_settings.openai_default_model
         self.default_dimensions = app_settings.default_dimensions_by_model
         self.preferred_dimensions = app_settings.preferred_dimensions
         self.encoding_format = app_settings.encoding_format.value
@@ -72,8 +73,6 @@ class OpenAIHandler(BaseHandler):
         Returns:
             Dict con embeddings y metadatos
         """
-        start_time = time.time()
-        
         # Configurar parámetros
         model = model or self.default_model
         dimensions = dimensions or self.preferred_dimensions
@@ -97,14 +96,8 @@ class OpenAIHandler(BaseHandler):
                 encoding_format=encoding_format
             )
             
-            # Calcular tiempo de procesamiento
-            processing_time_ms = int((time.time() - start_time) * 1000)
-            
-            # Agregar métricas al resultado
-            result["processing_time_ms"] = processing_time_ms
-            
             self._logger.info(
-                f"Embeddings generados exitosamente en {processing_time_ms}ms",
+                f"Embeddings generados exitosamente en {result.get('processing_time_ms')}ms",
                 extra={
                     "tenant_id": tenant_id,
                     "model": model,

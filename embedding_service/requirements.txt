@@ -10,11 +10,10 @@ redis==5.0.0
 # HTTP clients
 httpx==0.28.1
 
-# OpenAI (para tipos, aunque usamos httpx directamente)
-openai==1.6.1
+# OpenAI SDK
+openai~=1.30.0 # Using a recent version, includes httpx
 
 # Utilities
-tenacity==9.0.0
 python-dotenv==1.0.1
 
 # Logging

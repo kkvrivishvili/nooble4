@@ -9,230 +9,196 @@ import logging
 import time
 from typing import List, Optional, Dict, Any
 
-import httpx
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception_type
-)
+from openai import AsyncOpenAI, APIError, APITimeoutError, RateLimitError, APIConnectionError
+from common.errors.exceptions import ExternalServiceError
 
-from common.clients.base_http_client import BaseHTTPClient
-from common.errors.http_errors import ServiceUnavailableError
-
-
-class OpenAIClient(BaseHTTPClient):
+class OpenAIClient:
     """
-    Cliente asíncrono para la API de OpenAI Embeddings.
-    
-    Extiende BaseHTTPClient para proporcionar funcionalidad
-    específica para la generación de embeddings.
+    Cliente asíncrono para la API de OpenAI Embeddings usando el SDK oficial.
     """
     
     def __init__(
         self, 
         api_key: str,
-        base_url: str = "https://api.openai.com/v1",
+        base_url: Optional[str] = None, 
         timeout: int = 30,
         max_retries: int = 3
     ):
         """
-        Inicializa el cliente con la API key.
+        Inicializa el cliente con la API key y otras configuraciones.
         
         Args:
             api_key: API key de OpenAI
-            base_url: URL base de la API
-            timeout: Timeout en segundos
-            max_retries: Número máximo de reintentos
+            base_url: URL base de la API (opcional)
+            timeout: Timeout en segundos para las peticiones
+            max_retries: Número máximo de reintentos automáticos por el SDK
         """
         if not api_key:
             raise ValueError("API key de OpenAI es requerida")
         
-        # Headers con autenticación
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        # Inicializar cliente base
-        super().__init__(
-            base_url=base_url,
-            headers=headers
+        self.client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url, 
+            timeout=timeout,
+            max_retries=max_retries
         )
-        
-        self.timeout = timeout
-        self.max_retries = max_retries
         self.logger = logging.getLogger(__name__)
-    
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type(ServiceUnavailableError)
-    )
+
     async def generate_embeddings(
         self,
         texts: List[str],
         model: str = "text-embedding-3-small",
         dimensions: Optional[int] = None,
-        encoding_format: str = "float",
+        encoding_format: str = "float", 
         user: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Genera embeddings para una lista de textos.
+        Genera embeddings para una lista de textos usando el SDK de OpenAI.
         
         Args:
-            texts: Lista de textos para generar embeddings
-            model: Modelo de embedding a usar
-            dimensions: Dimensiones del embedding (opcional)
-            encoding_format: Formato de codificación
-            user: Identificador único del usuario
+            texts: Lista de textos para generar embeddings.
+            model: Modelo de embedding a usar.
+            dimensions: Dimensiones del embedding (opcional, soportado por modelos v3).
+            encoding_format: Formato de codificación ('float' o 'base64').
+            user: Identificador único del usuario final (opcional).
             
         Returns:
-            Dict con embeddings y metadatos
+            Un diccionario conteniendo la lista de embeddings, el modelo usado,
+            las dimensiones, información de uso de tokens y tiempo de procesamiento.
             
         Raises:
-            ServiceUnavailableError: Si el servicio no está disponible
-            Exception: Para otros errores
+            ExternalServiceError: Si ocurre un error con la API de OpenAI.
+            ValueError: Si los textos de entrada son inválidos.
         """
         start_time = time.time()
         
-        # Filtrar textos vacíos y recordar sus posiciones
-        non_empty_texts = []
-        non_empty_indices = []
+        non_empty_texts_with_original_indices = []
         for i, text in enumerate(texts):
             if text and text.strip():
-                non_empty_texts.append(text)
-                non_empty_indices.append(i)
+                non_empty_texts_with_original_indices.append({"text": text, "original_index": i})
         
-        if not non_empty_texts:
-            # Si todos los textos están vacíos, devolver embeddings de ceros
-            dimensions = dimensions or 1536  # Default para text-embedding-3-small
+        if not non_empty_texts_with_original_indices:
+            actual_dimensions = dimensions or 1536 
+            self.logger.info("No hay textos válidos para embeber, devolviendo vectores de ceros.")
             return {
-                "embeddings": [[0.0] * dimensions for _ in texts],
+                "embeddings": [[0.0] * actual_dimensions for _ in texts],
                 "model": model,
-                "dimensions": dimensions,
-                "total_tokens": 0,
+                "dimensions": actual_dimensions,
                 "prompt_tokens": 0,
                 "total_tokens": 0,
-                "processing_time_ms": 0
+                "processing_time_ms": int((time.time() - start_time) * 1000)
             }
+
+        input_texts_for_api = [item["text"] for item in non_empty_texts_with_original_indices]
         
-        # Preparar payload
-        payload = {
-            "input": non_empty_texts,
+        api_params = {
+            "input": input_texts_for_api,
             "model": model,
             "encoding_format": encoding_format
         }
         
-        # Agregar parámetros opcionales
-        if dimensions and model.startswith("text-embedding-3"):
-            payload["dimensions"] = dimensions
+        if dimensions and "text-embedding-3" in model:
+            api_params["dimensions"] = dimensions
         
         if user:
-            payload["user"] = user
-        
+            api_params["user"] = user
+            
         self.logger.debug(
-            f"Generando embeddings para {len(non_empty_texts)} textos con {model}"
+            f"Generando embeddings para {len(input_texts_for_api)} textos con el modelo {model}."
         )
-        
+
         try:
-            # Hacer petición
-            response = await self.post(
-                "/embeddings",
-                json=payload,
-                timeout=self.timeout
-            )
+            response = await self.client.embeddings.create(**api_params)
             
-            # Parsear respuesta
-            data = response.json()
+            sdk_embeddings_map = {item.index: item.embedding for item in response.data}
             
-            # Validar estructura
-            if "data" not in data:
-                raise ValueError("Respuesta inválida de OpenAI API: sin data")
+            actual_dimensions = len(response.data[0].embedding) if response.data else (dimensions or 1536)
             
-            # Extraer embeddings
-            embeddings_data = data["data"]
-            embeddings_dict = {item["index"]: item["embedding"] for item in embeddings_data}
-            
-            # Reconstruir lista completa con embeddings vacíos donde corresponda
-            dimensions_actual = len(embeddings_dict[0]) if embeddings_dict else (dimensions or 1536)
-            full_embeddings = []
-            
+            full_embeddings: List[List[float]] = []
+            current_sdk_idx = 0
             for i in range(len(texts)):
-                if i in non_empty_indices:
-                    # Obtener el índice en la respuesta de OpenAI
-                    response_idx = non_empty_indices.index(i)
-                    full_embeddings.append(embeddings_dict[response_idx])
-                else:
-                    # Texto vacío, agregar embedding de ceros
-                    full_embeddings.append([0.0] * dimensions_actual)
-            
-            # Extraer métricas
-            usage = data.get("usage", {})
+                is_processed = False
+                for item in non_empty_texts_with_original_indices:
+                    if item["original_index"] == i:
+                        if current_sdk_idx in sdk_embeddings_map:
+                             full_embeddings.append(sdk_embeddings_map[current_sdk_idx])
+                             current_sdk_idx +=1
+                        else:
+                            self.logger.error(f"Falta embedding para el índice SDK {current_sdk_idx} (índice original {i})")
+                            full_embeddings.append([0.0] * actual_dimensions)
+                        is_processed = True
+                        break
+                if not is_processed:
+                    full_embeddings.append([0.0] * actual_dimensions)
+
             processing_time_ms = int((time.time() - start_time) * 1000)
             
-            # Log métricas
             self.logger.info(
                 f"Embeddings generados en {processing_time_ms}ms. "
-                f"Tokens: {usage.get('total_tokens', 0)}"
+                f"Modelo: {response.model}. Tokens: {response.usage.total_tokens if response.usage else 'N/A'}."
             )
             
             return {
                 "embeddings": full_embeddings,
-                "model": data.get("model", model),
-                "dimensions": dimensions_actual,
-                "prompt_tokens": usage.get("prompt_tokens", 0),
-                "total_tokens": usage.get("total_tokens", 0),
+                "model": response.model,
+                "dimensions": actual_dimensions, 
+                "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
+                "total_tokens": response.usage.total_tokens if response.usage else 0,
                 "processing_time_ms": processing_time_ms
             }
-            
-        except httpx.TimeoutException:
-            self.logger.error(f"Timeout en llamada a OpenAI API después de {self.timeout}s")
-            raise ServiceUnavailableError(
-                f"OpenAI API timeout después de {self.timeout} segundos"
-            )
-        
-        except Exception as e:
-            self.logger.error(f"Error en llamada a OpenAI API: {str(e)}")
-            raise
-    
+
+        except APITimeoutError as e:
+            self.logger.error(f"Timeout en llamada a OpenAI API: {e}")
+            raise ExternalServiceError(f"OpenAI API timeout: {e}", original_exception=e)
+        except RateLimitError as e:
+            self.logger.error(f"Rate limit excedido en OpenAI API: {e}")
+            raise ExternalServiceError(f"OpenAI API rate limit excedido: {e}", original_exception=e)
+        except APIConnectionError as e:
+            self.logger.error(f"Error de conexión con OpenAI API: {e}")
+            raise ExternalServiceError(f"OpenAI API error de conexión: {e}", original_exception=e)
+        except APIError as e: 
+            self.logger.error(f"Error en OpenAI API: {e}")
+            raise ExternalServiceError(f"OpenAI API error: {e}", original_exception=e)
+        except Exception as e: 
+            self.logger.error(f"Error inesperado generando embeddings: {e}", exc_info=True)
+            raise ExternalServiceError(f"Error inesperado en el cliente OpenAI: {str(e)}", original_exception=e)
+
     async def list_models(self) -> List[Dict[str, Any]]:
         """
-        Lista los modelos de embedding disponibles.
-        
-        Returns:
-            Lista de modelos disponibles
+        Lista los modelos disponibles. (Refactorización pendiente si se necesita)
+        Actualmente, esta función es un placeholder.
         """
-        try:
-            response = await self.get("/models")
-            data = response.json()
-            
-            # Filtrar solo modelos de embedding
-            embedding_models = [
-                model for model in data.get("data", [])
-                if "embedding" in model.get("id", "")
-            ]
-            
-            return embedding_models
-            
-        except Exception as e:
-            self.logger.error(f"Error listando modelos: {e}")
-            raise
+        self.logger.info("La funcionalidad 'list_models' con el SDK de OpenAI aún no está completamente implementada.")
+        # Ejemplo de cómo podría ser con el SDK:
+        # try:
+        #     models = await self.client.models.list()
+        #     # Procesar y retornar 'models.data' según sea necesario, por ejemplo:
+        #     # return [model.to_dict() for model in models.data if "embedding" in model.id]
+        # except APIError as e:
+        #     self.logger.error(f"Error listando modelos de OpenAI: {e}")
+        #     raise ExternalServiceError(f"OpenAI API error listando modelos: {e}", original_exception=e)
+        return [] # Placeholder
     
     async def health_check(self) -> bool:
         """
-        Verifica si la API de OpenAI está disponible.
+        Verifica si la API de OpenAI está disponible intentando generar un embedding simple.
         
         Returns:
-            True si está disponible
+            True si la generación de embedding es exitosa, False en caso contrario.
         """
         try:
             # Intentar generar un embedding simple como health check
+            # Esto usará el nuevo método generate_embeddings basado en SDK
             result = await self.generate_embeddings(
                 texts=["health check"],
-                model="text-embedding-3-small"
+                model="text-embedding-3-small" # Usar un modelo pequeño y eficiente
             )
-            return len(result["embeddings"]) > 0
+            # Verificar que se obtuvieron embeddings y que no están vacíos
+            return bool(result and result.get("embeddings") and result["embeddings"][0])
             
-        except Exception:
+        except ExternalServiceError as e: # Capturar errores específicos del servicio externo
+            self.logger.warning(f"Health check fallido para OpenAI: {e}")
+            return False
+        except Exception as e: # Capturar cualquier otro error inesperado
+            self.logger.error(f"Error inesperado durante el health check de OpenAI: {e}", exc_info=True)
             return False

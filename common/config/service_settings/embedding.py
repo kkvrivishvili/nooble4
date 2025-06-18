@@ -38,14 +38,16 @@ class EmbeddingServiceSettings(CommonAppSettings):
 
     # --- Configuración de Proveedores de Embeddings ---
     openai_api_key: Optional[str] = Field(None, description="API Key para OpenAI. Requerida si se usa el proveedor OpenAI.")
-    azure_openai_api_key: Optional[str] = Field(None, description="API Key para Azure OpenAI. Requerida si se usa Azure OpenAI.")
-    azure_openai_endpoint: Optional[str] = Field(None, description="Endpoint para Azure OpenAI. Requerido si se usa Azure OpenAI.")
-    azure_openai_deployment_name: Optional[str] = Field(None, description="Nombre del deployment en Azure OpenAI.")
-    cohere_api_key: Optional[str] = Field(None, description="API Key para Cohere. Requerida si se usa el proveedor Cohere.")
+    openai_base_url: Optional[str] = Field(None, description="URL base para la API de OpenAI (opcional, útil para proxies o APIs compatibles).")
+
+    # Configuración específica para el cliente OpenAI SDK
+    openai_max_retries: int = Field(default=3, description="Número máximo de reintentos para el cliente OpenAI SDK.")
+    openai_timeout_seconds: int = Field(default=30, description="Timeout en segundos para las peticiones del cliente OpenAI SDK.")
+    openai_default_model: str = Field(default="text-embedding-3-small", description="Modelo de embedding por defecto a usar para el proveedor OpenAI si no se especifica uno.")
 
     default_models_by_provider: Dict[EmbeddingProviders, str] = Field(
         default_factory=lambda: {
-            EmbeddingProviders.OPENAI: "text-embedding-3-large",
+            # El modelo por defecto para OpenAI ahora se define en 'openai_default_model'
             EmbeddingProviders.AZURE_OPENAI: "text-embedding-ada-002", # Asegurarse que este es el nombre del deployment
             EmbeddingProviders.COHERE: "embed-english-v3.0",
             EmbeddingProviders.HUGGINGFACE: "sentence-transformers/all-mpnet-base-v2",
