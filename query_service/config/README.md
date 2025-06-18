@@ -52,3 +52,29 @@ La configuración del `Query Service` se gestiona a través de la clase `QuerySe
     -   **Consistencia en Nombres de Timeouts**: Los timeouts como `llm_timeout_seconds`, `embedding_service_timeout`, `search_timeout_seconds` son claros. Mantener esta consistencia es bueno.
 
 En general, el sistema de configuración es un punto fuerte del `Query Service`, proporcionando una base sólida, segura y flexible para su operación.
+
+## 5. Consistencia de Código (Imports y Variables)
+
+Se realizó una revisión de la consistencia del código en los archivos Python del módulo `config` (`__init__.py` y `settings.py`):
+
+### 5.1. Imports
+
+-   **`__init__.py`**:
+    -   El import `from .settings import get_settings` es directo y correcto.
+-   **`settings.py`**:
+    -   Los imports `from functools import lru_cache` y `from common.config import QueryServiceSettings` están bien organizados y son correctos.
+    -   **Sugerencia Menor (Opcional)**: Para una máxima explicitud, si `QueryServiceSettings` reside en un submódulo específico dentro de `common.config` (ej., `common.config.service_settings.query`), el import podría reflejar esa ruta completa (ej., `from common.config.service_settings.query import QueryServiceSettings`). Sin embargo, la forma actual es perfectamente funcional si `common.config` (o su `__init__.py`) expone `QueryServiceSettings` adecuadamente.
+
+### 5.2. Nomenclatura y Estructura de Variables
+
+-   **Convenciones**:
+    -   En `__init__.py`, `__all__ = ['get_settings']` es correcto.
+    -   En `settings.py`, la función `get_settings()` sigue la convención snake_case.
+    -   La variable global `settings` también sigue snake_case.
+-   **Prácticas**:
+    -   El uso de `@lru_cache()` en `get_settings()` es una excelente práctica para asegurar que la instancia de configuración sea un singleton, cargándose una sola vez.
+-   **Claridad**: Los nombres son claros y la estructura del módulo es simple y efectiva.
+
+### 5.3. Conclusión de la Revisión de Consistencia
+
+El módulo `config` demuestra un nivel muy alto de consistencia y sigue las mejores prácticas tanto en la organización de imports como en la nomenclatura y estructura del código. Las sugerencias son mínimas y de naturaleza opcional, enfocadas en la máxima explicitud de los imports si así lo dictan las convenciones generales del proyecto. El módulo es robusto y bien diseñado.
