@@ -27,13 +27,19 @@ class QueryGeneratePayload(BaseModel):
     temperature: Optional[float] = Field(None, ge=0.0, le=2.0, description="Temperatura para generación")
     max_tokens: Optional[int] = Field(None, ge=1, description="Máximo de tokens en la respuesta")
     system_prompt: Optional[str] = Field(None, description="Prompt de sistema personalizado")
-    
+    top_p: Optional[float] = Field(None, ge=0.0, le=1.0, description="Parámetro top_p para muestreo de núcleo")
+    frequency_penalty: Optional[float] = Field(None, ge=-2.0, le=2.0, description="Penalización por frecuencia de tokens")
+    presence_penalty: Optional[float] = Field(None, ge=-2.0, le=2.0, description="Penalización por presencia de tokens")
+    stop_sequences: Optional[List[str]] = Field(None, description="Secuencias de parada para la generación")
+    user_id: Optional[str] = Field(None, description="ID de usuario para seguimiento y moderación")
+
     # Contexto adicional
     conversation_history: Optional[List[Dict[str, str]]] = Field(
         default_factory=list,
         description="Historial de conversación para contexto"
     )
-    
+    response_mode: Optional[str] = Field("default", description="Modo de respuesta (e.g., 'default', 'fast', 'creative')")
+
     @field_validator('collection_ids')
     @classmethod
     def validate_collection_ids(cls, v):

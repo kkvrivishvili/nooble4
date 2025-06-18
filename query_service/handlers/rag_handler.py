@@ -44,10 +44,14 @@ class RAGHandler(BaseHandler):
         super().__init__(app_settings, direct_redis_conn)
         
         # Inicializar clientes
-        self.groq_client = GroqClient(api_key=app_settings.groq_api_key)
+        self.groq_client = GroqClient(
+            api_key=app_settings.groq_api_key,
+            base_url=app_settings.groq_api_base_url,
+            timeout=app_settings.llm_timeout_seconds
+        )
         self.vector_client = VectorClient(
             base_url=app_settings.vector_db_url,
-            timeout=app_settings.http_timeout_seconds
+            timeout=app_settings.search_timeout_seconds
         )
         
         # Configuración
@@ -56,6 +60,10 @@ class RAGHandler(BaseHandler):
         self.default_llm_model = app_settings.default_llm_model
         self.llm_temperature = app_settings.llm_temperature
         self.llm_max_tokens = app_settings.llm_max_tokens
+        self.llm_top_p = app_settings.llm_top_p
+        self.llm_frequency_penalty = app_settings.llm_frequency_penalty
+        self.llm_presence_penalty = app_settings.llm_presence_penalty
+        self.available_models = app_settings.available_models
         
         self._logger.info("RAGHandler inicializado")
     
@@ -346,12 +354,20 @@ class RAGHandler(BaseHandler):
             Tupla de (respuesta, uso_de_tokens)
         """
         try:
+            # Validar que el modelo esté disponible
+            if model not in self.available_models:
+                self._logger.warning(f"Modelo {model} no está en la lista de disponibles, usando default")
+                model = self.default_llm_model
+            
             response, token_usage = await self.groq_client.generate(
                 prompt=prompt,
                 system_prompt=system_prompt,
                 model=model,
                 temperature=temperature,
-                max_tokens=max_tokens
+                max_tokens=max_tokens,
+                top_p=self.llm_top_p,
+                frequency_penalty=self.llm_frequency_penalty,
+                presence_penalty=self.llm_presence_penalty
             )
             
             return response, token_usage

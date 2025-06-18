@@ -154,17 +154,29 @@ class QueryService(BaseService):
             collection_ids=payload.collection_ids,
             tenant_id=action.tenant_id,
             session_id=action.session_id,
-            # Parámetros opcionales
+            
+            # Parámetros de búsqueda
             top_k=payload.top_k or config_overrides.get("top_k"),
             similarity_threshold=payload.similarity_threshold or config_overrides.get("similarity_threshold"),
+            
+            # Parámetros de generación
             llm_model=payload.llm_model or config_overrides.get("llm_model"),
             temperature=payload.temperature or config_overrides.get("temperature"),
             max_tokens=payload.max_tokens or config_overrides.get("max_tokens"),
             system_prompt=payload.system_prompt,
+            top_p=payload.top_p,
+            frequency_penalty=payload.frequency_penalty,
+            presence_penalty=payload.presence_penalty,
+            stop_sequences=payload.stop_sequences,
+            user_id=payload.user_id,
+
+            # Contexto
             conversation_history=payload.conversation_history,
+            
             # Contexto de trazabilidad
             trace_id=action.trace_id,
             correlation_id=action.correlation_id,
+            
             # Cliente de embedding si está disponible
             embedding_client=self.embedding_client,
             task_id=action.task_id
