@@ -1,11 +1,11 @@
 
 ## 1. Objetivo del Servicio
 
-El Servicio de Ingestión es responsable de recibir documentos, URLs o texto plano, procesarlos, extraer su contenido, dividirlos en fragmentos (chunks), solicitar la generación de embeddings para estos fragmentos y, finalmente (aunque actualmente es un placeholder), almacenarlos en una base de datos vectorial (Vector Store) para su posterior búsqueda y recuperación. Proporciona actualizaciones en tiempo real del estado del procesamiento a través de WebSockets.
+El Servicio de Ingestión es responsable de recibir documentos, URLs o texto plano, procesarlos, extraer su contenido, dividirlos en fragmentos (chunks), solicitar la generación de embeddings para estos fragmentos y, finalmente  almacenarlos en una base de datos vectorial Qdrant local para su posterior búsqueda y recuperación. Proporciona actualizaciones en tiempo real del estado del procesamiento a través de WebSockets al front end.
 
 ## 2. Arquitectura y Componentes Principales
 
-El servicio está construido con Python, FastAPI para la API REST y WebSockets, y Redis para la gestión de colas y el estado temporal de las tareas. Utiliza LlamaIndex para la extracción de texto y el chunking.
+El servicio está construido con Python, FastAPI para la API REST y WebSockets, y Redis para la gestión de colas y el estado temporal de las tareas. Utiliza LlamaIndex para la extracción de texto y el chunking. Usa una estructura Domain Action, con archivos base en la carpeta common. Se comunica con los otros servicios a traves de Redis Streams, toda esa base esta disponible en los archivos common.
 
 ### 2.1. Entrypoint (`main.py`)
 
@@ -13,43 +13,19 @@ El servicio está construido con Python, FastAPI para la API REST y WebSockets, 
 - **Middleware**: `CORSMiddleware` para permitir orígenes configurados.
 - **Manejo de Errores**: Captura `ServiceError` y excepciones generales, devolviendo respuestas JSON estandarizadas.
 - **Routers**: Incluye routers de `documents.py`, `tasks.py` y `websockets.py`.
-- **Health Check (`/health`)**: Verifica la conexión a Redis (`queue_service`) y el estado del `worker_pool`.
+- **Health Check (`/health`)**: Verifica la conexión a Redis (`queue_service`) y el estado del worker.
 - **Eventos de Startup/Shutdown**:
     - `startup_event`: Inicializa `queue_service` y arranca el `worker_pool` (si `AUTO_START_WORKERS` es true).
     - `shutdown_event`: Detiene el `worker_pool` y cierra las conexiones de `queue_service`.
 
 ### 2.2. Workers
 
-- **`WorkerPool` (`workers/worker_pool.py`)**:
-    - Gestiona un pool de instancias de `IngestionWorker` para procesamiento paralelo.
-    - El número de workers se configura mediante `settings.WORKER_COUNT`.
-    - Métodos `start()`, `stop()`, `status()`.
-- **`IngestionWorker` (`workers/ingestion_worker.py`)**:
-    - Es el worker principal que procesa las tareas de ingestión.
-    - **Escucha Múltiples Colas**: Utiliza `asyncio.gather` para escuchar concurrentemente:
-        - `settings.DOCUMENT_QUEUE` para `DocumentProcessAction`.
-        - `settings.EMBEDDING_CALLBACK_QUEUE` para `EmbeddingCallbackAction` (respuestas del Embedding Service).
-        - `settings.TASK_STATUS_QUEUE` para `TaskStatusAction` (ej. cancelación, aunque la lógica de cancelación está marcada como TODO).
-        - `settings.INGESTION_ACTIONS_QUEUE` para acciones directas como validación de colecciones (actualmente placeholders).
-    - **Lógica de Procesamiento (`_process_document`)**:
-        1.  Recibe `DocumentProcessAction`.
-        2.  Almacena información de callback (si la acción original es pseudo-síncrona, aunque este patrón no parece ser el principal para ingestión de documentos).
-        3.  Envía actualizaciones de estado y milestones vía WebSocket (`event_dispatcher`).
-        4.  **Extracción de Texto**: Simulado si no se provee `text_content`. TODO para implementar extracción real basada en `document_origin` (e.g., S3, URL).
-        5.  **Chunking**: Llama a `chunking_service.split_document_intelligently()`.
-        6.  **Solicitud de Embeddings**: Construye `EmbeddingRequestAction`, establece `callback_queue_name` a `settings.EMBEDDING_CALLBACK_QUEUE` y `callback_action_type` a `embedding.callback`. Envía la acción al Embedding Service usando `embedding_client.request_embeddings()` (que en realidad es `embedding_client.generate_embeddings()`).
-    - **Manejo de Callback de Embeddings (`_handle_embedding_callback`)**:
-        1.  Recibe `EmbeddingCallbackAction`.
-        2.  Si es exitoso, crea `VectorDocument` y llama a `vector_store_client.add_documents()` (actualmente un placeholder).
-        3.  Envía milestones (`embedding_completed`, `storage_completed`) y estado final (`TaskStatus.COMPLETED`) vía WebSocket.
-        4.  Si la solicitud original era pseudo-síncrona, envía `DomainActionResponse`.
-        5.  Envía `CollectionIngestionStatusAction` (aún no se ha definido a dónde va esta acción, pero podría ser para Agent Orchestrator).
-        6.  Si falla, actualiza el estado a `TaskStatus.FAILED`.
-    - **Gestión de Callbacks Pseudo-Síncronos**: Métodos `_store_callback_info`, `_retrieve_callback_info`, `_send_sync_response` para manejar respuestas directas a `DomainAction`s específicas (ej. `ingestion.collections.validate`).
+
 
 ### 2.3. Handlers
 
-No existe un directorio `handlers` separado como en otros servicios. La lógica de manejo de acciones está integrada principalmente dentro del `IngestionWorker`.
+Los `handlers` sirven como apoyo a funciones estandarizadas para el manejo de logica core centralizada en la carpeta services del servicio. Adoptan las clase base del archivo base en common.
+
 
 ### 2.4. Servicios Internos
 
@@ -124,8 +100,8 @@ No existe un directorio `handlers` separado como en otros servicios. La lógica 
     - El servicio valida la solicitud, genera un `task_id` único.
     - Crea una `DocumentProcessAction` y la encola en `settings.DOCUMENT_QUEUE` usando `queue_service`.
     - Responde inmediatamente al cliente con el `task_id` y el estado inicial de la tarea (`PENDING`).
-2.  **Conexión WebSocket (Opcional)**:
-    - El cliente utiliza el `task_id` para establecer una conexión WebSocket a `WS /ws/tasks/{task_id}`.
+2.  **Conexión WebSocket**:
+    - El cliente utiliza el `task_id` para para establecer una tarea con el `IngestionService`.A su vez un `session_id` para una conexión WebSocket a `WS /ws/tasks/{task_id}`.
     - `ConnectionManager` gestiona estas conexiones.
 3.  **Procesamiento Asíncrono por `IngestionWorker`**:
     - Un `IngestionWorker` toma la `DocumentProcessAction` de la cola.
@@ -146,9 +122,9 @@ No existe un directorio `handlers` separado como en otros servicios. La lógica 
 
 ## 4. Integración con Otros Servicios
 
-- **Embedding Service**: Solicita la generación de embeddings para los chunks de texto. La comunicación es asíncrona: Ingestion Service envía una `EmbeddingRequestAction` (HTTP POST) y espera una `EmbeddingCallbackAction` en una cola Redis específica.
-- **Vector Store (Conceptual)**: El servicio está diseñado para almacenar los chunks y sus embeddings en una base de datos vectorial, pero el cliente (`VectorStoreClient`) es actualmente un placeholder. La integración real es un trabajo pendiente.
-- **(Potencial) Agent Orchestrator Service**: El envío de `CollectionIngestionStatusAction` sugiere una notificación a otro servicio (posiblemente Agent Orchestrator) cuando la ingestión de documentos para una colección se actualiza. Los detalles de esta integración no están completamente definidos en el código revisado.
+- **Embedding Service**: Solicita la generación de embeddings para los chunks de texto. La comunicación es pseudoasíncrona.
+- **Vector Store Qdrant**: El servicio está diseñado para almacenar los chunks y sus embeddings en una base de datos vectorial, pero el cliente 
+- **(Potencial) Agent Orchestrator Service**: E
 - **Redis**: Utilizado extensivamente como broker de mensajes para colas de `DomainAction` y como almacén temporal para el estado y metadatos de las tareas.
 
 ## 5. Capacidades Actuales
@@ -157,98 +133,8 @@ No existe un directorio `handlers` separado como en otros servicios. La lógica 
 - Validación de archivos (tipo, tamaño).
 - Extracción de texto de múltiples formatos (PDF, DOCX, HTML, TXT, imágenes básicas, etc.) usando LlamaIndex.
 - Fragmentación (chunking) inteligente de texto con LlamaIndex, configurable.
-- Comunicación asíncrona con el Embedding Service para solicitar embeddings.
-- Gestión de tareas de ingestión con seguimiento de estado (PENDING, PROCESSING, etc.) almacenado en Redis.
+- Comunicación pseudo asíncrona con el Embedding Service para solicitar embeddings.
 - Notificaciones en tiempo real del progreso y estado de las tareas a través de WebSockets.
 - API REST para iniciar ingestiones, consultar estado de tareas y solicitar cancelación.
 - Sistema de workers en pool para procesamiento paralelo.
 
-## 6. Limitaciones y Puntos Pendientes
-
-- **Integración con Vector Store**: El `VectorStoreClient` es un placeholder. La lógica para almacenar y gestionar documentos/embeddings en una base de datos vectorial real no está implementada. Esta es la limitación más significativa.
-- **Persistencia de Archivos**: El manejo de archivos subidos es temporal (`file_key = f"temp/{task_id}/{file.filename}"`). No hay integración con un sistema de almacenamiento persistente como S3 para los archivos originales. La extracción de texto de URLs también implica una descarga temporal, sin persistencia del contenido original de la URL.
-- **Manejo de Errores y Retries**: Aunque hay manejo básico de errores, estrategias de reintento robustas para comunicación con servicios externos (Embedding Service, futuro Vector Store) o para pasos de procesamiento podrían mejorarse.
-- **Seguridad y Autenticación**: La verificación de tokens en el endpoint WebSocket (`verify_task_access`) es un TODO. La autenticación/autorización general de API podría requerir revisión y fortalecimiento.
-- **Cancelación de Tareas**: La acción `TaskCancelAction` se encola, pero la lógica real para detener un `IngestionWorker` a mitad de proceso (especialmente durante llamadas a servicios externos o chunking intensivo) no está completamente detallada y puede ser compleja de implementar de forma segura.
-- **Listado de Tareas**: El endpoint `GET /api/v1/tasks/` es un placeholder y no lista tareas reales, ya que requeriría una base de datos persistente para las tareas más allá de los metadatos temporales en Redis.
-- **Extracción de Texto de URLs**: La lógica para descargar y procesar contenido de URLs dentro del `IngestionWorker` (después de que `DocumentProcessAction.url` es recibido) no está explícitamente mostrada, pero se asume que ocurriría antes del chunking.
-- **Configuración de `CollectionIngestionStatusAction`**: El destino y el consumidor de esta acción no están claros.
-- **Manejo de `TASK_STATUS_QUEUE`**: El `IngestionWorker` escucha esta cola, pero la lógica para `TaskStatusAction` (aparte de `TaskCancelAction`) no está detallada.
-- **Escalabilidad del `WorkerPool`**: El `WorkerPool` actual crea un número fijo de workers. Mecanismos de autoescalado basados en la carga de la cola podrían ser una mejora futura.
-- **Métricas y Observabilidad**: Faltan métricas detalladas sobre el rendimiento de la ingestión, tasas de error, etc.
-
-## 7. Resumen de Archivos y Módulos Clave
-
-- `main.py`: Entrypoint de la aplicación FastAPI, configuración inicial.
-- `workers/ingestion_worker.py`: Lógica central de procesamiento de tareas de ingestión.
-- `workers/worker_pool.py`: Gestión del pool de `IngestionWorker`.
-- `services/chunking.py`: Extracción de texto y fragmentación con LlamaIndex.
-- `services/queue.py`: Interacción con Redis para colas y estado de tareas.
-- `clients/embedding_client.py`: Cliente HTTP para el Embedding Service.
-- `clients/vector_store_client.py`: Cliente placeholder para el Vector Store.
-- `models/actions.py`: Modelos Pydantic para `DomainAction`s.
-- `models/tasks.py`: Modelos Pydantic para tareas y su estado.
-- `models/events.py`: Modelos Pydantic para eventos WebSocket.
-- `routes/documents.py`: Endpoints API para iniciar la ingestión.
-- `routes/tasks.py`: Endpoints API para consultar/gestionar tareas.
-- `routes/websockets.py`: Endpoint para conexiones WebSocket.
-- `websockets/connection_manager.py`: Gestión de conexiones WebSocket activas.
-- `websockets/event_dispatcher.py`: Envío de eventos a través de WebSockets.
-- `config/settings.py`: Configuración del servicio.
-
-## 8. Diagrama de Flujo Simplificado (ASCII)
-
-```mermaid
-sequenceDiagram
-    participant Client
-    participant IngestionAPI
-    participant RedisQueue (QueueService)
-    participant IngestionWorker
-    participant ChunkingService
-    participant EmbeddingClient
-    participant EmbeddingService
-    participant VectorStoreClient (Placeholder)
-    participant WebSocketManager
-
-    Client->>+IngestionAPI: POST /documents (file/url/text)
-    IngestionAPI->>IngestionAPI: Validate, Generate task_id
-    IngestionAPI->>RedisQueue: Enqueue DocumentProcessAction
-    IngestionAPI-->>-Client: TaskResponse (task_id, status: PENDING)
-
-    Client->>+WebSocketManager: WS /ws/tasks/{task_id}
-    WebSocketManager-->>-Client: Connection Established
-
-    IngestionWorker->>RedisQueue: Dequeue DocumentProcessAction
-    IngestionWorker->>WebSocketManager: Send Progress (PROCESSING)
-    alt File/URL provided
-        IngestionWorker->>ChunkingService: Extract Text
-        ChunkingService-->>IngestionWorker: Text Content
-        IngestionWorker->>WebSocketManager: Send Progress (TEXT_EXTRACTED)
-    end
-    IngestionWorker->>ChunkingService: Split into Chunks
-    ChunkingService-->>IngestionWorker: List of Chunks
-    IngestionWorker->>WebSocketManager: Send Progress (CHUNKING_COMPLETED)
-
-    IngestionWorker->>EmbeddingClient: Request Embeddings (EmbeddingRequestAction with chunks, callback_queue)
-    EmbeddingClient->>+EmbeddingService: POST /embeddings/generate
-    EmbeddingService-->>-EmbeddingClient: 202 Accepted
-    IngestionWorker->>WebSocketManager: Send Progress (EMBEDDING_STARTED)
-
-    EmbeddingService->>RedisQueue: Enqueue EmbeddingCallbackAction (to Ingestion's callback_queue)
-    IngestionWorker->>RedisQueue: Dequeue EmbeddingCallbackAction
-    alt Callback Success
-        IngestionWorker->>WebSocketManager: Send Progress (EMBEDDING_COMPLETED)
-        IngestionWorker->>VectorStoreClient (Placeholder): Add Documents (chunks + embeddings)
-        VectorStoreClient (Placeholder)-->>IngestionWorker: Success (Simulated)
-        IngestionWorker->>WebSocketManager: Send Progress (STORAGE_COMPLETED)
-        IngestionWorker->>WebSocketManager: Send Status (COMPLETED)
-        IngestionWorker->>RedisQueue: Set Task Completed
-    else Callback Error
-        IngestionWorker->>WebSocketManager: Send Error Event
-        IngestionWorker->>WebSocketManager: Send Status (FAILED)
-        IngestionWorker->>RedisQueue: Set Task Failed
-    end
-```
-
----
-*Documentación generada por Cascade AI.*
