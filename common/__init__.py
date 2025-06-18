@@ -15,7 +15,6 @@ from .models import (
     DomainAction,
     DomainActionResponse,
     ErrorDetail,
-    ExecutionContext,
 )
 
 # Handlers
@@ -52,7 +51,6 @@ __all__ = [
     "DomainAction",
     "DomainActionResponse",
     "ErrorDetail",
-    "ExecutionContext",
     # Handlers
     "BaseHandler",
     # Workers
