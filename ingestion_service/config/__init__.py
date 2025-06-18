@@ -1,17 +1,4 @@
-"""
-Configuración del servicio de ingestión.
+"""Configuration for Ingestion Service"""
+from .settings import get_settings
 
-Expone la configuración centralizada del servicio.
-"""
-
-from .settings import IngestionServiceSettings, get_settings
-from .constants import TaskStates, DocumentTypes, EndpointPaths, VERSION
-
-__all__ = [
-    'IngestionServiceSettings',
-    'get_settings',
-    'TaskStates',
-    'DocumentTypes',
-    'EndpointPaths',
-    'VERSION'
-]
+__all__ = ["get_settings"]
