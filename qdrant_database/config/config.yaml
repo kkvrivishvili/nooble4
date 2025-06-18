@@ -1,0 +1,90 @@
+# Nivel de logs. Opciones: TRACE, DEBUG, INFO, WARN, ERROR. Por defecto es INFO.
+log_level: INFO
+
+storage:
+  # Directorio donde se almacenarán todos los datos.
+  storage_path: ./storage
+  # Directorio donde se almacenarán los snapshots.
+  snapshots_path: ./snapshots
+  # Si es true, los payloads de los puntos no se almacenarán en memoria.
+  # Se leerán del disco cada vez que se soliciten. Ahorra RAM a costa de un poco de latencia.
+  on_disk_payload: true
+  # Configuración para el Write-Ahead-Log (WAL).
+  wal:
+    # Capacidad de un solo segmento del WAL en MB.
+    wal_capacity_mb: 32
+    # Número de segmentos de WAL a crear por adelantado.
+    wal_segments_ahead: 0
+
+performance:
+  # Número de hilos paralelos para operaciones de búsqueda. 0 para selección automática.
+  max_search_threads: 0
+  # Número máximo de hilos para optimizaciones en todas las colecciones.
+  max_optimization_threads: 0
+
+optimizers:
+  # Fracción mínima de vectores eliminados en un segmento para realizar una optimización.
+  deleted_threshold: 0.2
+  # Número mínimo de vectores en un segmento para realizar una optimización de vacío.
+  vacuum_min_vector_number: 1000
+  # Número objetivo de segmentos que el optimizador intentará mantener.
+  # 0 para selección automática basada en el número de CPUs.
+  default_segment_number: 0
+  # Intervalo entre flushes forzados en segundos.
+  flush_interval_sec: 5
+
+  # Parámetros por defecto para el índice HNSW. Pueden ser sobreescritos por colección.
+  hnsw_index:
+    # Número de enlaces por nodo en el grafo del índice. Mayor valor = más precisión, más espacio.
+    m: 16
+    # Número de vecinos a considerar durante la construcción del índice. Mayor valor = más precisión, más tiempo de construcción.
+    ef_construct: 100
+    # Umbral (en KB) para la indexación basada en payload. Por debajo de este valor, se usará escaneo completo.
+    full_scan_threshold_kb: 10000
+    # Número de hilos para la construcción de índices en segundo plano. 0 para selección automática.
+    max_indexing_threads: 0
+    # Almacenar el índice HNSW en disco. Si es false, se almacena en RAM.
+    on_disk: false
+
+collection:
+  # Parámetros por defecto para las colecciones.
+  vectors:
+    # Si los vectores deben ser almacenados en memoria o en disco.
+    on_disk: null
+  # Configuración de cuantización por defecto.
+  quantization:
+    # Opciones: "scalar", "product". Si es null, la cuantización está deshabilitada.
+    quantization: null
+
+service:
+  # Host para el servicio.
+  host: 0.0.0.0
+  # Puerto HTTP.
+  http_port: 6333
+  # Puerto gRPC. Si es null, gRPC está deshabilitado.
+  grpc_port: 6334
+  # Habilitar cabeceras CORS en la API REST.
+  enable_cors: true
+  # Habilitar HTTPS. Requiere configuración de TLS.
+  # enable_tls: false
+  # Clave de API para acceso. Si se establece, todas las peticiones deben incluirla.
+  # Se recomienda usar junto con TLS.
+  # api_key: "your-secret-api-key"
+
+# Configuración de clúster. Habilitar para modo distribuido.
+cluster:
+  enabled: false
+  # p2p:
+  #   port: 6335
+  #   enable_tls: false
+  # consensus:
+  #   tick_period_ms: 100
+
+# Deshabilitar telemetría anónima.
+telemetry_disabled: false
+
+# Configuración de TLS. Requerida si service.enable_tls o cluster.p2p.enable_tls es true.
+# tls:
+#   cert: ./tls/cert.pem
+#   key: ./tls/key.pem
+#   ca_cert: ./tls/cacert.pem

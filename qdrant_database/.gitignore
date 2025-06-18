@@ -1,0 +1,3 @@
+# Ignorar el directorio de almacenamiento de Qdrant
+/storage
+/snapshots
