@@ -233,10 +233,11 @@ class EmbeddingService(BaseService):
         Returns:
             Diccionario con EmbeddingBatchResponse
         """
-        # Validar y parsear payload. action.data ya debería tener task_id y chunk_ids
-        # gracias a que IngestionService los envía y EmbeddingBatchPayload ahora los define.
-        payload = EmbeddingBatchPayload(**action.data)
-        
+        # Validar y parsear payload. task_id se tomará de action.task_id.
+        # chunk_ids y otros datos específicos del lote están en action.data.
+        payload = EmbeddingBatchPayload(**action.data) # task_id ya no está aquí
+        current_task_id = str(action.task_id) if action.task_id else None
+
         try:
             # Crear una acción interna para _handle_generate.
             # _handle_generate espera un EmbeddingGeneratePayload en su action.data.
@@ -282,7 +283,7 @@ class EmbeddingService(BaseService):
             response = EmbeddingBatchResponse(
                 # batch_id=payload.batch_id, # ingestion_service no envía batch_id, así que puede ser None
                 status="completed",
-                task_id=payload.task_id,  # Propagar task_id del payload original
+                task_id=current_task_id,  # Usar task_id del DomainAction entrante
                 chunk_ids=payload.chunk_ids, # Propagar chunk_ids del payload original
                 embeddings=embedding_results_list,
                 successful_count=len(embedding_results_list),
@@ -295,14 +296,14 @@ class EmbeddingService(BaseService):
             return response.model_dump()
             
         except Exception as e:
-            self._logger.error(f"Error en _handle_batch_process para task {payload.task_id}: {e}", exc_info=True)
+            self._logger.error(f"Error en _handle_batch_process para task {current_task_id}: {e}", exc_info=True)
             from ..models.payloads import EmbeddingBatchResponse
             # En caso de error, devolver respuesta parcial con identificadores si es posible
             response = EmbeddingBatchResponse(
                 # batch_id=payload.batch_id,
                 status="failed",
-                task_id=payload.task_id, # Intentar incluir task_id si está disponible
-                chunk_ids=payload.chunk_ids, # Intentar incluir chunk_ids si están disponibles
+                task_id=current_task_id, # Usar task_id del DomainAction entrante
+                chunk_ids=payload.chunk_ids if payload else None, # Intentar incluir chunk_ids si están disponibles
                 embeddings=[],
                 successful_count=0,
                 failed_count=len(payload.texts) if payload and payload.texts else 0,

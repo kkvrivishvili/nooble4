@@ -164,7 +164,6 @@ class IngestionService(BaseService):
             data={
                 "texts": texts,
                 "chunk_ids": chunk_ids,
-                "task_id": task.task_id,
                 "model": "text-embedding-ada-002"
             },
             metadata={

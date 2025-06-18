@@ -58,7 +58,6 @@ class EmbeddingBatchPayload(BaseModel):
     model: Optional[str] = Field(None, description="Modelo de embedding")
     
     # Campos para propagar desde ingestion_service
-    task_id: Optional[str] = Field(None, description="ID de la tarea de origen en ingestion_service")
     chunk_ids: Optional[List[str]] = Field(None, description="IDs de los chunks originales de ingestion_service")
     
     # Metadatos del lote
