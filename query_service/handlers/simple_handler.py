@@ -9,11 +9,13 @@ from uuid import UUID, uuid4
 from common.handlers import BaseHandler
 from common.errors.exceptions import ExternalServiceError, AppValidationError
 
-from ..models import (
-    QuerySimplePayload,
-    QuerySimpleResponseData,
-    TokenUsage,
-    QueryServiceChatMessage
+from common.models.chat_models import (
+    SimpleChatPayload,
+    SimpleChatResponse,
+    ChatMessage,
+    ChatCompletionRequest,
+    EmbeddingRequest,
+    TokenUsage
 )
 from ..clients.groq_client import GroqClient
 from ..clients.vector_client import VectorClient
@@ -49,33 +51,38 @@ class SimpleHandler(BaseHandler):
     
     async def process_simple_query(
         self,
-        payload: QuerySimplePayload,
+        payload: SimpleChatPayload,
         tenant_id: str,
         session_id: str,
         task_id: UUID,
         trace_id: UUID,
         correlation_id: UUID
-    ) -> QuerySimpleResponseData:
+    ) -> SimpleChatResponse:
         """Procesa una consulta simple con RAG automático."""
         start_time = time.time()
         query_id = str(correlation_id) if correlation_id else str(uuid4())
         
         try:
-            # Validar que tenemos todos los parámetros requeridos
+            # Validar que tenemos todos los parámetros requeridos (Pydantic ya lo hace en parte)
             self._validate_payload(payload)
-            
-            # 1. Obtener embedding de la consulta
+
+            # 1. Preparar request de embeddings (compatible con OpenAI)
+            embedding_request = EmbeddingRequest(
+                model=payload.embedding_model,
+                input=payload.user_message,
+                dimensions=payload.embedding_dimensions
+            )
+
+            # 2. Obtener embedding
             query_embedding = await self._get_query_embedding(
-                query_text=payload.user_message,
-                embedding_config=payload.embedding_config,
+                embedding_request=embedding_request,
                 tenant_id=tenant_id,
                 session_id=session_id,
                 task_id=task_id,
                 trace_id=trace_id
             )
-            
-            # 2. Buscar en vector store
-            # TODO: Implementar búsqueda en Qdrant local
+
+            # 3. Buscar en vector store
             search_results = await self.vector_client.search(
                 query_embedding=query_embedding,
                 collection_ids=payload.collection_ids,
@@ -84,42 +91,79 @@ class SimpleHandler(BaseHandler):
                 tenant_id=tenant_id,
                 filters={"document_ids": payload.document_ids} if payload.document_ids else None
             )
-            
-            # 3. Construir contexto con los chunks encontrados
-            context = self._build_context(search_results)
-            sources = list(set(r.document_id for r in search_results if r.document_id))
-            
-            # 4. Generar respuesta con LLM
+
+            # 4. Construir mensajes para Groq
+            messages: List[ChatMessage] = []
+
+            # System message siempre presente
+            if payload.system_prompt:
+                messages.append(ChatMessage(
+                    role="system",
+                    content=payload.system_prompt
+                ))
+
+            # Agregar historial
+            if payload.conversation_history:
+                messages.extend(payload.conversation_history)
+
+            # Agregar contexto RAG
+            if search_results:
+                context = self._build_context(search_results)
+                messages.append(ChatMessage(
+                    role="system",
+                    content=f"Context information:\n{context}"
+                ))
+
+            # Agregar mensaje del usuario
+            messages.append(ChatMessage(
+                role="user",
+                content=payload.user_message
+            ))
+
+            # 5. Preparar request para Groq
+            chat_request = ChatCompletionRequest(
+                model=payload.chat_model,
+                messages=messages,
+                temperature=payload.temperature,
+                max_tokens=payload.max_tokens,
+                top_p=payload.top_p,
+                frequency_penalty=payload.frequency_penalty,
+                presence_penalty=payload.presence_penalty,
+                stop=payload.stop
+            )
+
+            # 6. Llamar a Groq
             groq_client = GroqClient(
                 api_key=self.app_settings.groq_api_key,
-                timeout=payload.agent_config.max_tokens // 100  # Aproximación basada en tokens
+                timeout=payload.max_tokens // 100 if payload.max_tokens else 30
             )
             
-            prompt = self._build_prompt(
-                user_message=payload.user_message,
-                context=context,
-                conversation_history=payload.conversation_history
+            response = await groq_client.chat.completions.create(
+                **chat_request.model_dump(exclude_none=True)
             )
+
+            # 7. Construir respuesta unificada
+            response_message_content = ""
+            if response.choices and response.choices[0].message:
+                response_message_content = response.choices[0].message.content
             
-            response, token_usage = await groq_client.generate(
-                prompt=prompt,
-                system_prompt=payload.system_prompt,
-                model=payload.agent_config.model_name,
-                temperature=payload.agent_config.temperature,
-                max_tokens=payload.agent_config.max_tokens,
-                top_p=payload.agent_config.top_p,
-                frequency_penalty=payload.agent_config.frequency_penalty,
-                presence_penalty=payload.agent_config.presence_penalty,
-                stop=payload.agent_config.stop_sequences
-            )
-            
+            response_token_usage = TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
+            if response.usage:
+                response_token_usage = TokenUsage(
+                    prompt_tokens=response.usage.prompt_tokens,
+                    completion_tokens=response.usage.completion_tokens,
+                    total_tokens=response.usage.total_tokens
+                )
+
             execution_time_ms = int((time.time() - start_time) * 1000)
-            
-            return QuerySimpleResponseData(
-                message=response,
-                sources=sources,
-                usage=TokenUsage(**token_usage),
+            final_sources = list(set(r.document_id for r in search_results if r.document_id))
+
+            return SimpleChatResponse(
+                message=response_message_content,
+                sources=final_sources,
+                usage=response_token_usage,
                 query_id=query_id,
+                conversation_id=str(uuid4()),
                 execution_time_ms=execution_time_ms
             )
             
@@ -127,15 +171,14 @@ class SimpleHandler(BaseHandler):
             self._logger.error(f"Error en simple query: {e}", exc_info=True)
             raise ExternalServiceError(f"Error procesando query simple: {str(e)}")
     
-    def _validate_payload(self, payload: QuerySimplePayload):
+    def _validate_payload(self, payload: SimpleChatPayload):
         """Valida que el payload tenga todos los campos requeridos."""
         # Validación adicional si es necesaria
         pass
     
     async def _get_query_embedding(
         self,
-        query_text: str,
-        embedding_config: dict,
+        embedding_request: EmbeddingRequest,
         tenant_id: str,
         session_id: str,
         task_id: UUID,
@@ -143,12 +186,12 @@ class SimpleHandler(BaseHandler):
     ) -> List[float]:
         """Obtiene el embedding de la consulta usando el Embedding Service."""
         response = await self.embedding_client.request_query_embedding(
-            query_text=query_text,
+            query_text=embedding_request.input if isinstance(embedding_request.input, str) else embedding_request.input[0],
             tenant_id=tenant_id,
             session_id=session_id,
             task_id=task_id,
             trace_id=trace_id,
-            model=embedding_config.model
+            model=embedding_request.model,
         )
         
         if not response.success or not response.data:
@@ -162,34 +205,7 @@ class SimpleHandler(BaseHandler):
             return "No se encontró información relevante."
         
         context_parts = []
-        for result in search_results[:5]:  # Limitar a top 5
+        for result in search_results[:5]:  
             context_parts.append(f"[Fuente: {result.collection_id}] {result.content}")
         
         return "\n\n".join(context_parts)
-    
-    def _build_prompt(
-        self,
-        user_message: str,
-        context: str,
-        conversation_history: List[QueryServiceChatMessage]
-    ) -> str:
-        """Construye el prompt final para el LLM."""
-        prompt_parts = []
-        
-        # Agregar historial si existe
-        if conversation_history:
-            prompt_parts.append("Conversación previa:")
-            for msg in conversation_history[-5:]:  # Últimos 5 mensajes
-                prompt_parts.append(f"{msg.role}: {msg.content}")
-            prompt_parts.append("")
-        
-        # Agregar contexto
-        prompt_parts.append("Información relevante:")
-        prompt_parts.append(context)
-        prompt_parts.append("")
-        
-        # Agregar pregunta actual
-        prompt_parts.append("Pregunta actual:")
-        prompt_parts.append(user_message)
-        
-        return "\n".join(prompt_parts)

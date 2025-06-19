@@ -45,37 +45,16 @@ class QueryClient:
 
     async def query_simple(
         self,
-        user_message: str,
-        collection_ids: List[str],
+        payload: Dict[str, Any],  # Recibe el payload completo serializado
         tenant_id: str,
         session_id: str,
         task_id: uuid.UUID,
-        agent_config: Dict[str, Any],
-        embedding_config: Dict[str, Any],
-        document_ids: Optional[List[str]] = None,
-        conversation_history: Optional[List[Dict[str, str]]] = None,
         timeout: Optional[int] = None
     ) -> Dict[str, Any]:
-        """
-        Realiza una consulta simple con RAG integrado.
+        """Realiza una consulta simple con RAG integrado."""
+        # El payload ya viene serializado desde SimpleChatHandler
+        # payload contiene user_message, collection_ids, agent_config, etc.
         
-        Query Service realiza:
-        1. Búsqueda vectorial en las colecciones
-        2. Envío de chunks relevantes a Groq
-        3. Retorno de respuesta final del LLM
-        
-        Returns:
-            Dict con la respuesta del Query Service
-        """
-        payload = {
-            "user_message": user_message,
-            "collection_ids": collection_ids,
-            "document_ids": document_ids,
-            "conversation_history": conversation_history or [],
-            "agent_config": agent_config,
-            "embedding_config": embedding_config
-        }
-
         action = DomainAction(
             action_id=uuid.uuid4(),
             action_type=ACTION_QUERY_SIMPLE,
