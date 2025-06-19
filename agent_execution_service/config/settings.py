@@ -16,24 +16,27 @@ class ExecutionServiceSettings(CommonAppSettings):
     )
 
     # Información del servicio (override de CommonAppSettings)
-    service_name: str = Field(default="agent_execution_service")
+    service_name: str = Field(default="agent-execution-service") # Consistent naming with hyphens
     service_version: str = Field(default="1.0.0")
     
     # Domain específico
     domain_name: str = Field(default="execution")
 
+    # Nombres de servicios para comunicación interna
+    query_service_name: str = Field(default="query-service")
+
     # URLs de servicios externos
     query_service_url: str = Field(
         default="http://localhost:8002", 
-        description="URL del Query Service para RAG"
+        description="URL del Query Service para RAG (será obsoleto con Redis)"
     )
     conversation_service_url: str = Field(
         default="http://localhost:8004", 
-        description="URL del Conversation Service"
+        description="URL del Conversation Service (será obsoleto con Redis)"
     )
     agent_management_service_url: str = Field(
         default="http://localhost:8003", 
-        description="URL del Agent Management Service"
+        description="URL del Agent Management Service (será obsoleto con Redis)"
     )
 
     # Configuración de LLM por defecto

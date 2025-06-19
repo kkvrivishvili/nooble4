@@ -2,6 +2,7 @@
 Servicio principal de ejecución de agentes.
 """
 import logging
+import uuid
 from typing import Optional, Dict, Any
 from common.services.base_service import BaseService
 from common.models.actions import DomainAction
@@ -38,8 +39,16 @@ class ExecutionService(BaseService):
         
         self.settings = app_settings
 
-        # Inicializar QueryClient
-        self.query_client = QueryClient(base_url=self.settings.query_service_url)
+        if not isinstance(self.direct_redis_conn, AIORedis):
+            self._logger.error("Conexión Redis asíncrona directa (direct_redis_conn) no es una instancia válida de AIORedis o no fue proporcionada a ExecutionService.")
+            raise ValueError("ExecutionService requiere una instancia válida de AIORedis en direct_redis_conn para QueryClient.")
+
+        # Inicializar QueryClient con la nueva firma
+        self.query_client = QueryClient(
+            aes_service_name=self.settings.service_name,
+            redis_conn=self.direct_redis_conn, 
+            settings=self.settings
+        )
 
         # Inicializar ToolRegistry y registrar herramientas
         self.tool_registry = ToolRegistry()
@@ -98,14 +107,19 @@ class ExecutionService(BaseService):
             # Validar que tenemos los campos requeridos
             self._validate_action(action)
 
+            task_id = action.task_id
+            if task_id is None:
+                self._logger.error(f"task_id es None para la acción {action.action_id} de tipo {action_type}. Es requerido.")
+                raise InvalidActionError(f"task_id es None para la acción {action.action_id} de tipo {action_type}. Es requerido.")
+
             if action_type == "execution.chat.simple":
-                return await self._handle_simple_chat(action)
+                return await self._handle_simple_chat(action, task_id)
             
             elif action_type == "execution.react.execute":
-                return await self._handle_react_execution(action)
+                return await self._handle_react_execution(action, task_id)
             
             elif action_type == "execution.agent.execute":
-                return await self._handle_agent_execution(action)
+                return await self._handle_agent_execution(action, task_id)
             
             else:
                 raise InvalidActionError(f"Tipo de acción no soportado: {action_type}")
@@ -138,7 +152,7 @@ class ExecutionService(BaseService):
         if not action.data:
             raise InvalidActionError("El payload de datos está vacío")
 
-    async def _handle_simple_chat(self, action: DomainAction) -> Dict[str, Any]:
+    async def _handle_simple_chat(self, action: DomainAction, task_id: uuid.UUID) -> Dict[str, Any]:
         """Maneja chat simple con RAG."""
         try:
             # Validar y parsear payload
@@ -148,7 +162,8 @@ class ExecutionService(BaseService):
             result = await self.simple_chat_handler.execute_simple_chat(
                 payload=payload,
                 tenant_id=action.tenant_id,
-                session_id=action.session_id
+                session_id=action.session_id,
+                task_id=task_id
             )
             
             return result.model_dump()
@@ -157,7 +172,7 @@ class ExecutionService(BaseService):
             self._logger.error(f"Error en chat simple: {e}")
             raise
 
-    async def _handle_react_execution(self, action: DomainAction) -> Dict[str, Any]:
+    async def _handle_react_execution(self, action: DomainAction, task_id: uuid.UUID) -> Dict[str, Any]:
         """Maneja ejecución ReAct."""
         try:
             # Validar y parsear payload
@@ -167,7 +182,8 @@ class ExecutionService(BaseService):
             result = await self.react_handler.execute_react(
                 payload=payload,
                 tenant_id=action.tenant_id,
-                session_id=action.session_id
+                session_id=action.session_id,
+                task_id=task_id
             )
             
             return result.model_dump()
@@ -176,7 +192,7 @@ class ExecutionService(BaseService):
             self._logger.error(f"Error en ReAct: {e}")
             raise
 
-    async def _handle_agent_execution(self, action: DomainAction) -> Dict[str, Any]:
+    async def _handle_agent_execution(self, action: DomainAction, task_id: uuid.UUID) -> Dict[str, Any]:
         """Maneja ejecución general de agente."""
         try:
             # Validar y parsear payload
@@ -196,7 +212,8 @@ class ExecutionService(BaseService):
                 result = await self.simple_chat_handler.execute_simple_chat(
                     payload=simple_payload,
                     tenant_id=action.tenant_id,
-                    session_id=action.session_id
+                    session_id=action.session_id,
+                    task_id=task_id
                 )
                 
                 # Envolver en ExecuteAgentResponse
@@ -220,7 +237,8 @@ class ExecutionService(BaseService):
                 result = await self.react_handler.execute_react(
                     payload=react_payload,
                     tenant_id=action.tenant_id,
-                    session_id=action.session_id
+                    session_id=action.session_id,
+                    task_id=task_id
                 )
                 
                 return result.model_dump()

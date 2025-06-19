@@ -4,11 +4,12 @@ Handler para agentes ReAct que utiliza el QueryService para llamadas LLM y tool 
 import logging
 import time
 import json
+import uuid
 from typing import Dict, Any, List, Optional, Union # Added Union
 from datetime import datetime
 
 from common.handlers.base_handler import BaseHandler
-from common.config.base_settings import CommonAppSettings
+from ..config.settings import ExecutionServiceSettings
 from common.errors.exceptions import ExternalServiceError, ToolExecutionError, AppValidationError
 
 from ..clients.query_client import QueryClient # Changed: Using QueryClient
@@ -29,18 +30,19 @@ TOOL_ROLE = "tool"
 class ReactHandler(BaseHandler):
     """Handler para agentes ReAct con herramientas, usando QueryService."""
 
-    def __init__(self, app_settings: CommonAppSettings, tool_registry: ToolRegistry):
-        super().__init__(app_settings)
-        query_url = getattr(app_settings, 'query_service_url', 'http://localhost:8002')
-        self.query_client = QueryClient(base_url=query_url)
+    def __init__(self, query_client: QueryClient, tool_registry: ToolRegistry, settings: ExecutionServiceSettings):
+        super().__init__(settings)
+        self.query_client = query_client
         self.tool_registry = tool_registry
-        self._logger.info(f"ReactHandler inicializado con QueryService URL: {query_url}")
+        self.settings = settings # Guardar settings si se necesitan localmente
+        self._logger.info(f"ReactHandler inicializado con QueryClient y ToolRegistry.")
 
     async def execute_react(
         self,
         payload: ExecuteReactPayload,
         tenant_id: str,
-        session_id: str
+        session_id: str,
+        task_id: uuid.UUID
     ) -> ExecuteReactResponse:
         """
         Ejecuta agente ReAct con loop de pensamiento-acción, usando QueryService para LLM y tool calls.
@@ -98,7 +100,8 @@ class ReactHandler(BaseHandler):
                     session_id=session_id,
                     llm_config=payload.llm_config.model_dump() if payload.llm_config else None,
                     tools=available_tools_definitions if available_tools_definitions else None,
-                    tool_choice=payload.tool_choice # Puede ser 'auto', 'none', o specific
+                    tool_choice=payload.tool_choice, # Puede ser 'auto', 'none', o specific
+                    task_id=task_id
                 )
                 total_llm_calls += 1
                 if llm_response_data.get("total_tokens"):

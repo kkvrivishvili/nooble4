@@ -3,9 +3,10 @@ Handler para chat simple con RAG.
 """
 import logging
 import time
+import uuid
 from typing import Dict, Any, Optional
 from common.handlers.base_handler import BaseHandler
-from common.config.base_settings import CommonAppSettings
+from ..config.settings import ExecutionServiceSettings
 from common.errors.exceptions import ExternalServiceError
 
 from ..clients.query_client import QueryClient
@@ -16,18 +17,17 @@ logger = logging.getLogger(__name__)
 class SimpleChatHandler(BaseHandler):
     """Handler para modo simple: Chat + RAG."""
 
-    def __init__(self, app_settings: CommonAppSettings):
-        super().__init__(app_settings)
-        
-        # Solo necesitamos QueryClient, no LLMClient
-        query_url = getattr(app_settings, 'query_service_url', 'http://localhost:8002')
-        self.query_client = QueryClient(base_url=query_url) 
+    def __init__(self, query_client: QueryClient, settings: ExecutionServiceSettings):
+        super().__init__(settings) # BaseHandler espera CommonAppSettings, ExecutionServiceSettings hereda de ella
+        self.query_client = query_client
+        self.settings = settings 
 
     async def execute_simple_chat(
         self,
         payload: ExecuteSimpleChatPayload,
         tenant_id: str,
-        session_id: str
+        session_id: str,
+        task_id: uuid.UUID
     ) -> ExecuteSimpleChatResponse:
         """
         Ejecuta chat simple con o sin RAG, delegando siempre al Query Service.
@@ -48,7 +48,8 @@ class SimpleChatHandler(BaseHandler):
                     tenant_id=tenant_id,
                     session_id=session_id,
                     collection_ids=payload.collection_ids,
-                    llm_config=payload.llm_config.model_dump() if payload.llm_config else None
+                    llm_config=payload.llm_config.model_dump() if payload.llm_config else None,
+                    task_id=task_id
                 )
                 
                 response_text = result.get("response", "")
@@ -78,7 +79,8 @@ class SimpleChatHandler(BaseHandler):
                     messages=messages,
                     tenant_id=tenant_id,
                     session_id=session_id,
-                    llm_config=payload.llm_config.model_dump() if payload.llm_config else None
+                    llm_config=payload.llm_config.model_dump() if payload.llm_config else None,
+                    task_id=task_id
                 )
                 
                 response_text = result.get("response", "")
