@@ -185,3 +185,68 @@ class SimpleChatResponse(BaseModel):
     execution_time_ms: int = Field(..., description="Tiempo de ejecución")
     
     model_config = {"extra": "forbid"}
+
+
+class ToolDefinition(BaseModel):
+    """Representa una herramienta."""
+    name: str = Field(..., description="Nombre de la herramienta")
+    description: str = Field(..., description="Descripción de la herramienta")
+    functions: List[Dict[str, Any]] = Field(..., description="Funciones disponibles")
+    
+    model_config = {"extra": "forbid"}
+
+
+class ToolCall(BaseModel):
+    """Representa una llamada a herramienta."""
+    id: str = Field(..., description="ID único de la llamada")
+    type: str = Field(default="function")
+    function: Dict[str, Any] = Field(..., description="Función llamada y argumentos")
+    
+    model_config = {"extra": "forbid"}
+
+
+# =============================================================================
+# ADVANCE CHAT PAYLOAD (Unificado)
+# =============================================================================
+
+class AdvanceChatPayload(BaseModel):
+    """Payload unificado para advance chat con RAG y Tools."""
+    # Mensaje principal
+    user_message: str = Field(..., min_length=1)
+    
+    # Configuración de chat (compatible con Groq)
+    chat_model: ChatModel = Field(default=ChatModel.LLAMA3_70B)
+    system_prompt: str = Field(
+        default="You are a helpful AI assistant. Use the provided context and tools to answer questions accurately."
+    )
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=4096, gt=0)
+    top_p: float = Field(default=1.0, ge=0.0, le=1.0)
+    
+    # Campos para advance chat (tools)
+    tools: Optional[List[ToolDefinition]] = Field(None, description="Herramientas disponibles")
+    tool_choice: Optional[Union[Literal["none", "auto"], Dict[str, Any]]] = Field(None)
+    
+    # Configuración de RAG
+    collection_ids: List[str] = Field(..., min_items=1)
+    document_ids: Optional[List[str]] = None
+    top_k: int = Field(default=5, gt=0, le=20)
+    similarity_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
+    
+    # Historial de conversación
+    conversation_history: List[ChatMessage] = Field(default_factory=list)
+    
+    model_config = {"extra": "forbid"}
+
+
+class AdvanceChatResponse(BaseModel):
+    """Respuesta unificada para advance chat."""
+    message: Optional[str] = Field(None, description="Respuesta del asistente (si la hay)")
+    tool_calls: Optional[List[ToolCall]] = Field(None, description="Llamadas a herramientas")
+    sources: List[str] = Field(default_factory=list, description="IDs de documentos usados")
+    usage: TokenUsage = Field(..., description="Uso de tokens")
+    query_id: str = Field(..., description="ID único de la consulta")
+    conversation_id: str = Field(..., description="ID de la conversación")
+    execution_time_ms: int = Field(..., description="Tiempo de ejecución")
+    
+    model_config = {"extra": "forbid"}
