@@ -7,13 +7,13 @@ import uuid
 from typing import Dict, Any
 
 from common.handlers.base_handler import BaseHandler
-from common.errors.exceptions import ExternalServiceError, AppValidationError
+from common.errors.exceptions import ExternalServiceError
+from common.models.chat_models import SimpleChatPayload, SimpleChatResponse
+
 from ..config.settings import ExecutionServiceSettings
 from ..clients.query_client import QueryClient
 from ..clients.conversation_client import ConversationClient
-from common.models.chat_models import SimpleChatPayload, SimpleChatResponse, ChatMessage
-
-logger = logging.getLogger(__name__)
+from ..models.execution_payloads import ExecutionSimpleChatPayload
 
 
 class SimpleChatHandler(BaseHandler):
@@ -28,80 +28,89 @@ class SimpleChatHandler(BaseHandler):
         super().__init__(settings)
         self.query_client = query_client
         self.conversation_client = conversation_client
-        self._logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     async def handle_simple_chat(
         self,
-        payload: SimpleChatPayload,  # Usar modelo unificado (tipo de common.models)
+        payload: ExecutionSimpleChatPayload,
         tenant_id: str,
         session_id: str,
         task_id: uuid.UUID
-    ) -> SimpleChatResponse:  # Retornar modelo unificado
+    ) -> SimpleChatResponse:
         """
         Ejecuta chat simple delegando al Query Service.
-        
-        El Query Service se encarga de:
-        1. Realizar búsqueda RAG
-        2. Enviar chunks a Groq
-        3. Retornar respuesta final
         """
-        # conversation_id y message_id se mantienen para el registro de conversación local
+        start_time = time.time()
         conversation_id = str(uuid.uuid4())
         message_id = str(uuid.uuid4())
         
         try:
-            self._logger.info(
+            self.logger.info(
                 f"Procesando chat simple",
                 extra={
                     "tenant_id": tenant_id,
                     "session_id": session_id,
-                    "conversation_id": conversation_id # Usa el conversation_id local para logging
+                    "conversation_id": conversation_id,
+                    "request_id": payload.request_id
                 }
             )
 
-            # No necesita conversión, Query Service espera el mismo modelo
+            # Crear payload base sin campos específicos de Execution
+            query_payload = SimpleChatPayload(
+                user_message=payload.user_message,
+                chat_model=payload.chat_model,
+                system_prompt=payload.system_prompt,
+                temperature=payload.temperature,
+                max_tokens=payload.max_tokens,
+                top_p=payload.top_p,
+                frequency_penalty=payload.frequency_penalty,
+                presence_penalty=payload.presence_penalty,
+                stop=payload.stop,
+                embedding_model=payload.embedding_model,
+                embedding_dimensions=payload.embedding_dimensions,
+                collection_ids=payload.collection_ids,
+                document_ids=payload.document_ids,
+                top_k=payload.top_k,
+                similarity_threshold=payload.similarity_threshold,
+                conversation_history=payload.conversation_history
+            )
+
+            # Delegar al Query Service
             query_response = await self.query_client.query_simple(
-                payload=payload.model_dump(),  # Enviar todo el payload
+                payload=query_payload.model_dump(),
                 tenant_id=tenant_id,
                 session_id=session_id,
                 task_id=task_id
             )
+
+            # Parsear respuesta
+            response = SimpleChatResponse.model_validate(query_response)
             
-            # Extraer datos de query_response para guardar la conversación.
-            # Se asume que query_response es un diccionario con las claves necesarias.
-            agent_message_content = query_response["message"]
-            response_sources = query_response["sources"]
+            # Actualizar conversation_id con el nuestro
+            response.conversation_id = conversation_id
 
             # Guardar conversación (fire-and-forget)
-            # Se asume que payload.user_message y payload.collection_ids siguen siendo válidos
-            # con el nuevo SimpleChatPayload de common.models.
             await self.conversation_client.save_conversation(
                 conversation_id=conversation_id,
                 message_id=message_id,
-                user_message=payload.user_message, 
-                agent_message=agent_message_content,
+                user_message=payload.user_message,
+                agent_message=response.message,
                 tenant_id=tenant_id,
                 session_id=session_id,
                 task_id=task_id,
                 metadata={
                     "mode": "simple",
-                    "collections": payload.collection_ids, 
-                    "sources": response_sources
+                    "collections": payload.collection_ids,
+                    "sources": response.sources,
+                    "request_id": payload.request_id,
+                    "client_metadata": payload.client_metadata,
+                    "token_usage": response.usage.model_dump()
                 }
             )
 
-            # Construir respuesta unificada usando datos de query_response
-            return SimpleChatResponse(
-                message=query_response["message"],
-                sources=query_response["sources"],
-                usage=query_response["usage"],
-                query_id=query_response["query_id"],
-                conversation_id=conversation_id, # Se usa el conversation_id generado localmente
-                execution_time_ms=query_response["execution_time_ms"]
-            )
+            return response
 
         except ExternalServiceError:
             raise
         except Exception as e:
-            self._logger.error(f"Error en simple chat handler: {e}", exc_info=True)
+            self.logger.error(f"Error en simple chat handler: {e}", exc_info=True)
             raise ExternalServiceError(f"Error procesando chat simple: {str(e)}")

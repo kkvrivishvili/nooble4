@@ -45,16 +45,25 @@ class QueryClient:
 
     async def query_simple(
         self,
-        payload: Dict[str, Any],  # Recibe el payload completo serializado
+        payload: Dict[str, Any],
         tenant_id: str,
         session_id: str,
         task_id: uuid.UUID,
         timeout: Optional[int] = None
     ) -> Dict[str, Any]:
-        """Realiza una consulta simple con RAG integrado."""
-        # El payload ya viene serializado desde SimpleChatHandler
-        # payload contiene user_message, collection_ids, agent_config, etc.
+        """
+        Realiza una consulta simple con RAG integrado.
         
+        Args:
+            payload: SimpleChatPayload serializado
+            tenant_id: ID del tenant
+            session_id: ID de sesión
+            task_id: ID de tarea
+            timeout: Timeout opcional
+            
+        Returns:
+            Dict con SimpleChatResponse serializado
+        """
         action = DomainAction(
             action_id=uuid.uuid4(),
             action_type=ACTION_QUERY_SIMPLE,
@@ -91,6 +100,8 @@ class QueryClient:
         except Exception as e:
             self._logger.error(f"Error en query.simple: {e}", exc_info=True)
             raise ExternalServiceError(f"Error comunicándose con Query Service: {str(e)}")
+
+    # Los otros métodos (query_advance, query_rag) se actualizarán similarmente...
 
     async def query_advance(
         self,
