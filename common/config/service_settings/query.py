@@ -45,7 +45,6 @@ class QueryServiceSettings(CommonAppSettings):
     )
     
     # Vector Store Configuration
-    vector_db_url: str = Field(default="http://localhost:8006", description="URL del servicio de base de datos vectorial")
     similarity_threshold: float = Field(default=0.7, description="Umbral de similitud mínimo para considerar un resultado relevante")
     default_top_k: int = Field(default=5, description="Número de resultados (chunks) a recuperar por defecto de la base de datos vectorial")
     

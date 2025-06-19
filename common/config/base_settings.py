@@ -40,3 +40,19 @@ class CommonAppSettings(BaseSettings):
 
     # Configuración de Base de Datos (Opcional por servicio)
     database_url: Optional[str] = Field(None, description="URL de conexión a la base de datos principal (ej. PostgreSQL, MySQL).")
+
+    # Configuración de Qdrant
+    qdrant_url: Optional[AnyHttpUrl] = Field(None, description="URL del servicio Qdrant, ej: http://localhost:6333")
+    qdrant_api_key: Optional[str] = Field(None, description="API Key para Qdrant (si es requerida).")
+
+    # Configuración de OpenAI
+    openai_api_key: Optional[str] = Field(None, description="API Key para OpenAI.")
+    openai_embedding_model: str = Field("text-embedding-ada-002", description="Modelo de embedding de OpenAI a utilizar.")
+    openai_timeout_seconds: int = Field(30, description="Timeout para las llamadas a la API de OpenAI.")
+    openai_max_retries: int = Field(3, description="Máximos reintentos para las llamadas a la API de OpenAI.")
+
+    # Configuración de Groq
+    groq_api_key: Optional[str] = Field(None, description="API Key para Groq.")
+    groq_model_name: str = Field("mixtral-8x7b-32768", description="Modelo de Groq a utilizar para LLM.")
+    groq_timeout_seconds: int = Field(60, description="Timeout para las llamadas a la API de Groq.")
+    groq_max_retries: int = Field(3, description="Máximos reintentos para las llamadas a la API de Groq.")

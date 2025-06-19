@@ -23,18 +23,10 @@ class QueryServiceSettings(CommonQueryServiceSettings):
     service_name: str = Field(default="query_service")
     service_version: str = Field(default="2.0.0")
     
-    # Redis
-    redis_url: str = Field(..., description="URL de Redis")
-    
     # Timeouts del servicio
     search_timeout_seconds: int = Field(default=30, description="Timeout para búsquedas vectoriales")
     
-    # Vector Store
-    # TODO: Cambiar a configuración local de Qdrant cuando esté implementado
-    vector_db_url: str = Field(..., description="URL del vector store")
-    
-    # Groq API (necesario para el cliente)
-    groq_api_key: str = Field(..., description="API key de Groq")
+    # Worker configuration
     
     # Worker configuration
     worker_count: int = Field(default=2, gt=0, description="Número de workers")

@@ -43,7 +43,7 @@ class SimpleHandler(BaseHandler):
         
         # TODO: Cambiar a Qdrant local cuando esté implementado
         self.vector_client = VectorClient(
-            base_url=app_settings.vector_db_url,
+            base_url=str(app_settings.qdrant_url) if app_settings.qdrant_url else None,
             timeout=app_settings.search_timeout_seconds
         )
         
