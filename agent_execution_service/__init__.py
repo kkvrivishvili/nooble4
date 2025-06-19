@@ -1,7 +1,8 @@
 """
-Agent Execution Service - Servicio de ejecución de agentes de IA.
+Agent Execution Service.
 
-Este servicio es responsable de ejecutar agentes de IA, gestionando su ciclo de vida y procesando acciones de dominio asíncronas.
+Servicio para ejecución de agentes conversacionales y ReAct.
 """
 
 __version__ = "1.0.0"
+__author__ = "Nooble4 Team"

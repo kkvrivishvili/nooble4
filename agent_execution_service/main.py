@@ -1,128 +1,219 @@
 """
 Punto de entrada principal para Agent Execution Service.
-
-MODIFICADO: Integración completa con sistema de colas por tier.
 """
-
 import asyncio
 import logging
+import signal
 from contextlib import asynccontextmanager
-
+from typing import List
+import uvicorn
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
-from common.errors import setup_error_handling
+from common.clients.redis.redis_manager import RedisManager
 from common.utils.logging import init_logging
-from common.helpers.health import register_health_routes
-from common.redis_pool import get_redis_client
-from common.services.domain_queue_manager import DomainQueueManager
-from agent_execution_service.workers.execution_worker import ExecutionWorker
-from agent_execution_service.config.settings import get_settings
+from .config.settings import ExecutionServiceSettings
+from .workers.execution_worker import ExecutionWorker
 
-settings = get_settings()
-logger = logging.getLogger(__name__)
-
-# Worker global
-execution_worker = None
-queue_manager = None
+# Variables globales para gestión de recursos
+redis_manager: RedisManager = None
+workers: List[ExecutionWorker] = []
+settings: ExecutionServiceSettings = None
+worker_tasks: List[asyncio.Task] = []
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Gestiona el ciclo de vida de la aplicación."""
-    global execution_worker, queue_manager
-    
-    logger.info("Iniciando Agent Execution Service")
+    """Gestor del ciclo de vida de la aplicación."""
+    global redis_manager, workers, settings, worker_tasks
     
     try:
-        # Inicializar Redis y Queue Manager
-        redis_client = await get_redis_client()
-        queue_manager = DomainQueueManager(redis_client)
+        # Cargar configuración
+        settings = ExecutionServiceSettings()
         
-        # Verificar conexión Redis
-        await redis_client.ping()
-        logger.info("Conexión a Redis establecida")
+        # Inicializar logging
+        init_logging(
+            log_level=settings.log_level,
+            service_name=settings.service_name
+        )
         
-        # Inicializar worker con queue_manager
-        execution_worker = ExecutionWorker(redis_client, queue_manager)
+        logger = logging.getLogger(__name__)
+        logger.info(f"Iniciando {settings.service_name} v{settings.service_version}")
         
-        # Iniciar worker en background
-        worker_task = asyncio.create_task(execution_worker.start())
-        logger.info("ExecutionWorker iniciado con DomainQueueManager")
+        # Validar configuración crítica
+        if not settings.redis_url:
+            logger.error("REDIS_URL no configurado")
+            raise ValueError("REDIS_URL es requerido")
         
-        # Hacer queue_manager disponible para la app
-        app.state.queue_manager = queue_manager
-        app.state.redis_client = redis_client
+        # Inicializar Redis Manager
+        redis_manager = RedisManager(settings)
+        redis_client = await redis_manager.get_client()
+        logger.info("Conexión Redis establecida")
+        
+        # Crear workers
+        workers = []
+        for i in range(settings.worker_count):
+            worker = ExecutionWorker(
+                app_settings=settings,
+                async_redis_conn=redis_client,
+                consumer_id_suffix=f"worker-{i}"
+            )
+            workers.append(worker)
+        
+        # Inicializar workers
+        for worker in workers:
+            await worker.initialize()
+        
+        # Iniciar workers como tareas
+        worker_tasks = []
+        for worker in workers:
+            task = asyncio.create_task(
+                worker.run(),
+                name=f"worker-{worker.consumer_name}"
+            )
+            worker_tasks.append(task)
+        
+        logger.info(f"Servicio {settings.service_name} iniciado con {len(workers)} workers")
         
         yield
         
+    except Exception as e:
+        logger.error(f"Error durante el startup: {e}")
+        raise
     finally:
-        logger.info("Deteniendo Agent Execution Service")
+        # Cleanup
+        logger.info("Iniciando shutdown del servicio...")
         
-        # Detener worker
-        if execution_worker:
-            await execution_worker.stop()
-        
-        # Cancelar task
-        if 'worker_task' in locals():
-            worker_task.cancel()
-            try:
-                await worker_task
-            except asyncio.CancelledError:
-                pass
-        
-        # Cerrar conexiones Redis
-        if queue_manager and hasattr(queue_manager, 'redis'):
-            await queue_manager.redis.close()
+        try:
+            # Detener workers
+            for worker in workers:
+                try:
+                    await worker.stop()
+                except Exception as e:
+                    logger.error(f"Error deteniendo worker: {e}")
+            
+            # Cancelar tareas de workers
+            for task in worker_tasks:
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+            
+            # Cleanup de workers
+            for worker in workers:
+                try:
+                    await worker.cleanup()
+                except Exception as e:
+                    logger.error(f"Error en cleanup de worker: {e}")
+            
+            # Cerrar Redis
+            if redis_manager:
+                await redis_manager.close()
+            
+            logger.info("Servicio detenido correctamente")
+            
+        except Exception as e:
+            logger.error(f"Error durante shutdown: {e}")
 
-# Crear aplicación
+# Crear aplicación FastAPI
 app = FastAPI(
     title="Agent Execution Service",
-    description="Servicio de ejecución de agentes con colas por tier",
-    version=settings.service_version,
+    description="Servicio de ejecución de agentes conversacionales y ReAct",
+    version="1.0.0",
     lifespan=lifespan
 )
 
-# Configurar CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # En producción, especificar orígenes permitidos
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+@app.get("/")
+async def root():
+    """Endpoint raíz."""
+    return {
+        "service": "agent_execution_service",
+        "version": "1.0.0",
+        "status": "running"
+    }
 
-# Configurar manejo de errores
-setup_error_handling(app)
+@app.get("/health")
+async def health_check():
+    """Health check básico."""
+    return {"status": "healthy"}
 
-# Registrar health routes
-register_health_routes(app)
+@app.get("/health/detailed")
+async def detailed_health_check():
+    """Health check detallado."""
+    global redis_manager, workers, settings
+    
+    health_status = {
+        "service": "agent_execution_service",
+        "status": "healthy",
+        "workers": {
+            "configured": len(workers),
+            "running": 0
+        },
+        "redis_connected": False
+    }
+    
+    # Verificar workers
+    try:
+        running_workers = sum(1 for w in workers if w._running)
+        health_status["workers"]["running"] = running_workers
+        
+        if running_workers == 0 and len(workers) > 0:
+            health_status["status"] = "degraded"
+            
+    except Exception as e:
+        health_status["workers"]["error"] = str(e)
+    
+    # Verificar Redis
+    try:
+        if redis_manager:
+            redis_client = await redis_manager.get_client()
+            await redis_client.ping()
+            health_status["redis_connected"] = True
+    except Exception as e:
+        health_status["status"] = "unhealthy"
+        health_status["redis_error"] = str(e)
+    
+    return health_status
 
-# Health checks específicos del execution service
-@app.get("/metrics/overview")
-async def get_metrics_overview():
-    """Métricas generales del execution service."""
-    if execution_worker:
-        return await execution_worker.get_execution_stats()
-    else:
-        return {"error": "Worker no inicializado"}
+@app.get("/metrics")
+async def metrics():
+    """Métricas básicas del servicio."""
+    global workers
+    
+    metrics_data = {
+        "workers_total": len(workers),
+        "workers_running": sum(1 for w in workers if getattr(w, '_running', False)),
+        "service_version": "1.0.0"
+    }
+    
+    return metrics_data
 
-@app.get("/metrics/queues")
-async def get_queue_metrics():
-    """Métricas específicas de colas."""
-    if queue_manager:
-        return await queue_manager.get_queue_stats(settings.domain_name)
-    else:
-        return {"error": "Queue manager no inicializado"}
+async def shutdown_handler():
+    """Handler para shutdown graceful."""
+    logger = logging.getLogger(__name__)
+    logger.info("Recibida señal de shutdown...")
+    
+    # FastAPI se encarga del shutdown via lifespan
 
-# Configurar logging
-init_logging(settings.log_level, service_name="agent-execution-service")
+def setup_signal_handlers():
+    """Configura handlers para señales del sistema."""
+    if hasattr(signal, 'SIGTERM'):
+        signal.signal(signal.SIGTERM, lambda s, f: asyncio.create_task(shutdown_handler()))
+    if hasattr(signal, 'SIGINT'):
+        signal.signal(signal.SIGINT, lambda s, f: asyncio.create_task(shutdown_handler()))
 
 if __name__ == "__main__":
-    import uvicorn
+    # Configurar signal handlers
+    setup_signal_handlers()
+    
+    # Cargar configuración para desarrollo
+    dev_settings = ExecutionServiceSettings()
+    
     uvicorn.run(
-        "main:app", 
-        host="0.0.0.0", 
-        port=8005,
-        reload=True,
-        log_level="info"
+        "agent_execution_service.main:app",
+        host="0.0.0.0",
+        port=8005,  # Puerto específico para este servicio
+        reload=False,  # Cambiar a False para producción
+        log_level=dev_settings.log_level.lower(),
+        access_log=True
     )

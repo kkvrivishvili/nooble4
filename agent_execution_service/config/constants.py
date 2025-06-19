@@ -1,45 +1,50 @@
 """
-Constantes para el Agent Execution Service.
-
-Este módulo define constantes y valores estáticos utilizados por el servicio
-de ejecución de agentes. Las configuraciones variables se gestionan en settings.py.
+Constantes para Agent Execution Service.
 """
+from enum import Enum
+from typing import Dict
 
-# Constantes de LangChain
-DEFAULT_CONVERSATION_MEMORY_KEY = None
-
-# Constantes de Colas y Processing
-# (Si hay constantes específicas de colas que no son configurables, van aquí)
-
-# Constantes para LLM
-class LLMProviders:
+class LLMProviders(str, Enum):
+    """Proveedores de LLM soportados."""
     OPENAI = "openai"
-    ANTHROPIC = "anthropic"
     GROQ = "groq"
-    AZURE_OPENAI = "azure_openai"
-    OLLAMA = "ollama"
-    COHERE = "cohere"
+    ANTHROPIC = "anthropic"
 
-# Modelos por defecto para cada proveedor (usado por el validador en settings.py)
-DEFAULT_MODELS = {
-    LLMProviders.OPENAI: "gpt-4",
-    LLMProviders.ANTHROPIC: "claude-3-sonnet-20240229",
-    LLMProviders.GROQ: "llama3-70b-8192",
-    LLMProviders.AZURE_OPENAI: "gpt-4", # Asegúrate que este sea el nombre correcto del deployment/modelo en Azure
-    LLMProviders.OLLAMA: "llama3",
-    LLMProviders.COHERE: "command-r-plus"
+class AgentTypes(str, Enum):
+    """Tipos de agentes soportados."""
+    CONVERSATIONAL = "conversational"  # Modo simple: Chat + RAG
+    REACT = "react"  # Modo avanzado: ReAct pattern
+
+class ExecutionModes(str, Enum):
+    """Modos de ejecución."""
+    SIMPLE = "simple"  # Chat + RAG básico
+    ADVANCED = "advanced"  # ReAct con herramientas
+
+# Modelos por defecto por proveedor
+DEFAULT_MODELS: Dict[str, str] = {
+    LLMProviders.OPENAI: "gpt-4-turbo-preview",
+    LLMProviders.GROQ: "llama-3.3-70b-versatile", 
+    LLMProviders.ANTHROPIC: "claude-3-5-sonnet-20241022"
 }
 
-# Constantes para cache
-# (Si hay constantes específicas de cache que no son configurables, van aquí)
+# Prompts del sistema para ReAct
+REACT_SYSTEM_PROMPT = """You are a helpful AI assistant that can reason about problems and use tools to solve them.
 
-# Constantes para validación por tier
-# (Si hay constantes específicas de validación que no son configurables, van aquí)
+You have access to the following tools:
+{tools_description}
 
-# Constantes para Endpoints
-class EndpointPaths:
-    HEALTH = "/health"
-    EXECUTE = "/execute"
-    STREAM = "/stream"
-    TOOLS = "/tools"
-    STOP = "/stop/{execution_id}"
+When responding, follow this format:
+Thought: Think about what you need to do
+Action: tool_name
+Action Input: {{"parameter": "value"}}
+Observation: [Tool output will appear here]
+
+You can repeat this cycle as needed. When ready to answer:
+Thought: I now have enough information to answer
+Final Answer: [Your complete response]
+
+Rules:
+- Think step by step
+- Use tools when needed
+- Provide clear final answers
+"""
