@@ -16,6 +16,8 @@ from ..models.payloads import (
 from ..handlers.simple_chat_handler import SimpleChatHandler
 from ..handlers.react_handler import ReactHandler
 from ..config.settings import ExecutionServiceSettings
+from ..clients.query_client import QueryClient
+from ..tools.tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -35,19 +37,25 @@ class ExecutionService(BaseService):
             raise ValueError("app_settings debe ser una instancia de ExecutionServiceSettings")
         
         self.settings = app_settings
+
+        # Inicializar QueryClient
+        self.query_client = QueryClient(base_url=self.settings.query_service_url)
+
+        # Inicializar ToolRegistry y registrar herramientas
+        self.tool_registry = ToolRegistry()
+        self._register_default_tools()
         
-        # Inicializar handlers
-        self.simple_chat_handler = SimpleChatHandler(app_settings)
-        self.react_handler = ReactHandler(app_settings)
+        # Inicializar handlers con dependencias actualizadas
+        self.simple_chat_handler = SimpleChatHandler(self.query_client, self.settings)
+        self.react_handler = ReactHandler(self.query_client, self.tool_registry, self.settings)
         
-        # Setup de handlers
-        self._setup_handlers_task = None
+        self._logger.info("ExecutionService handlers inicializados con QueryClient y ToolRegistry.")
 
     async def initialize(self):
         """Inicializa el servicio y sus handlers."""
         try:
-            # Configurar handlers con API keys disponibles
-            await self._setup_handlers()
+            # La configuración de API keys ahora se maneja a través del QueryService
+            # y los handlers utilizan QueryClient. _setup_handlers ya no es necesario aquí.
             
             self._logger.info(f"ExecutionService inicializado correctamente")
             
@@ -55,38 +63,16 @@ class ExecutionService(BaseService):
             self._logger.error(f"Error inicializando ExecutionService: {e}")
             raise
 
-    async def _setup_handlers(self):
-        """Configura los handlers con API keys."""
-        try:
-            # Configurar SimpleChatHandler con LLM si hay API key
-            if self.settings.groq_api_key:
-                await self.simple_chat_handler.setup_llm_client(
-                    provider="groq", 
-                    api_key=self.settings.groq_api_key
-                )
-            elif self.settings.openai_api_key:
-                await self.simple_chat_handler.setup_llm_client(
-                    provider="openai", 
-                    api_key=self.settings.openai_api_key
-                )
-            
-            # Configurar ReactHandler
-            if self.settings.groq_api_key:
-                await self.react_handler.setup(
-                    api_key=self.settings.groq_api_key, 
-                    provider="groq"
-                )
-            elif self.settings.openai_api_key:
-                await self.react_handler.setup(
-                    api_key=self.settings.openai_api_key, 
-                    provider="openai"
-                )
-            
-            self._logger.info("Handlers configurados correctamente")
-            
-        except Exception as e:
-            self._logger.error(f"Error configurando handlers: {e}")
-            raise
+    def _register_default_tools(self) -> None:
+        """Registra las herramientas por defecto en el ToolRegistry."""
+        # Ejemplo de cómo se podrían registrar herramientas:
+        # from ..tools.example_tools import ExampleSearchTool # Suponiendo que existe
+        # search_tool = ExampleSearchTool()
+        # self.tool_registry.register_tool(search_tool)
+        # self._logger.info(f"Herramienta '{search_tool.name}' registrada.")
+        # Por ahora, lo dejamos vacío hasta que definamos herramientas concretas.
+        self._logger.info("No hay herramientas por defecto para registrar en esta etapa.")
+        pass
 
     async def process_action(self, action: DomainAction) -> Optional[Dict[str, Any]]:
         """

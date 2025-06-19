@@ -48,3 +48,13 @@ Rules:
 - Use tools when needed
 - Provide clear final answers
 """
+
+# System prompt for ReAct when using direct tool calling (e.g., OpenAI functions/tools)
+REACT_TOOL_SYSTEM_PROMPT = """You are a helpful AI assistant.
+
+You have access to the following tools. Use them when necessary to answer the user's request.
+{tools_description}
+
+If you need to use a tool, call it by its name and provide the required arguments.
+If you can answer directly without a tool, please do so.
+"""

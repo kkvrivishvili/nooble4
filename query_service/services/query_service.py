@@ -19,10 +19,12 @@ from ..models.payloads import (
     QueryGeneratePayload,
     QuerySearchPayload,
     QueryStatusPayload,
-    QueryErrorResponse
+    QueryErrorResponse,
+    LLMDirectPayload # NUEVO
 )
 from ..handlers.rag_handler import RAGHandler
 from ..handlers.search_handler import SearchHandler
+from ..handlers.llm_handler import LLMHandler # NUEVO
 
 
 class QueryService(BaseService):
@@ -53,6 +55,12 @@ class QueryService(BaseService):
         )
         
         self.search_handler = SearchHandler(
+            app_settings=app_settings,
+            direct_redis_conn=direct_redis_conn
+        )
+        
+        # NUEVO: Inicializar LLM handler
+        self.llm_handler = LLMHandler(
             app_settings=app_settings,
             direct_redis_conn=direct_redis_conn
         )
@@ -99,6 +107,10 @@ class QueryService(BaseService):
                 
             elif action.action_type == "query.status":
                 return await self._handle_status(action)
+                
+            # NUEVO: Routing para LLM directo
+            elif action.action_type == "query.llm.direct":
+                return await self._handle_llm_direct(action)
                 
             else:
                 self._logger.warning(f"Tipo de acción no soportado: {action.action_type}")
@@ -240,3 +252,47 @@ class QueryService(BaseService):
             "message": "La funcionalidad de status check no está implementada en esta versión",
             "query_id": action.data.get("query_id")
         }
+
+    # NUEVO MÉTODO
+    async def _handle_llm_direct(self, action: DomainAction) -> Dict[str, Any]:
+        """
+        Maneja la acción query.llm.direct para llamadas directas al LLM.
+        
+        Args:
+            action: DomainAction con LLMDirectPayload
+            
+        Returns:
+            Diccionario con LLMDirectResponse
+        """
+        # Validar y parsear payload
+        payload = LLMDirectPayload(**action.data)
+        
+        # Obtener configuración de metadata si existe
+        config_overrides = action.metadata or {}
+        
+        # Delegar al LLM handler
+        response = await self.llm_handler.process_llm_direct(
+            messages=payload.messages,
+            tenant_id=action.tenant_id,
+            session_id=action.session_id,
+            
+            # Parámetros de LLM (con overrides de metadata)
+            llm_model=payload.llm_model or config_overrides.get("llm_model"),
+            temperature=payload.temperature or config_overrides.get("temperature"),
+            max_tokens=payload.max_tokens or config_overrides.get("max_tokens"),
+            top_p=payload.top_p or config_overrides.get("top_p"),
+            frequency_penalty=payload.frequency_penalty,
+            presence_penalty=payload.presence_penalty,
+            stop_sequences=payload.stop_sequences,
+            
+            # Tool calling
+            tools=payload.tools,
+            tool_choice=payload.tool_choice,
+            
+            # Contexto
+            user_id=payload.user_id,
+            trace_id=action.trace_id,
+            correlation_id=action.correlation_id
+        )
+        
+        return response.model_dump()

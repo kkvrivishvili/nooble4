@@ -9,7 +9,6 @@ from common.config.base_settings import CommonAppSettings
 from common.errors.exceptions import ExternalServiceError
 
 from ..clients.query_client import QueryClient
-from ..clients.llm_client import LLMClient
 from ..models.payloads import ExecuteSimpleChatPayload, ExecuteSimpleChatResponse
 
 logger = logging.getLogger(__name__)
@@ -20,20 +19,9 @@ class SimpleChatHandler(BaseHandler):
     def __init__(self, app_settings: CommonAppSettings):
         super().__init__(app_settings)
         
-        # Inicializar cliente Query Service
+        # Solo necesitamos QueryClient, no LLMClient
         query_url = getattr(app_settings, 'query_service_url', 'http://localhost:8002')
-        self.query_client = QueryClient(base_url=query_url)
-        
-        # Cliente LLM (se inicializa cuando sea necesario)
-        self.llm_client: Optional[LLMClient] = None
-
-    async def setup_llm_client(self, provider: str, api_key: str):
-        """Configura el cliente LLM."""
-        if self.llm_client:
-            await self.llm_client.close()
-        
-        self.llm_client = LLMClient(provider=provider, api_key=api_key)
-        self._logger.info(f"Cliente LLM configurado para proveedor: {provider}")
+        self.query_client = QueryClient(base_url=query_url) 
 
     async def execute_simple_chat(
         self,
@@ -42,7 +30,7 @@ class SimpleChatHandler(BaseHandler):
         session_id: str
     ) -> ExecuteSimpleChatResponse:
         """
-        Ejecuta chat simple con RAG delegando al Query Service.
+        Ejecuta chat simple con o sin RAG, delegando siempre al Query Service.
         """
         start_time = time.time()
         
@@ -52,7 +40,7 @@ class SimpleChatHandler(BaseHandler):
             )
 
             if payload.use_rag:
-                # Delegar completamente al Query Service para RAG
+                # Delegar al Query Service para RAG
                 self._logger.debug("Usando RAG - delegando al Query Service")
                 
                 result = await self.query_client.query_with_rag(
@@ -66,16 +54,13 @@ class SimpleChatHandler(BaseHandler):
                 response_text = result.get("response", "")
                 sources = result.get("sources", [])
                 context = result.get("context", "")
-                tokens_used = result.get("tokens_used")
+                tokens_used = result.get("tokens_used") 
                 
             else:
-                # Chat directo sin RAG
-                self._logger.debug("Chat directo sin RAG")
+                # Chat directo sin RAG - TAMBIÉN delegando al Query Service
+                self._logger.debug("Chat directo sin RAG - delegando al Query Service")
                 
-                if not self.llm_client:
-                    raise ExternalServiceError("Cliente LLM no configurado para chat directo")
-                
-                # Construir mensajes
+                # Construir mensajes para LLM directo
                 messages = []
                 
                 if payload.system_prompt:
@@ -88,24 +73,18 @@ class SimpleChatHandler(BaseHandler):
                 # Agregar mensaje del usuario
                 messages.append({"role": "user", "content": payload.user_message})
                 
-                # Configuración LLM
-                llm_config = payload.llm_config or {}
-                model = getattr(llm_config, 'model_name', 'llama-3.3-70b-versatile')
-                temperature = getattr(llm_config, 'temperature', 0.7)
-                max_tokens = getattr(llm_config, 'max_tokens', 1024)
-                
-                # Llamar al LLM
-                llm_response = await self.llm_client.generate_response(
+                # Llamar Query Service para LLM directo
+                result = await self.query_client.llm_direct(
                     messages=messages,
-                    model=model,
-                    temperature=temperature,
-                    max_tokens=max_tokens
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    llm_config=payload.llm_config.model_dump() if payload.llm_config else None
                 )
                 
-                response_text = llm_response["choices"][0]["message"]["content"]
-                sources = []
-                context = None
-                tokens_used = llm_response.get("usage", {}).get("total_tokens")
+                response_text = result.get("response", "")
+                sources = [] 
+                context = None 
+                tokens_used = result.get("total_tokens") 
 
             execution_time = time.time() - start_time
 
@@ -119,14 +98,14 @@ class SimpleChatHandler(BaseHandler):
                 sources_used=sources,
                 rag_context=context,
                 execution_time_seconds=execution_time,
-                tokens_used=tokens_used
+                tokens_used=tokens_used 
             )
 
         except ExternalServiceError:
             # Re-lanzar errores de servicios externos sin modificar
             raise
         except Exception as e:
-            self._logger.error(f"Error en chat simple: {e}")
+            self._logger.error(f"Error en chat simple: {e}", exc_info=True) 
             raise ExternalServiceError(
                 f"Error interno en chat simple: {str(e)}",
                 original_exception=e
@@ -135,12 +114,9 @@ class SimpleChatHandler(BaseHandler):
     async def cleanup(self):
         """Limpia recursos del handler."""
         try:
-            if hasattr(self.query_client, 'close'):
+            if hasattr(self.query_client, 'close') and callable(getattr(self.query_client, 'close')):
                 await self.query_client.close()
-            
-            if self.llm_client:
-                await self.llm_client.close()
                 
             self._logger.debug("SimpleChatHandler limpiado correctamente")
         except Exception as e:
-            self._logger.error(f"Error limpiando SimpleChatHandler: {e}")
+            self._logger.error(f"Error limpiando SimpleChatHandler: {e}", exc_info=True) 

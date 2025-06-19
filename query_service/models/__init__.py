@@ -11,7 +11,10 @@ from .payloads import (
     QuerySearchResponse,
     QueryErrorResponse,
     EmbeddingRequest,
-    CollectionConfig
+    CollectionConfig,
+    LLMDirectPayload,
+    LLMDirectResponse,
+    ToolCall
 )
 
 __all__ = [
@@ -23,5 +26,8 @@ __all__ = [
     'QuerySearchResponse',
     'QueryErrorResponse',
     'EmbeddingRequest',
-    'CollectionConfig'
+    'CollectionConfig',
+    'LLMDirectPayload',
+    'LLMDirectResponse',
+    'ToolCall'
 ]

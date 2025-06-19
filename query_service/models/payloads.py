@@ -168,3 +168,80 @@ class CollectionConfig(BaseModel):
     chunk_size: int
     chunk_overlap: int
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+# --- Modelos para LLM Directo ---
+
+class LLMDirectPayload(BaseModel):
+    """Payload para acción query.llm.direct - Llamada directa al LLM sin RAG."""
+    
+    messages: List[Dict[str, str]] = Field(..., description="Mensajes en formato OpenAI")
+    
+    # Configuración LLM
+    llm_model: Optional[str] = Field(None, description="Modelo LLM específico")
+    temperature: Optional[float] = Field(None, ge=0.0, le=2.0, description="Temperatura para generación")
+    max_tokens: Optional[int] = Field(None, ge=1, description="Máximo de tokens")
+    top_p: Optional[float] = Field(None, ge=0.0, le=1.0, description="Parámetro top_p")
+    frequency_penalty: Optional[float] = Field(None, ge=-2.0, le=2.0, description="Penalización por frecuencia")
+    presence_penalty: Optional[float] = Field(None, ge=-2.0, le=2.0, description="Penalización por presencia")
+    stop_sequences: Optional[List[str]] = Field(None, description="Secuencias de parada")
+    
+    # Tool calling support
+    tools: Optional[List[Dict[str, Any]]] = Field(None, description="Definiciones de herramientas")
+    tool_choice: Optional[str] = Field(None, description="Selección de herramienta ('auto', 'none', nombre específico)")
+    
+    # Contexto
+    user_id: Optional[str] = Field(None, description="ID de usuario")
+
+    @field_validator('messages')
+    @classmethod
+    def validate_messages(cls, v):
+        if not v:
+            raise ValueError("Al menos un mensaje es requerido")
+        
+        # Validar formato de mensajes
+        for msg in v:
+            if not isinstance(msg, dict):
+                raise ValueError("Cada mensaje debe ser un diccionario")
+            if 'role' not in msg or 'content' not in msg:
+                raise ValueError("Cada mensaje debe tener 'role' y 'content'")
+            if msg['role'] not in ['system', 'user', 'assistant', 'tool']:
+                raise ValueError("Role debe ser 'system', 'user', 'assistant' o 'tool'")
+        
+        return v
+
+
+class ToolCall(BaseModel):
+    """Representa una llamada a herramienta del LLM."""
+    
+    id: str = Field(..., description="ID único de la llamada")
+    type: str = Field(..., description="Tipo de llamada (generalmente 'function')")
+    function: Dict[str, Any] = Field(..., description="Detalles de la función a llamar")
+
+
+class LLMDirectResponse(BaseModel):
+    """Respuesta para query.llm.direct."""
+    
+    query_id: str = Field(..., description="ID único de la consulta")
+    
+    # Respuesta del LLM
+    response: str = Field(..., description="Respuesta generada por el LLM")
+    
+    # Tool calls si los hay
+    tool_calls: Optional[List[ToolCall]] = Field(None, description="Llamadas a herramientas solicitadas")
+    
+    # Metadatos de generación
+    llm_model: str = Field(..., description="Modelo utilizado")
+    finish_reason: str = Field(..., description="Razón de finalización")
+    
+    # Usage tokens
+    prompt_tokens: Optional[int] = Field(None, description="Tokens del prompt")
+    completion_tokens: Optional[int] = Field(None, description="Tokens de la respuesta")
+    total_tokens: Optional[int] = Field(None, description="Total de tokens")
+    
+    # Timing
+    generation_time_ms: int = Field(..., description="Tiempo de generación en ms")
+    
+    # Metadatos adicionales
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
