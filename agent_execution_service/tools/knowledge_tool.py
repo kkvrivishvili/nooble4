@@ -5,6 +5,8 @@ import logging
 from typing import Dict, Any, List, Optional
 import uuid
 
+from common.models.chat_models import EmbeddingConfig
+
 from .base_tool import BaseTool
 from ..clients.query_client import QueryClient
 
@@ -19,7 +21,7 @@ class KnowledgeTool(BaseTool):
         query_client: QueryClient,
         collection_ids: List[str],
         document_ids: Optional[List[str]],
-        embedding_config: Dict[str, Any],
+        embedding_config: EmbeddingConfig,
         tenant_id: str,
         session_id: str,
         task_id: uuid.UUID
@@ -50,13 +52,14 @@ class KnowledgeTool(BaseTool):
         try:
             self._logger.info(f"Ejecutando búsqueda RAG: {query[:100]}...")
             
+            # El query_client espera el embedding_config como dict
             result = await self.query_client.query_rag(
                 query_text=query,
                 collection_ids=self.collection_ids,
                 tenant_id=self.tenant_id,
                 session_id=self.session_id,
                 task_id=self.task_id,
-                embedding_config=self.embedding_config,
+                embedding_config=self.embedding_config.model_dump(),
                 document_ids=self.document_ids,
                 top_k=kwargs.get("top_k", 5),
                 similarity_threshold=kwargs.get("similarity_threshold")
@@ -67,7 +70,7 @@ class KnowledgeTool(BaseTool):
             for chunk in result.get("chunks", []):
                 formatted_chunks.append({
                     "content": chunk.get("content", ""),
-                    "source": chunk.get("document_id", ""),
+                    "source": chunk.get("source", ""),
                     "score": chunk.get("score", 0.0)
                 })
             
@@ -102,6 +105,11 @@ class KnowledgeTool(BaseTool):
                         "type": "integer",
                         "description": "Number of results to retrieve (default: 5)",
                         "default": 5
+                    },
+                    "similarity_threshold": {
+                        "type": "number",
+                        "description": "Minimum similarity score (0-1)",
+                        "default": 0.7
                     }
                 },
                 "required": ["query"]
