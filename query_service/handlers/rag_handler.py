@@ -17,9 +17,10 @@ import json
 from common.handlers import BaseHandler
 from common.errors.exceptions import ExternalServiceError
 
-from ..models.payloads import (
-    QueryGenerateResponse,
-    SearchResult
+from ..models import (
+    QueryGenerateResponseData,
+    SearchResultData,
+    QueryServiceChatMessage
 )
 from ..clients.groq_client import GroqClient
 from ..clients.vector_client import VectorClient
@@ -79,12 +80,12 @@ class RAGHandler(BaseHandler):
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         system_prompt: Optional[str] = None,
-        conversation_history: Optional[List[Dict[str, str]]] = None,
+        conversation_history: Optional[List[QueryServiceChatMessage]] = None,
         trace_id: Optional[UUID] = None,
         correlation_id: Optional[UUID] = None,
         embedding_client=None,
         task_id: Optional[UUID] = None
-    ) -> QueryGenerateResponse:
+    ) -> QueryGenerateResponseData:
         """
         Procesa una consulta RAG completa.
         
@@ -171,7 +172,7 @@ class RAGHandler(BaseHandler):
             # 5. Construir respuesta
             total_time_ms = int((time.time() - start_time) * 1000)
             
-            response = QueryGenerateResponse(
+            response = QueryGenerateResponseData(
                 query_id=query_id,
                 query_text=query_text,
                 generated_response=generated_response,
@@ -260,7 +261,7 @@ class RAGHandler(BaseHandler):
         top_k: int,
         similarity_threshold: float,
         tenant_id: str
-    ) -> List[SearchResult]:
+    ) -> List[SearchResultData]:
         """
         Busca documentos relevantes en las colecciones especificadas.
         """
@@ -286,8 +287,8 @@ class RAGHandler(BaseHandler):
     def _build_rag_prompt(
         self,
         query_text: str,
-        search_results: List[SearchResult],
-        conversation_history: Optional[List[Dict[str, str]]] = None
+        search_results: List[SearchResultData],
+        conversation_history: Optional[List[QueryServiceChatMessage]] = None
     ) -> str:
         """
         Construye el prompt para el LLM con el contexto recuperado.
@@ -310,9 +311,7 @@ class RAGHandler(BaseHandler):
         if conversation_history:
             prompt_parts.append("HISTORIAL DE CONVERSACIÓN:")
             for msg in conversation_history[-5:]:  # Últimos 5 mensajes
-                role = msg.get("role", "user")
-                content = msg.get("content", "")
-                prompt_parts.append(f"{role.upper()}: {content}")
+                prompt_parts.append(f"{msg.role.upper()}: {msg.content}")
             prompt_parts.append("")
         
         # Agregar contexto

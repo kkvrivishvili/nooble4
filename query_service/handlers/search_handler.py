@@ -16,7 +16,7 @@ import json
 from common.handlers import BaseHandler
 from common.errors.exceptions import ExternalServiceError
 
-from ..models.payloads import QuerySearchResponse, SearchResult
+from ..models import QuerySearchResponseData, SearchResultData
 from ..clients.vector_client import VectorClient
 
 
@@ -41,7 +41,7 @@ class SearchHandler(BaseHandler):
         # Cliente de vector store
         self.vector_client = VectorClient(
             base_url=app_settings.vector_db_url,
-            timeout=app_settings.http_timeout_seconds
+            timeout=app_settings.search_timeout_seconds
         )
         
         # Configuración por defecto
@@ -62,7 +62,7 @@ class SearchHandler(BaseHandler):
         embedding_client=None,
         session_id: Optional[str] = None,
         task_id: Optional[UUID] = None
-    ) -> QuerySearchResponse:
+    ) -> QuerySearchResponseData:
         """
         Realiza una búsqueda vectorial en las colecciones especificadas.
         
@@ -122,7 +122,7 @@ class SearchHandler(BaseHandler):
             search_time_ms = int((time.time() - start_time) * 1000)
             
             # Construir respuesta
-            response = QuerySearchResponse(
+            response = QuerySearchResponseData(
                 query_id=query_id,
                 query_text=query_text,
                 search_results=search_results,

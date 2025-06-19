@@ -12,28 +12,34 @@ from uuid import uuid4
 from pydantic import ValidationError
 
 from common.services import BaseService
-from common.models import DomainAction, ErrorDetail
+from common.models import DomainAction, ErrorDetail # ErrorDetail might not be used directly here anymore
 from common.errors.exceptions import InvalidActionError, ExternalServiceError
 
-from ..models.payloads import (
+from ..models import (
+    ACTION_QUERY_GENERATE,
+    ACTION_QUERY_LLM_DIRECT,
+    ACTION_QUERY_SEARCH,
+    ACTION_QUERY_STATUS,
     QueryGeneratePayload,
     QuerySearchPayload,
     QueryStatusPayload,
-    QueryErrorResponse,
-    LLMDirectPayload # NUEVO
+    LLMDirectPayload,
+    QueryErrorResponseData, # Changed from QueryErrorResponse
+    QueryStatusResponseData # Added for status response
 )
 from ..handlers.rag_handler import RAGHandler
 from ..handlers.search_handler import SearchHandler
-from ..handlers.llm_handler import LLMHandler # NUEVO
+from ..handlers.llm_handler import LLMHandler
 
 
 class QueryService(BaseService):
     """
-    Servicio principal para procesamiento de consultas RAG.
+    Servicio principal para procesamiento de consultas.
     
     Maneja las acciones:
     - query.generate: Procesamiento RAG completo (búsqueda + generación)
     - query.search: Solo búsqueda vectorial
+    - query.llm.direct: Llamada directa al LLM
     - query.status: Estado de una consulta (opcional)
     """
     
@@ -48,7 +54,6 @@ class QueryService(BaseService):
         """
         super().__init__(app_settings, service_redis_client, direct_redis_conn)
         
-        # Inicializar handlers
         self.rag_handler = RAGHandler(
             app_settings=app_settings,
             direct_redis_conn=direct_redis_conn
@@ -59,15 +64,14 @@ class QueryService(BaseService):
             direct_redis_conn=direct_redis_conn
         )
         
-        # NUEVO: Inicializar LLM handler
         self.llm_handler = LLMHandler(
             app_settings=app_settings,
             direct_redis_conn=direct_redis_conn
         )
         
-        # Si necesitamos comunicarnos con otros servicios
         self.embedding_client = None
         if service_redis_client:
+            # Consider moving client instantiation to an on-demand or factory pattern if complex
             from ..clients.embedding_client import EmbeddingClient
             self.embedding_client = EmbeddingClient(service_redis_client)
         
@@ -76,16 +80,6 @@ class QueryService(BaseService):
     async def process_action(self, action: DomainAction) -> Optional[Dict[str, Any]]:
         """
         Procesa una DomainAction según su tipo.
-        
-        Args:
-            action: La acción a procesar
-            
-        Returns:
-            Diccionario con los datos de respuesta o None
-            
-        Raises:
-            InvalidActionError: Si el tipo de acción no es soportado
-            ValidationError: Si el payload no es válido
         """
         self._logger.info(
             f"Procesando acción: {action.action_type} ({action.action_id})",
@@ -93,206 +87,188 @@ class QueryService(BaseService):
                 "action_id": str(action.action_id),
                 "action_type": action.action_type,
                 "tenant_id": action.tenant_id,
-                "correlation_id": str(action.correlation_id) if action.correlation_id else None
+                "correlation_id": str(action.correlation_id) if action.correlation_id else None,
+                "task_id": str(action.task_id) if action.task_id else None
             }
         )
         
         try:
-            # Enrutar según el tipo de acción
-            if action.action_type == "query.generate":
+            if action.action_type == ACTION_QUERY_GENERATE:
                 return await self._handle_generate(action)
-                
-            elif action.action_type == "query.search":
+            elif action.action_type == ACTION_QUERY_SEARCH:
                 return await self._handle_search(action)
-                
-            elif action.action_type == "query.status":
-                return await self._handle_status(action)
-                
-            # NUEVO: Routing para LLM directo
-            elif action.action_type == "query.llm.direct":
+            elif action.action_type == ACTION_QUERY_LLM_DIRECT:
                 return await self._handle_llm_direct(action)
-                
+            elif action.action_type == ACTION_QUERY_STATUS:
+                return await self._handle_status(action)
             else:
                 self._logger.warning(f"Tipo de acción no soportado: {action.action_type}")
                 raise InvalidActionError(
                     f"Acción '{action.action_type}' no es soportada por Query Service"
                 )
-                
         except ValidationError as e:
-            self._logger.error(f"Error de validación en {action.action_type}: {e}")
-            # Crear respuesta de error
-            error_response = QueryErrorResponse(
+            self._logger.error(f"Error de validación en {action.action_type} para action_id {action.action_id}: {e}", exc_info=True)
+            error_response = QueryErrorResponseData(
                 query_id=str(action.action_id),
+                action=action.action_type,
                 error_type="ValidationError",
-                error_message="Error de validación en el payload",
+                error_message="Error de validación en el payload de la acción.",
                 error_details={"validation_errors": e.errors()}
             )
             return error_response.model_dump()
-            
         except ExternalServiceError as e:
-            self._logger.error(f"Error de servicio externo en {action.action_type}: {e}")
-            error_response = QueryErrorResponse(
+            self._logger.error(f"Error de servicio externo en {action.action_type} para action_id {action.action_id}: {e}", exc_info=True)
+            error_response = QueryErrorResponseData(
                 query_id=str(action.action_id),
+                action=action.action_type,
                 error_type="ExternalServiceError",
                 error_message=str(e),
-                error_details={"original_error": str(e.original_exception) if e.original_exception else None}
+                error_details={"service_name": e.service_name, "original_error": str(e.original_exception) if e.original_exception else None}
             )
             return error_response.model_dump()
-            
         except Exception as e:
-            self._logger.exception(f"Error inesperado procesando {action.action_type}")
-            # Re-lanzar para que BaseWorker maneje el error
-            raise
-    
+            self._logger.exception(f"Error inesperado procesando {action.action_type} para action_id {action.action_id}")
+            # For unexpected errors, we might not have a query_id if parsing action itself failed
+            # However, action_id is from DomainAction, so it should be available.
+            error_response = QueryErrorResponseData(
+                query_id=str(action.action_id),
+                action=action.action_type,
+                error_type="InternalServerError",
+                error_message="Ocurrió un error inesperado en QueryService.",
+                error_details={"exception_type": e.__class__.__name__, "detail": str(e)}
+            )
+            # Unlike BaseWorker, BaseService might not automatically handle this response.
+            # Depending on the worker's _handle_action, this might need to be returned or re-raised.
+            # For now, returning the error payload, assuming worker sends it back.
+            return error_response.model_dump()
+
+    def _get_effective_llm_params(self, llm_config, overrides):
+        """Helper to get effective LLM parameters considering overrides."""
+        # Start with llm_config as a dict
+        params = llm_config.model_dump()
+        
+        # Apply overrides for specific keys that map to llm_config fields
+        # Note: overrides keys should match the expected handler param names or llm_config field names
+        if "llm_model" in overrides: params["model_name"] = overrides["llm_model"]
+        if "temperature" in overrides: params["temperature"] = overrides["temperature"]
+        if "max_tokens" in overrides: params["max_tokens"] = overrides["max_tokens"]
+        if "top_p" in overrides: params["top_p"] = overrides["top_p"]
+        if "frequency_penalty" in overrides: params["frequency_penalty"] = overrides["frequency_penalty"]
+        if "presence_penalty" in overrides: params["presence_penalty"] = overrides["presence_penalty"]
+        if "stop_sequences" in overrides: params["stop_sequences"] = overrides["stop_sequences"]
+        if "user_id" in overrides: params["user_id"] = overrides["user_id"]
+        # stream is part of llm_config but usually not overridden this way by action.metadata
+
+        return params
+
     async def _handle_generate(self, action: DomainAction) -> Dict[str, Any]:
-        """
-        Maneja la acción query.generate para procesamiento RAG completo.
-        
-        Args:
-            action: DomainAction con QueryGeneratePayload
-            
-        Returns:
-            Diccionario con QueryGenerateResponse
-        """
-        # Validar y parsear payload
-        payload = QueryGeneratePayload(**action.data)
-        
-        # Obtener configuración de metadata si existe
+        payload = QueryGeneratePayload.model_validate(action.data)
         config_overrides = action.metadata or {}
-        
-        # Pasar embedding_client si está disponible
+
+        llm_params_for_handler = self._get_effective_llm_params(payload.llm_config, config_overrides)
+
         response = await self.rag_handler.process_rag_query(
             query_text=payload.query_text,
             collection_ids=payload.collection_ids,
             tenant_id=action.tenant_id,
             session_id=action.session_id,
             
-            # Parámetros de búsqueda
-            top_k=payload.top_k or config_overrides.get("top_k"),
+            top_k=payload.top_k_retrieval or config_overrides.get("top_k_retrieval"), # Uses top_k_retrieval from payload
             similarity_threshold=payload.similarity_threshold or config_overrides.get("similarity_threshold"),
             
-            # Parámetros de generación
-            llm_model=payload.llm_model or config_overrides.get("llm_model"),
-            temperature=payload.temperature or config_overrides.get("temperature"),
-            max_tokens=payload.max_tokens or config_overrides.get("max_tokens"),
-            system_prompt=payload.system_prompt,
-            top_p=payload.top_p,
-            frequency_penalty=payload.frequency_penalty,
-            presence_penalty=payload.presence_penalty,
-            stop_sequences=payload.stop_sequences,
-            user_id=payload.user_id,
+            # Pass effective LLM parameters
+            llm_model=llm_params_for_handler["model_name"],
+            temperature=llm_params_for_handler["temperature"],
+            max_tokens=llm_params_for_handler["max_tokens"],
+            system_prompt=payload.system_prompt_template, # Renamed in new model
+            top_p=llm_params_for_handler["top_p"],
+            frequency_penalty=llm_params_for_handler["frequency_penalty"],
+            presence_penalty=llm_params_for_handler["presence_penalty"],
+            stop_sequences=llm_params_for_handler["stop_sequences"],
+            user_id=llm_params_for_handler["user_id"],
+            # provider and stream are part of llm_config but not typically passed individually here
 
-            # Contexto
-            conversation_history=payload.conversation_history,
+            conversation_history=payload.conversation_history, # Now List[QueryServiceChatMessage]
             
-            # Contexto de trazabilidad
             trace_id=action.trace_id,
             correlation_id=action.correlation_id,
-            
-            # Cliente de embedding si está disponible
             embedding_client=self.embedding_client,
             task_id=action.task_id
         )
-        
         return response.model_dump()
     
     async def _handle_search(self, action: DomainAction) -> Dict[str, Any]:
-        """
-        Maneja la acción query.search para solo búsqueda vectorial.
-        
-        Args:
-            action: DomainAction con QuerySearchPayload
-            
-        Returns:
-            Diccionario con QuerySearchResponse
-        """
-        # Validar y parsear payload
-        payload = QuerySearchPayload(**action.data)
-        
-        # Obtener configuración de metadata si existe
+        payload = QuerySearchPayload.model_validate(action.data)
         config_overrides = action.metadata or {}
         
-        # Delegar al search handler
         response = await self.search_handler.search_documents(
             query_text=payload.query_text,
             collection_ids=payload.collection_ids,
             tenant_id=action.tenant_id,
-            # Parámetros opcionales
             top_k=payload.top_k or config_overrides.get("top_k"),
             similarity_threshold=payload.similarity_threshold or config_overrides.get("similarity_threshold"),
             filters=payload.filters,
-            # Contexto
             trace_id=action.trace_id,
-            # Cliente de embedding si está disponible
             embedding_client=self.embedding_client,
             session_id=action.session_id,
             task_id=action.task_id
         )
-        
         return response.model_dump()
     
     async def _handle_status(self, action: DomainAction) -> Dict[str, Any]:
-        """
-        Maneja la acción query.status para consultar estado.
-        
-        Esta es una funcionalidad opcional que podría implementarse
-        para consultas de larga duración.
-        
-        Args:
-            action: DomainAction con QueryStatusPayload
-            
-        Returns:
-            Diccionario con estado de la consulta
-        """
-        # Por ahora, retornamos un mensaje indicando que no está implementado
-        self._logger.info(f"Status check solicitado para {action.data.get('query_id')}")
-        
-        return {
-            "status": "not_implemented",
-            "message": "La funcionalidad de status check no está implementada en esta versión",
-            "query_id": action.data.get("query_id")
-        }
+        try:
+            payload = QueryStatusPayload.model_validate(action.data)
+        except ValidationError as e:
+            # Handle validation error specifically for status payload if needed, or let global handler catch
+            self._logger.error(f"Validation error in QueryStatusPayload for action_id {action.action_id}: {e}")
+            error_response = QueryErrorResponseData(
+                query_id=action.data.get("query_id", str(action.action_id)), # Try to get query_id if parsing failed
+                action=action.action_type,
+                error_type="ValidationError",
+                error_message="Payload para query.status inválido.",
+                error_details={"validation_errors": e.errors()}
+            )
+            return error_response.model_dump()
 
-    # NUEVO MÉTODO
+        self._logger.info(f"Status check solicitado para query_id: {payload.query_id}")
+        
+        # Placeholder: Actual status check logic would go here (e.g., check DB or cache)
+        status_response = QueryStatusResponseData(
+            query_id=payload.query_id,
+            status="not_found", # Example status
+            action_type=None, # Could be enriched if status tracking stores original action type
+            result_preview=None,
+            error_info=None,
+            metadata={"message": "La funcionalidad de status check detallado no está completamente implementada."}
+        )
+        return status_response.model_dump()
+
     async def _handle_llm_direct(self, action: DomainAction) -> Dict[str, Any]:
-        """
-        Maneja la acción query.llm.direct para llamadas directas al LLM.
-        
-        Args:
-            action: DomainAction con LLMDirectPayload
-            
-        Returns:
-            Diccionario con LLMDirectResponse
-        """
-        # Validar y parsear payload
-        payload = LLMDirectPayload(**action.data)
-        
-        # Obtener configuración de metadata si existe
+        payload = LLMDirectPayload.model_validate(action.data)
         config_overrides = action.metadata or {}
+
+        llm_params_for_handler = self._get_effective_llm_params(payload.llm_config, config_overrides)
         
-        # Delegar al LLM handler
         response = await self.llm_handler.process_llm_direct(
-            messages=payload.messages,
+            messages=payload.messages, # Now List[QueryServiceChatMessage]
             tenant_id=action.tenant_id,
             session_id=action.session_id,
             
-            # Parámetros de LLM (con overrides de metadata)
-            llm_model=payload.llm_model or config_overrides.get("llm_model"),
-            temperature=payload.temperature or config_overrides.get("temperature"),
-            max_tokens=payload.max_tokens or config_overrides.get("max_tokens"),
-            top_p=payload.top_p or config_overrides.get("top_p"),
-            frequency_penalty=payload.frequency_penalty,
-            presence_penalty=payload.presence_penalty,
-            stop_sequences=payload.stop_sequences,
+            llm_model=llm_params_for_handler["model_name"],
+            temperature=llm_params_for_handler["temperature"],
+            max_tokens=llm_params_for_handler["max_tokens"],
+            top_p=llm_params_for_handler["top_p"],
+            frequency_penalty=llm_params_for_handler["frequency_penalty"],
+            presence_penalty=llm_params_for_handler["presence_penalty"],
+            stop_sequences=llm_params_for_handler["stop_sequences"],
+            # provider and stream are part of llm_config but not typically passed individually here
             
-            # Tool calling
-            tools=payload.tools,
+            tools=payload.tools, # Now List[QueryServiceToolDefinition]
             tool_choice=payload.tool_choice,
             
-            # Contexto
-            user_id=payload.user_id,
+            user_id=llm_params_for_handler["user_id"],
             trace_id=action.trace_id,
             correlation_id=action.correlation_id
+            # task_id could be added if llm_handler supports it
         )
-        
         return response.model_dump()

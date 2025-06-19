@@ -13,6 +13,14 @@ from common.models.actions import DomainAction, DomainActionResponse
 from common.errors.exceptions import ExternalServiceError
 from common.clients.base_redis_client import BaseRedisClient
 from common.config.base_settings import CommonAppSettings # Para tipar settings
+from query_service.models import (
+    QueryGeneratePayload, QueryGenerateResponseData,
+    QueryLLMDirectPayload, LLMDirectResponseData,  # Note: LLMDirectResponseData
+    QuerySearchPayload, QuerySearchResponseData,
+    QueryServiceLLMConfig, QueryServiceChatMessage, QueryServiceToolDefinition,
+    ACTION_QUERY_GENERATE, ACTION_QUERY_LLM_DIRECT, ACTION_QUERY_SEARCH
+)
+from typing import Union # For tool_choice
 
 logger = logging.getLogger(__name__)
 
@@ -48,192 +56,149 @@ class QueryClient:
         query_text: str,
         tenant_id: str,
         session_id: str,
-        task_id: uuid.UUID, # Añadido para propagación
-        collection_ids: Optional[List[str]] = None,
-        # llm_config es parte de QueryGeneratePayload, no campos separados como en LLMDirectPayload
-        llm_config_params: Optional[Dict[str, Any]] = None, # Renombrado para claridad
+        task_id: uuid.UUID,
+        collection_ids: List[str],
+        llm_config: QueryServiceLLMConfig,
+        conversation_history: Optional[List[QueryServiceChatMessage]] = None,
+        system_prompt_template: Optional[str] = None,
+        top_k_retrieval: int = 5,
+        similarity_threshold: Optional[float] = None,
         timeout: Optional[int] = None
-    ) -> Dict[str, Any]:
+    ) -> QueryGenerateResponseData:
         """
         Realiza una consulta RAG al Query Service usando DomainActions vía Redis.
-        Asegúrate que QueryGeneratePayload en QueryService espera estos campos.
         """
-        payload = {
-            "query_text": query_text,
-            "tenant_id": tenant_id, 
-            "session_id": session_id,
-            "collection_ids": collection_ids or [],
-        }
-        # QueryGeneratePayload espera campos como llm_model, temperature, etc. directamente.
-        if llm_config_params:
-            payload.update({
-                "llm_model": llm_config_params.get("model_name") or llm_config_params.get("llm_model"),
-                "temperature": llm_config_params.get("temperature"),
-                "max_tokens": llm_config_params.get("max_tokens"),
-                "system_prompt": llm_config_params.get("system_prompt"),
-                "top_p": llm_config_params.get("top_p"),
-                "frequency_penalty": llm_config_params.get("frequency_penalty"),
-                "presence_penalty": llm_config_params.get("presence_penalty"),
-                "stop_sequences": llm_config_params.get("stop_sequences"),
-                "user_id": llm_config_params.get("user_id"),
-                "conversation_history": llm_config_params.get("conversation_history"),
-                # Campos de búsqueda
-                "top_k": llm_config_params.get("top_k"),
-                "similarity_threshold": llm_config_params.get("similarity_threshold"),
-            })
+        payload = QueryGeneratePayload(
+            query_text=query_text,
+            collection_ids=collection_ids,
+            conversation_history=conversation_history if conversation_history is not None else [],
+            llm_config=llm_config,
+            system_prompt_template=system_prompt_template,
+            top_k_retrieval=top_k_retrieval,
+            similarity_threshold=similarity_threshold
+        )
 
         action = DomainAction(
             action_id=uuid.uuid4(),
-            action_type="query.generate", # Target service "query", action "generate"
+            action_type=ACTION_QUERY_GENERATE,
             timestamp=datetime.now(timezone.utc),
             tenant_id=tenant_id,
             session_id=session_id,
             task_id=task_id,
             origin_service=self.aes_service_name,
-            data=payload,
-            # correlation_id y callback_queue_name son gestionados por send_action_pseudo_sync
+            data=payload.model_dump(exclude_none=True),
         )
         actual_timeout = timeout if timeout is not None else self.default_timeout
         try:
             response_action = await self.redis_comms.send_action_pseudo_sync(action, timeout=actual_timeout)
-            if not response_action.success:
+            if not response_action.success or response_action.data is None:
                 error_detail = response_action.error
-                error_message = f"QueryService error para acción {action.action_id} (query.generate): {error_detail.message if error_detail else 'Unknown error'}"
+                error_message = f"QueryService error para acción {action.action_id} ({ACTION_QUERY_GENERATE}): {error_detail.message if error_detail else 'Unknown error or no data'}"
                 logger.error(error_message, extra={"action_id": str(action.action_id), "error_detail": error_detail.model_dump() if error_detail else None})
                 raise ExternalServiceError(error_message, error_detail=error_detail.model_dump() if error_detail else None)
-            return response_action.data if response_action.data is not None else {}
+            return QueryGenerateResponseData.model_validate(response_action.data)
         except TimeoutError as e:
-            logger.error(f"Timeout esperando respuesta de QueryService para query.generate ({action.action_id}): {e}")
-            raise ExternalServiceError(f"Timeout esperando respuesta de QueryService para query.generate: {str(e)}", original_exception=e)
+            logger.error(f"Timeout esperando respuesta de QueryService para {ACTION_QUERY_GENERATE} ({action.action_id}): {e}")
+            raise ExternalServiceError(f"Timeout esperando respuesta de QueryService para {ACTION_QUERY_GENERATE}: {str(e)}", original_exception=e)
         except Exception as e:
-            logger.error(f"Error inesperado comunicándose con QueryService para query.generate ({action.action_id}): {e}", exc_info=True)
-            raise ExternalServiceError(f"Error inesperado comunicándose con QueryService para query.generate: {str(e)}", original_exception=e)
+            logger.error(f"Error inesperado comunicándose con QueryService para {ACTION_QUERY_GENERATE} ({action.action_id}): {e}", exc_info=True)
+            raise ExternalServiceError(f"Error inesperado comunicándose con QueryService para {ACTION_QUERY_GENERATE}: {str(e)}", original_exception=e)
+
 
     async def llm_direct(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[QueryServiceChatMessage],
         tenant_id: str,
         session_id: str,
-        task_id: uuid.UUID, # Añadido para propagación
-        llm_config_params: Optional[Dict[str, Any]] = None, # Renombrado para claridad
-        tools: Optional[List[Dict[str, Any]]] = None,
-        tool_choice: Optional[str] = None,
+        task_id: uuid.UUID,
+        llm_config: QueryServiceLLMConfig,
+        tools: Optional[List[QueryServiceToolDefinition]] = None,
+        tool_choice: Optional[Union[str, Dict[str, Any]]] = None, # OpenAI type: Literal['none', 'auto'] | ChatCompletionNamedToolChoice
         timeout: Optional[int] = None
-    ) -> Dict[str, Any]:
+    ) -> LLMDirectResponseData:
         """
         Realiza una llamada directa al LLM (sin RAG) usando DomainActions vía Redis.
         Espera una respuesta de forma pseudo-asíncrona.
-        
-        Args:
-            messages: Lista de mensajes en formato OpenAI.
-            tenant_id: ID del tenant.
-            session_id: ID de la sesión.
-            task_id: ID de la tarea de alto nivel.
-            llm_config_params: Configuración del LLM (ej. model_name, temperature).
-            tools: Definiciones de herramientas para tool calling.
-            tool_choice: Control de selección de herramientas.
-            timeout: Timeout específico para esta llamada.
-            
-        Returns:
-            Diccionario con la respuesta del LLM, incluyendo posibles tool_calls.
-            Corresponde al 'data' de LLMDirectResponse.
         """
-        payload = {
-            "messages": messages,
-            "tenant_id": tenant_id, 
-            "session_id": session_id,
-        }
-
-        if llm_config_params:
-            payload["llm_model"] = llm_config_params.get("model_name") or llm_config_params.get("llm_model")
-            if "temperature" in llm_config_params: payload["temperature"] = llm_config_params.get("temperature")
-            if "max_tokens" in llm_config_params: payload["max_tokens"] = llm_config_params.get("max_tokens")
-            if "top_p" in llm_config_params: payload["top_p"] = llm_config_params.get("top_p")
-            if "frequency_penalty" in llm_config_params: payload["frequency_penalty"] = llm_config_params.get("frequency_penalty")
-            if "presence_penalty" in llm_config_params: payload["presence_penalty"] = llm_config_params.get("presence_penalty")
-            if "stop_sequences" in llm_config_params: payload["stop_sequences"] = llm_config_params.get("stop_sequences")
-            if "user_id" in llm_config_params: payload["user_id"] = llm_config_params.get("user_id")
-        
-        if tools:
-            payload["tools"] = tools
-            if tool_choice: 
-                payload["tool_choice"] = tool_choice
+        payload = QueryLLMDirectPayload(
+            messages=messages,
+            llm_config=llm_config,
+            tools=tools,
+            tool_choice=tool_choice
+        )
 
         action = DomainAction(
             action_id=uuid.uuid4(),
-            action_type="query.llm.direct", # Target service "query", action "llm.direct"
+            action_type=ACTION_QUERY_LLM_DIRECT,
             timestamp=datetime.now(timezone.utc),
             tenant_id=tenant_id,
             session_id=session_id,
             task_id=task_id,
             origin_service=self.aes_service_name,
-            data=payload,
+            data=payload.model_dump(exclude_none=True),
         )
         actual_timeout = timeout if timeout is not None else self.default_timeout
         try:
             response_action = await self.redis_comms.send_action_pseudo_sync(action, timeout=actual_timeout)
-            if not response_action.success:
+            if not response_action.success or response_action.data is None:
                 error_detail = response_action.error
-                error_message = f"QueryService error para acción {action.action_id} (query.llm.direct): {error_detail.message if error_detail else 'Unknown error'}"
+                error_message = f"QueryService error para acción {action.action_id} ({ACTION_QUERY_LLM_DIRECT}): {error_detail.message if error_detail else 'Unknown error or no data'}"
                 logger.error(error_message, extra={"action_id": str(action.action_id), "error_detail": error_detail.model_dump() if error_detail else None})
                 raise ExternalServiceError(error_message, error_detail=error_detail.model_dump() if error_detail else None)
-            return response_action.data if response_action.data is not None else {}
+            return LLMDirectResponseData.model_validate(response_action.data)
         except TimeoutError as e:
-            logger.error(f"Timeout esperando respuesta de QueryService para query.llm.direct ({action.action_id}): {e}")
-            raise ExternalServiceError(f"Timeout esperando respuesta de QueryService para query.llm.direct: {str(e)}", original_exception=e)
+            logger.error(f"Timeout esperando respuesta de QueryService para {ACTION_QUERY_LLM_DIRECT} ({action.action_id}): {e}")
+            raise ExternalServiceError(f"Timeout esperando respuesta de QueryService para {ACTION_QUERY_LLM_DIRECT}: {str(e)}", original_exception=e)
         except Exception as e:
-            logger.error(f"Error inesperado comunicándose con QueryService para query.llm.direct ({action.action_id}): {e}", exc_info=True)
-            raise ExternalServiceError(f"Error inesperado comunicándose con QueryService para query.llm.direct: {str(e)}", original_exception=e)
+            logger.error(f"Error inesperado comunicándose con QueryService para {ACTION_QUERY_LLM_DIRECT} ({action.action_id}): {e}", exc_info=True)
+            raise ExternalServiceError(f"Error inesperado comunicándose con QueryService para {ACTION_QUERY_LLM_DIRECT}: {str(e)}", original_exception=e)
+
 
     async def search_only(
         self,
         query_text: str,
         tenant_id: str,
         session_id: str,
-        task_id: uuid.UUID, # Añadido para propagación
-        collection_ids: Optional[List[str]] = None,
+        task_id: uuid.UUID,
+        collection_ids: List[str],
         top_k: int = 5,
-        # Otros parámetros de QuerySearchPayload como filters, similarity_threshold
-        search_params: Optional[Dict[str, Any]] = None,
+        filters: Optional[Dict[str, Any]] = None,
+        similarity_threshold: Optional[float] = None,
         timeout: Optional[int] = None
-    ) -> Dict[str, Any]:
+    ) -> QuerySearchResponseData:
         """
         Realiza solo búsqueda vectorial usando DomainActions vía Redis.
-        Asegúrate que QuerySearchPayload en QueryService espera estos campos.
         """
-        payload = {
-            "query_text": query_text,
-            "tenant_id": tenant_id,
-            "session_id": session_id,
-            "collection_ids": collection_ids or [],
-            "top_k": top_k
-        }
-        if search_params:
-            if "filters" in search_params: payload["filters"] = search_params.get("filters")
-            if "similarity_threshold" in search_params: payload["similarity_threshold"] = search_params.get("similarity_threshold")
+        payload = QuerySearchPayload(
+            query_text=query_text,
+            collection_ids=collection_ids,
+            top_k=top_k,
+            filters=filters,
+            similarity_threshold=similarity_threshold
+        )
 
         action = DomainAction(
             action_id=uuid.uuid4(),
-            action_type="query.search", # Target service "query", action "search"
+            action_type=ACTION_QUERY_SEARCH,
             timestamp=datetime.now(timezone.utc),
             tenant_id=tenant_id,
             session_id=session_id,
             task_id=task_id,
             origin_service=self.aes_service_name,
-            data=payload,
+            data=payload.model_dump(exclude_none=True),
         )
         actual_timeout = timeout if timeout is not None else self.default_timeout
         try:
             response_action = await self.redis_comms.send_action_pseudo_sync(action, timeout=actual_timeout)
-            if not response_action.success:
+            if not response_action.success or response_action.data is None:
                 error_detail = response_action.error
-                error_message = f"QueryService error para acción {action.action_id} (query.search): {error_detail.message if error_detail else 'Unknown error'}"
+                error_message = f"QueryService error para acción {action.action_id} ({ACTION_QUERY_SEARCH}): {error_detail.message if error_detail else 'Unknown error or no data'}"
                 logger.error(error_message, extra={"action_id": str(action.action_id), "error_detail": error_detail.model_dump() if error_detail else None})
                 raise ExternalServiceError(error_message, error_detail=error_detail.model_dump() if error_detail else None)
-            return response_action.data if response_action.data is not None else {}
+            return QuerySearchResponseData.model_validate(response_action.data)
         except TimeoutError as e:
-            logger.error(f"Timeout esperando respuesta de QueryService para query.search ({action.action_id}): {e}")
-            raise ExternalServiceError(f"Timeout esperando respuesta de QueryService para query.search: {str(e)}", original_exception=e)
+            logger.error(f"Timeout esperando respuesta de QueryService para {ACTION_QUERY_SEARCH} ({action.action_id}): {e}")
+            raise ExternalServiceError(f"Timeout esperando respuesta de QueryService para {ACTION_QUERY_SEARCH}: {str(e)}", original_exception=e)
         except Exception as e:
-            logger.error(f"Error inesperado comunicándose con QueryService para query.search ({action.action_id}): {e}", exc_info=True)
-            raise ExternalServiceError(f"Error inesperado comunicándose con QueryService para query.search: {str(e)}", original_exception=e)
+            logger.error(f"Error inesperado comunicándose con QueryService para {ACTION_QUERY_SEARCH} ({action.action_id}): {e}", exc_info=True)
+            raise ExternalServiceError(f"Error inesperado comunicándose con QueryService para {ACTION_QUERY_SEARCH}: {str(e)}", original_exception=e)

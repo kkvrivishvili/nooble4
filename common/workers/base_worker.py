@@ -176,7 +176,36 @@ class BaseWorker(ABC):
                             if action.correlation_id is None:
                                 logger.error(f"[{self.service_name}][{self.consumer_name}] Error crítico: Acción {action.action_id} ({action.action_type}) requiere respuesta pseudo-síncrona pero no tiene correlation_id. No se enviará respuesta.")
                                 raise ValueError(f"Acción {action.action_id} ({action.action_type}) requiere respuesta pseudo-síncrona pero no tiene correlation_id.")
-                            response = self._create_success_response(action, handler_result or {})
+                            # ---- START MODIFICATION for service-reported errors ----
+                            is_service_reported_error = False
+                            if isinstance(handler_result, dict) and \
+                               handler_result.get("error_type") and \
+                               handler_result.get("error_message"): # Convention for service-reported errors
+                                is_service_reported_error = True
+
+                            if is_service_reported_error:
+                                logger.warning(f"[{self.service_name}][{self.consumer_name}] Acción {action.action_id} ({action.action_type}) resultó en un error reportado por el servicio: {handler_result.get('error_type')}", extra=action.get_log_extra())
+                                
+                                error_obj = ErrorDetail(
+                                    error_type=handler_result.get("error_type", "ServiceReportedError"),
+                                    error_code=handler_result.get("error_code"), # Service can optionally provide this
+                                    message=handler_result.get("error_message", "An error occurred in the service."),
+                                    details=handler_result.get("error_details") or {}
+                                )
+                                response = DomainActionResponse(
+                                    action_id=uuid.uuid4(),
+                                    correlation_id=action.correlation_id, # Must be present due to check above
+                                    trace_id=action.trace_id,
+                                    task_id=action.task_id,
+                                    tenant_id=action.tenant_id,
+                                    session_id=action.session_id,
+                                    success=False,
+                                    data=None,
+                                    error=error_obj
+                                )
+                            else: # Successful result from handler
+                                response = self._create_success_response(action, handler_result or {})
+                            # ---- END MODIFICATION ----
                             await self._send_response(response, action.callback_queue_name)
                         elif is_async_callback:
                             await self._send_callback(action, handler_result or {})

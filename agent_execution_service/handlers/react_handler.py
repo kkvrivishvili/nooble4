@@ -19,6 +19,7 @@ from ..models.payloads import (
 )
 from ..tools.base_tool import BaseTool
 from ..tools.tool_registry import ToolRegistry # Assuming a tool registry exists
+from query_service.models import QueryServiceChatMessage, QueryServiceToolDefinition, QueryServiceToolCall # Added imports
 
 # Parser for ReAct thought/action is removed, LLM will use tool_calls directly.
 
@@ -68,10 +69,10 @@ class ReactHandler(BaseHandler):
                 payload.available_tools # Pasamos ToolConfig para la descripción textual
             )
 
-            messages: List[Dict[str, Any]] = []
+            messages: List[QueryServiceChatMessage] = []
             if system_message_content:
-                messages.append({"role": "system", "content": system_message_content})
-            messages.append({"role": "user", "content": payload.user_message})
+                messages.append(QueryServiceChatMessage(role="system", content=system_message_content))
+            messages.append(QueryServiceChatMessage(role="user", content=payload.user_message))
 
             final_answer: Optional[str] = None
             iteration = 0
@@ -94,51 +95,56 @@ class ReactHandler(BaseHandler):
 
                 # Llamada al LLM a través de QueryService
                 self._logger.debug(f"Iteración {iteration}: Enviando mensajes al LLM: {messages}")
-                llm_response_data = await self.query_client.llm_direct(
-                    messages=messages,
+                # Convert available_tools_definitions (list of dicts) to List[QueryServiceToolDefinition]
+                qs_tool_definitions = [QueryServiceToolDefinition.model_validate(tool_dict) for tool_dict in available_tools_definitions] if available_tools_definitions else None
+
+                llm_response = await self.query_client.llm_direct(
+                    messages=messages, # Already List[QueryServiceChatMessage]
                     tenant_id=tenant_id,
                     session_id=session_id,
-                    llm_config=payload.llm_config.model_dump() if payload.llm_config else None,
-                    tools=available_tools_definitions if available_tools_definitions else None,
+                    llm_config_params=payload.llm_config.model_dump(exclude_none=True) if payload.llm_config else None,
+                    tools=qs_tool_definitions, # Pass List[QueryServiceToolDefinition]
                     tool_choice=payload.tool_choice, # Puede ser 'auto', 'none', o specific
                     task_id=task_id
                 )
                 total_llm_calls += 1
-                if llm_response_data.get("total_tokens"):
-                    total_llm_tokens += llm_response_data["total_tokens"]
+                if llm_response.token_usage and llm_response.token_usage.total_tokens is not None:
+                    total_llm_tokens += llm_response.token_usage.total_tokens
                 
-                self._logger.debug(f"Iteración {iteration}: Respuesta LLM recibida: {llm_response_data}")
-
-                llm_message_content = llm_response_data.get("response")
-                tool_calls = llm_response_data.get("tool_calls")
+                self._logger.debug(f"Iteración {iteration}: Respuesta LLM recibida: {llm_response.model_dump_json(indent=2)}") # Log the Pydantic model
+                
+                # llm_response is LLMDirectResponseData
+                llm_message_content = llm_response.response
+                tool_calls_from_llm = llm_response.tool_calls # This is Optional[List[QueryServiceToolCall]]
 
                 # El 'thought' puede ser el contenido del mensaje del LLM si no hay tool_calls
                 current_step.thought = llm_message_content if llm_message_content else "No thought provided by LLM."
 
                 # Construir el mensaje del asistente para la próxima iteración
-                assistant_message: Dict[str, Any] = {"role": "assistant"}
+                assistant_message_data: Dict[str, Any] = {"role": "assistant"}
                 if llm_message_content:
-                    assistant_message["content"] = llm_message_content
+                    assistant_message_data["content"] = llm_message_content
                 
-                if tool_calls:
-                    assistant_message["tool_calls"] = tool_calls # Guardar para el historial
+                if tool_calls_from_llm: # This is List[QueryServiceToolCall]
+                    # For history, LLM APIs expect tool_calls as list of dicts, not Pydantic models
+                    assistant_message_data["tool_calls"] = [tc.model_dump() for tc in tool_calls_from_llm]
                     
                     # Ejecutar herramientas
-                    tool_messages_for_next_llm_call: List[Dict[str, str]] = []
-                    for tool_call in tool_calls:
-                        tool_name = tool_call.get("function", {}).get("name")
-                        tool_args_str = tool_call.get("function", {}).get("arguments")
-                        tool_call_id = tool_call.get("id") # Necesario para la respuesta de la tool
+                    tool_response_messages_for_llm: List[QueryServiceChatMessage] = []
+                    for tool_call_item in tool_calls_from_llm: # tool_call_item is QueryServiceToolCall
+                        tool_name = tool_call_item.function.name
+                        tool_args_str = tool_call_item.function.arguments
+                        tool_call_id = tool_call_item.id
 
-                        if not tool_name or not tool_args_str or not tool_call_id:
-                            self._logger.error(f"Tool call inválido recibido: {tool_call}")
-                            observation = f"Error: Tool call inválido: {tool_call}"
-                            tool_messages_for_next_llm_call.append({
-                                "role": TOOL_ROLE,
-                                "tool_call_id": tool_call_id, 
-                                "name": tool_name or "unknown_tool",
-                                "content": observation
-                            })
+                        if not tool_name or tool_args_str is None or not tool_call_id: # arguments can be empty string for no-arg functions
+                            self._logger.error(f"Tool call inválido recibido: {tool_call_item.model_dump_json()}")
+                            observation = f"Error: Tool call inválido: {tool_call_item.model_dump_json()}"
+                            tool_response_messages_for_llm.append(QueryServiceChatMessage(
+                                role=TOOL_ROLE,
+                                tool_call_id=tool_call_id or uuid.uuid4().hex, # Ensure tool_call_id is present
+                                name=tool_name or "unknown_tool",
+                                content=observation
+                            ))
                             continue
                         
                         current_step.action = tool_name
@@ -158,18 +164,18 @@ class ReactHandler(BaseHandler):
                         if tool_name not in tools_used_in_run:
                             tools_used_in_run.append(tool_name)
                         
-                        tool_messages_for_next_llm_call.append({
-                            "role": TOOL_ROLE,
-                            "tool_call_id": tool_call_id,
-                            "name": tool_name,
-                            "content": str(observation) # El contenido debe ser string
-                        })
+                        tool_response_messages_for_llm.append(QueryServiceChatMessage(
+                            role=TOOL_ROLE,
+                            tool_call_id=tool_call_id,
+                            name=tool_name,
+                            content=str(observation) # El contenido debe ser string
+                        ))
                     
-                    messages.append(assistant_message) # Mensaje del asistente con tool_calls
-                    messages.extend(tool_messages_for_next_llm_call) # Resultados de las tools
+                    messages.append(QueryServiceChatMessage.model_validate(assistant_message_data)) # Mensaje del asistente con tool_calls
+                    messages.extend(tool_response_messages_for_llm) # Resultados de las tools
                 else:
                     # No hay tool_calls, el LLM debe haber dado la respuesta final o continuar pensando
-                    messages.append(assistant_message) # Mensaje del asistente sin tool_calls
+                    messages.append(QueryServiceChatMessage.model_validate(assistant_message_data)) # Mensaje del asistente sin tool_calls
                     if llm_message_content:
                         # Asumimos que si no hay tool_calls, el contenido es la respuesta final o un pensamiento continuo.
                         # El prompt debe guiar al LLM para usar "Final Answer:" o similar si es el final.
@@ -182,7 +188,7 @@ class ReactHandler(BaseHandler):
                         self._logger.warning("LLM no devolvió contenido ni tool_calls.")
                         final_answer = "El LLM no proporcionó una respuesta o acción." 
                 
-                current_step.execution_time_seconds = time.time() - step_start_time
+                current_step.execution_time_ms = int((time.time() - step_start_time) * 1000)
                 execution_steps.append(current_step)
 
                 if final_answer: # Salir del loop si ya tenemos respuesta final

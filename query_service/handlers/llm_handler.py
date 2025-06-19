@@ -14,9 +14,11 @@ from uuid import UUID, uuid4 # Ensure uuid4 is available if used, or just UUID i
 from common.handlers import BaseHandler
 from common.errors.exceptions import ExternalServiceError
 
-from ..models.payloads import (
-    LLMDirectResponse,
-    ToolCall
+from ..models import (
+    LLMDirectResponseData,
+    QueryServiceToolCall,
+    QueryServiceChatMessage,
+    QueryServiceToolDefinition
 )
 from ..clients.groq_client import GroqClient
 
@@ -58,7 +60,7 @@ class LLMHandler(BaseHandler):
     
     async def process_llm_direct(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[QueryServiceChatMessage],
         tenant_id: str,
         session_id: str,
         llm_model: Optional[str] = None,
@@ -68,12 +70,12 @@ class LLMHandler(BaseHandler):
         frequency_penalty: Optional[float] = None,
         presence_penalty: Optional[float] = None,
         stop_sequences: Optional[List[str]] = None,
-        tools: Optional[List[Dict[str, Any]]] = None,
+        tools: Optional[List[QueryServiceToolDefinition]] = None,
         tool_choice: Optional[str] = None,
         user_id: Optional[str] = None,
         trace_id: Optional[UUID] = None,
         correlation_id: Optional[UUID] = None
-    ) -> LLMDirectResponse:
+    ) -> LLMDirectResponseData:
         """
         Procesa una consulta directa al LLM.
         """
@@ -114,17 +116,17 @@ class LLMHandler(BaseHandler):
             processed_tool_calls = None
             if tool_calls_data:
                 processed_tool_calls = [
-                    ToolCall(
-                        id=tc.get("id", ""),
+                    QueryServiceToolCall(
+                        id=tc.get("id", ""), # Assuming tc is a dict from Groq response
                         type=tc.get("type", "function"),
-                        function=tc.get("function", {})
+                        function=tc.get("function", {}) # This will be validated by QueryServiceToolCall
                     )
                     for tc in tool_calls_data
                 ]
             
             generation_time_ms = int((time.time() - start_time) * 1000)
             
-            response = LLMDirectResponse(
+            response = LLMDirectResponseData(
                 query_id=query_id,
                 response=response_text,
                 tool_calls=processed_tool_calls,
@@ -163,7 +165,7 @@ class LLMHandler(BaseHandler):
     
     async def _generate_llm_response(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[QueryServiceChatMessage],
         model: str,
         temperature: float,
         max_tokens: int,
@@ -171,9 +173,9 @@ class LLMHandler(BaseHandler):
         frequency_penalty: float,
         presence_penalty: float,
         stop_sequences: Optional[List[str]],
-        tools: Optional[List[Dict[str, Any]]],
+        tools: Optional[List[QueryServiceToolDefinition]],
         tool_choice: Optional[str]
-    ) -> Tuple[str, Dict[str, int], str, Optional[List[Dict]]]:
+    ) -> Tuple[str, Dict[str, int], str, Optional[List[Dict[str, Any]]]]: # Adjusted tool_calls_data type hint for clarity
         """
         Genera respuesta usando el cliente Groq.
         """
@@ -182,9 +184,13 @@ class LLMHandler(BaseHandler):
                 self._logger.warning(f"Modelo {model} no disponible, usando default: {self.default_llm_model}")
                 model = self.default_llm_model
             
+            # Transform messages and tools for Groq client
+            groq_messages = [{"role": msg.role, "content": msg.content} for msg in messages]
+            groq_tools = [tool.model_dump() for tool in tools] if tools else None
+
             groq_params = {
                 "model": model,
-                "messages": messages,
+                "messages": groq_messages,
                 "temperature": temperature,
                 "max_tokens": max_tokens,
                 "top_p": top_p,
@@ -195,8 +201,8 @@ class LLMHandler(BaseHandler):
             if stop_sequences:
                 groq_params["stop"] = stop_sequences
             
-            if tools:
-                groq_params["tools"] = tools
+            if groq_tools:
+                groq_params["tools"] = groq_tools
                 if tool_choice:
                     groq_params["tool_choice"] = tool_choice
             
