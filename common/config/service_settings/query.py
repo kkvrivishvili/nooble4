@@ -29,6 +29,7 @@ class QueryServiceSettings(CommonAppSettings):
     llm_top_p: float = Field(default=1.0, description="Parámetro Top P para el LLM")
     llm_frequency_penalty: float = Field(default=0.0, description="Penalización de frecuencia para el LLM")
     llm_presence_penalty: float = Field(default=0.0, description="Penalización de presencia para el LLM")
+    llm_default_stop_sequences: Optional[List[str]] = Field(default=None, description="Default stop sequences for LLM generation")
     
     # Modelos disponibles
     available_llm_models: List[str] = Field(

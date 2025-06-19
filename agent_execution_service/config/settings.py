@@ -48,6 +48,9 @@ class ExecutionServiceSettings(CommonAppSettings):
     groq_api_key: Optional[str] = Field(None)
     anthropic_api_key: Optional[str] = Field(None)
 
+    # Timeouts
+    query_client_timeout_seconds: int = Field(default=30, description="Default timeout in seconds for QueryClient Redis operations")
+
     # Límites de ejecución
     max_iterations: int = Field(default=10, gt=0)
     max_execution_time: int = Field(default=120, gt=0)

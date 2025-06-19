@@ -113,7 +113,7 @@ class ReactHandler(BaseHandler):
                 
                 self._logger.debug(f"Iteración {iteration}: Respuesta LLM recibida: {llm_response.model_dump_json(indent=2)}") # Log the Pydantic model
                 
-                # llm_response is LLMDirectResponseData
+                # llm_response is QueryLLMDirectResponseData
                 llm_message_content: Optional[str] = None
                 tool_calls_from_llm: Optional[List[QueryServiceToolCall]] = None
                 if llm_response.message:

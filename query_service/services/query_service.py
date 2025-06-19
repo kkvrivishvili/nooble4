@@ -23,7 +23,7 @@ from ..models import (
     QueryGeneratePayload,
     QuerySearchPayload,
     QueryStatusPayload,
-    LLMDirectPayload,
+    QueryLLMDirectPayload,
     QueryErrorResponseData, # Changed from QueryErrorResponse
     QueryStatusResponseData # Added for status response
 )
@@ -165,35 +165,52 @@ class QueryService(BaseService):
         payload = QueryGeneratePayload.model_validate(action.data)
         config_overrides = action.metadata or {}
 
-        llm_params_for_handler = self._get_effective_llm_params(payload.llm_config, config_overrides)
+        # Apply overrides from action.metadata to the payload object
+        if "top_k_retrieval" in config_overrides and config_overrides["top_k_retrieval"] is not None:
+            payload.top_k_retrieval = config_overrides["top_k_retrieval"]
+        if "similarity_threshold" in config_overrides and config_overrides["similarity_threshold"] is not None:
+            payload.similarity_threshold = config_overrides["similarity_threshold"]
+        if "system_prompt_template" in config_overrides and config_overrides["system_prompt_template"] is not None:
+            payload.system_prompt_template = config_overrides["system_prompt_template"]
+        
+        if payload.llm_config: # Ensure llm_config exists before trying to update it
+            if "llm_model" in config_overrides and config_overrides["llm_model"] is not None:
+                payload.llm_config.model_name = config_overrides["llm_model"]
+            if "temperature" in config_overrides and config_overrides["temperature"] is not None:
+                payload.llm_config.temperature = config_overrides["temperature"]
+            if "max_tokens" in config_overrides and config_overrides["max_tokens"] is not None:
+                payload.llm_config.max_tokens = config_overrides["max_tokens"]
+            if "top_p" in config_overrides and config_overrides["top_p"] is not None:
+                payload.llm_config.top_p = config_overrides["top_p"]
+            if "frequency_penalty" in config_overrides and config_overrides["frequency_penalty"] is not None:
+                payload.llm_config.frequency_penalty = config_overrides["frequency_penalty"]
+            if "presence_penalty" in config_overrides and config_overrides["presence_penalty"] is not None:
+                payload.llm_config.presence_penalty = config_overrides["presence_penalty"]
+            if "stop_sequences" in config_overrides: # Allow None or empty list
+                payload.llm_config.stop_sequences = config_overrides["stop_sequences"]
+            if "user_id" in config_overrides: # Allow None
+                payload.llm_config.user = config_overrides["user_id"] # Assuming llm_config has a 'user' field
+        elif config_overrides: # If llm_config is None but there are LLM overrides, create a default config
+            from ..models.base_models import QueryServiceLLMConfig # Local import
+            payload.llm_config = QueryServiceLLMConfig(
+                model_name=config_overrides.get("llm_model"),
+                temperature=config_overrides.get("temperature"),
+                max_tokens=config_overrides.get("max_tokens"),
+                top_p=config_overrides.get("top_p"),
+                frequency_penalty=config_overrides.get("frequency_penalty"),
+                presence_penalty=config_overrides.get("presence_penalty"),
+                stop_sequences=config_overrides.get("stop_sequences"),
+                user=config_overrides.get("user_id")
+            )
 
         response = await self.rag_handler.process_rag_query(
-            query_text=payload.query_text,
-            collection_ids=payload.collection_ids,
+            payload=payload, # Pass the entire payload object
             tenant_id=action.tenant_id,
             session_id=action.session_id,
-            
-            top_k=payload.top_k_retrieval or config_overrides.get("top_k_retrieval"), # Uses top_k_retrieval from payload
-            similarity_threshold=payload.similarity_threshold or config_overrides.get("similarity_threshold"),
-            
-            # Pass effective LLM parameters
-            llm_model=llm_params_for_handler["model_name"],
-            temperature=llm_params_for_handler["temperature"],
-            max_tokens=llm_params_for_handler["max_tokens"],
-            system_prompt=payload.system_prompt_template, # Renamed in new model
-            top_p=llm_params_for_handler["top_p"],
-            frequency_penalty=llm_params_for_handler["frequency_penalty"],
-            presence_penalty=llm_params_for_handler["presence_penalty"],
-            stop_sequences=llm_params_for_handler["stop_sequences"],
-            user_id=llm_params_for_handler["user_id"],
-            # provider and stream are part of llm_config but not typically passed individually here
-
-            conversation_history=payload.conversation_history, # Now List[QueryServiceChatMessage]
-            
+            task_id=action.task_id,
             trace_id=action.trace_id,
             correlation_id=action.correlation_id,
-            embedding_client=self.embedding_client,
-            task_id=action.task_id
+            embedding_client=self.embedding_client
         )
         return response.model_dump()
     
@@ -244,7 +261,7 @@ class QueryService(BaseService):
         return status_response.model_dump()
 
     async def _handle_llm_direct(self, action: DomainAction) -> Dict[str, Any]:
-        payload = LLMDirectPayload.model_validate(action.data)
+        payload = QueryLLMDirectPayload.model_validate(action.data)
         config_overrides = action.metadata or {}
 
         llm_params_for_handler = self._get_effective_llm_params(payload.llm_config, config_overrides)

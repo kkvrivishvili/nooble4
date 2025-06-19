@@ -49,24 +49,24 @@ class RAGHandler(BaseHandler):
         # Inicializar clientes
         self.groq_client = GroqClient(
             api_key=app_settings.groq_api_key,
+            default_model=app_settings.default_llm_model,
+            api_base_url=app_settings.groq_api_base_url,
             timeout=app_settings.llm_timeout_seconds,
             max_retries=app_settings.groq_max_retries
         )
-        self.vector_client = VectorClient(
-            base_url=app_settings.vector_db_url,
-            timeout=app_settings.search_timeout_seconds
-        )
+        self.vector_client = VectorClient(base_url=app_settings.vector_db_url, timeout=app_settings.search_timeout_seconds)
         
-        # Configuración
-        self.default_top_k = app_settings.default_top_k
-        self.similarity_threshold = app_settings.similarity_threshold
+        # Configuraciones por defecto del handler, obtenidas de app_settings
         self.default_llm_model = app_settings.default_llm_model
-        self.llm_temperature = app_settings.llm_temperature
-        self.llm_max_tokens = app_settings.llm_max_tokens
-        self.llm_top_p = app_settings.llm_top_p
-        self.llm_frequency_penalty = app_settings.llm_frequency_penalty
-        self.llm_presence_penalty = app_settings.llm_presence_penalty
-        self.available_models = app_settings.available_models
+        self.default_top_k_retrieval = app_settings.default_top_k 
+        self.default_similarity_threshold = app_settings.similarity_threshold
+        self.default_temperature = app_settings.llm_temperature
+        self.default_max_tokens = app_settings.llm_max_tokens
+        self.default_system_prompt_template = app_settings.rag_system_prompt_template
+        self.default_top_p = app_settings.llm_top_p
+        self.default_frequency_penalty = app_settings.llm_frequency_penalty
+        self.default_presence_penalty = app_settings.llm_presence_penalty
+        self.default_stop_sequences = app_settings.llm_default_stop_sequences
         
         self._logger.info("RAGHandler inicializado")
     
@@ -109,13 +109,24 @@ class RAGHandler(BaseHandler):
         similarity_threshold_eff = payload.similarity_threshold if payload.similarity_threshold is not None else self.similarity_threshold
 
         # Effective LLM parameters from payload.llm_config or handler defaults
-        qs_llm_config = payload.llm_config
-        llm_model_eff = qs_llm_config.model_name if qs_llm_config.model_name else self.default_llm_model
-        temperature_eff = qs_llm_config.temperature if qs_llm_config.temperature is not None else self.llm_temperature
-        max_tokens_eff = qs_llm_config.max_tokens if qs_llm_config.max_tokens is not None else self.llm_max_tokens
-        top_p_eff = qs_llm_config.top_p # Can be None, Groq client handles default
-        frequency_penalty_eff = qs_llm_config.frequency_penalty # Can be None
-        presence_penalty_eff = qs_llm_config.presence_penalty # Can be None
+        qs_llm_config = payload.llm_config # This can be None
+
+        if qs_llm_config:
+            llm_model_eff = qs_llm_config.model_name if qs_llm_config.model_name else self.default_llm_model
+            temperature_eff = qs_llm_config.temperature if qs_llm_config.temperature is not None else self.llm_temperature
+            max_tokens_eff = qs_llm_config.max_tokens if qs_llm_config.max_tokens is not None else self.llm_max_tokens
+            top_p_eff = qs_llm_config.top_p if qs_llm_config.top_p is not None else self.llm_top_p
+            frequency_penalty_eff = qs_llm_config.frequency_penalty if qs_llm_config.frequency_penalty is not None else self.llm_frequency_penalty
+            presence_penalty_eff = qs_llm_config.presence_penalty if qs_llm_config.presence_penalty is not None else self.llm_presence_penalty
+            stop_sequences_eff = qs_llm_config.stop_sequences # Pass as is, GroqClient handles None or uses its default
+        else:
+            llm_model_eff = self.default_llm_model
+            temperature_eff = self.llm_temperature
+            max_tokens_eff = self.llm_max_tokens
+            top_p_eff = self.llm_top_p 
+            frequency_penalty_eff = self.llm_frequency_penalty
+            presence_penalty_eff = self.llm_presence_penalty
+            stop_sequences_eff = None # Consistent with QueryServiceLLMConfig default for stop_sequences
 
         effective_system_prompt = system_prompt_template if system_prompt_template is not None else self._get_default_system_prompt()
 
@@ -183,7 +194,8 @@ class RAGHandler(BaseHandler):
                 max_tokens=max_tokens_eff,
                 top_p=top_p_eff,
                 frequency_penalty=frequency_penalty_eff,
-                presence_penalty=presence_penalty_eff
+                presence_penalty=presence_penalty_eff,
+                stop_sequences=stop_sequences_eff
             )
             generation_time_ms = int((time.time() - generation_start) * 1000)
             

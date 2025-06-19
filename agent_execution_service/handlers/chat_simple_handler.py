@@ -44,26 +44,14 @@ class SimpleChatHandler(BaseHandler):
                 # Delegar al Query Service para RAG
                 self._logger.debug("Usando RAG - delegando al Query Service")
                 
-                # Convert AES Message history to QueryServiceChatMessage history if necessary
-                # Assuming payload.conversation_history is List[common.models.message.Message]
-                # If it's already List[QueryServiceChatMessage], this conversion is not strictly needed but ensures type safety.
-                qs_conversation_history: Optional[List[QueryServiceChatMessage]] = None
-                if payload.conversation_history:
-                    qs_conversation_history = []
-                    for msg in payload.conversation_history:
-                        # Assuming common.models.message.Message has 'role' and 'content' attributes
-                        # and maps directly to QueryServiceChatMessage roles.
-                        # If roles differ (e.g. 'model' vs 'assistant'), mapping is needed.
-                        qs_conversation_history.append(QueryServiceChatMessage(role=msg.role, content=msg.content))
-
                 result = await self.query_client.query_with_rag(
                     query_text=payload.user_message,
                     tenant_id=tenant_id,
                     session_id=session_id,
                     task_id=task_id,
                     collection_ids=payload.collection_ids,
-                    llm_config_params=payload.llm_config.model_dump(exclude_none=True) if payload.llm_config else None,
-                    conversation_history=qs_conversation_history
+                    llm_config=payload.llm_config, # query_client now expects QueryServiceLLMConfig object
+                    conversation_history=payload.conversation_history # Already List[QueryServiceChatMessage]
                 )
                 
                 response_text = result.ai_response or ""
@@ -88,12 +76,8 @@ class SimpleChatHandler(BaseHandler):
                 if payload.system_prompt:
                     llm_messages.append(QueryServiceChatMessage(role="system", content=payload.system_prompt))
                 
-                # Convert AES Message history to QueryServiceChatMessage history
                 if payload.conversation_history:
-                    for msg in payload.conversation_history:
-                        # Assuming common.models.message.Message has 'role' and 'content'
-                        # and maps directly to QueryServiceChatMessage roles.
-                        llm_messages.append(QueryServiceChatMessage(role=msg.role, content=msg.content))
+                    llm_messages.extend(payload.conversation_history) # Already List[QueryServiceChatMessage]
                 
                 llm_messages.append(QueryServiceChatMessage(role="user", content=payload.user_message))
                 
@@ -103,7 +87,7 @@ class SimpleChatHandler(BaseHandler):
                     tenant_id=tenant_id,
                     session_id=session_id,
                     task_id=task_id,
-                    llm_config_params=payload.llm_config.model_dump(exclude_none=True) if payload.llm_config else None
+                    llm_config=payload.llm_config # query_client now expects QueryServiceLLMConfig object
                 )
                 
                 response_text = result.message.content if result.message else ""

@@ -5,6 +5,7 @@ from typing import Optional, Dict, Any, List, Union
 from pydantic import BaseModel, Field, field_validator
 from enum import Enum
 from datetime import datetime
+from query_service.models.base_models import QueryServiceLLMProvider, QueryServiceChatMessage
 
 class AgentType(str, Enum):
     CONVERSATIONAL = "conversational"
@@ -14,38 +15,20 @@ class ExecutionMode(str, Enum):
     SIMPLE = "simple"
     ADVANCED = "advanced"
 
-class LLMProvider(str, Enum):
-    OPENAI = "openai"
-    GROQ = "groq"
-    ANTHROPIC = "anthropic"
-
 class LLMConfig(BaseModel):
-    """Configuración para el modelo de lenguaje."""
-    provider: LLMProvider = Field(default=LLMProvider.GROQ)
+    """Configuración para el modelo de lenguaje (alineada con QueryServiceLLMConfig)."""
+    provider: QueryServiceLLMProvider = Field(default=QueryServiceLLMProvider.GROQ)
     model_name: str = Field(default="llama-3.3-70b-versatile")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    max_tokens: int = Field(default=1024, gt=0, le=8192)
+    max_tokens: int = Field(default=2048, gt=0)
     top_p: float = Field(default=1.0, ge=0.0, le=1.0)
-    stream: bool = Field(default=False)
-    frequency_penalty: float = Field(default=0.0, ge=0.0, le=2.0)
-    presence_penalty: float = Field(default=0.0, ge=0.0, le=2.0)
+    stream: bool = Field(default=False, description="Indicates if streaming is preferred. QueryService handles actual streaming.")
+    frequency_penalty: float = Field(default=0.0, ge=-2.0, le=2.0)
+    presence_penalty: float = Field(default=0.0, ge=-2.0, le=2.0)
+    stop_sequences: Optional[List[str]] = Field(None, description="Sequences to stop generation at.")
+    user_id: Optional[str] = Field(None, description="Optional user ID for tracking/moderation by LLM provider.")
 
-class Message(BaseModel):
-    """Mensaje en una conversación."""
-    role: str = Field(..., description="Rol: user, assistant, system, tool")
-    content: str = Field(..., description="Contenido del mensaje")
-    timestamp: Optional[str] = Field(
-        default_factory=lambda: datetime.now().isoformat()
-    )
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
-
-    @field_validator('role')
-    @classmethod
-    def validate_role(cls, v):
-        allowed_roles = ['user', 'assistant', 'system', 'tool']
-        if v not in allowed_roles:
-            raise ValueError(f"Role debe ser uno de: {allowed_roles}")
-        return v
+    model_config = {"extra": "forbid"}
 
 class ToolConfig(BaseModel):
     """Configuración de herramienta."""
@@ -73,7 +56,7 @@ class ExecuteSimpleChatPayload(BaseModel):
     llm_config: Optional[LLMConfig] = Field(None)
     
     # Historial de conversación
-    conversation_history: List[Message] = Field(default_factory=list)
+    conversation_history: List[QueryServiceChatMessage] = Field(default_factory=list)
 
     @field_validator('conversation_history')
     @classmethod

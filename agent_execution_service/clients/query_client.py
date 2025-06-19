@@ -12,10 +12,10 @@ import redis.asyncio as redis_async # Para el tipado de redis_conn
 from common.models.actions import DomainAction, DomainActionResponse
 from common.errors.exceptions import ExternalServiceError
 from common.clients.base_redis_client import BaseRedisClient
-from common.config.base_settings import CommonAppSettings # Para tipar settings
+from ..config.settings import ExecutionServiceSettings # Para tipar settings
 from query_service.models import (
     QueryGeneratePayload, QueryGenerateResponseData,
-    QueryLLMDirectPayload, LLMDirectResponseData,  # Note: LLMDirectResponseData
+    QueryLLMDirectPayload, QueryLLMDirectResponseData,  # Note: QueryLLMDirectResponseData
     QuerySearchPayload, QuerySearchResponseData,
     QueryServiceLLMConfig, QueryServiceChatMessage, QueryServiceToolDefinition,
     ACTION_QUERY_GENERATE, ACTION_QUERY_LLM_DIRECT, ACTION_QUERY_SEARCH
@@ -24,8 +24,6 @@ from typing import Union # For tool_choice
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_REDIS_TIMEOUT = 30 # segundos
-
 class QueryClient:
     """Cliente para Query Service vía Redis DomainActions, utilizando BaseRedisClient."""
 
@@ -33,8 +31,7 @@ class QueryClient:
         self,
         aes_service_name: str, # Nombre del servicio actual (AgentExecutionService)
         redis_conn: redis_async.Redis,
-        settings: CommonAppSettings, # Configuración de AES, que hereda de CommonAppSettings
-        default_timeout: int = DEFAULT_REDIS_TIMEOUT
+        settings: ExecutionServiceSettings # Configuración de AES
     ):
         if not aes_service_name:
             raise ValueError("aes_service_name es requerido")
@@ -46,7 +43,7 @@ class QueryClient:
         self.aes_service_name = aes_service_name
         # BaseRedisClient necesita el nombre del servicio que lo USA (AES), la conexión y los settings comunes.
         self.redis_comms = BaseRedisClient(service_name=aes_service_name, redis_client=redis_conn, settings=settings)
-        self.default_timeout = default_timeout
+        self.default_timeout = settings.query_client_timeout_seconds
         # query_service_name se definirá en el action_type de la DomainAction, ej "query.llm.direct" -> target service "query"
 
 
@@ -58,7 +55,7 @@ class QueryClient:
         session_id: str,
         task_id: uuid.UUID,
         collection_ids: List[str],
-        llm_config_params: Optional[Dict[str, Any]] = None, # Changed
+        llm_config: Optional[QueryServiceLLMConfig] = None,
         conversation_history: Optional[List[QueryServiceChatMessage]] = None,
         system_prompt_template: Optional[str] = None,
         top_k_retrieval: int = 5,
@@ -68,11 +65,8 @@ class QueryClient:
         """
         Realiza una consulta RAG al Query Service usando DomainActions vía Redis.
         """
-        # Create QueryServiceLLMConfig from params or use default
-        if llm_config_params:
-            qs_llm_config = QueryServiceLLMConfig(**llm_config_params)
-        else:
-            qs_llm_config = QueryServiceLLMConfig()
+        # Use provided llm_config or default if None
+        qs_llm_config = llm_config if llm_config is not None else QueryServiceLLMConfig()
 
         payload = QueryGeneratePayload(
             query_text=query_text,
@@ -117,20 +111,17 @@ class QueryClient:
         tenant_id: str,
         session_id: str,
         task_id: uuid.UUID,
-        llm_config_params: Optional[Dict[str, Any]] = None, # Changed
+        llm_config: Optional[QueryServiceLLMConfig] = None,
         tools: Optional[List[QueryServiceToolDefinition]] = None,
         tool_choice: Optional[Union[str, Dict[str, Any]]] = None, # OpenAI type: Literal['none', 'auto'] | ChatCompletionNamedToolChoice
         timeout: Optional[int] = None
-    ) -> LLMDirectResponseData:
+    ) -> QueryLLMDirectResponseData:
         """
         Realiza una llamada directa al LLM (sin RAG) usando DomainActions vía Redis.
         Espera una respuesta de forma pseudo-asíncrona.
         """
-        # Create QueryServiceLLMConfig from params or use default
-        if llm_config_params:
-            qs_llm_config = QueryServiceLLMConfig(**llm_config_params)
-        else:
-            qs_llm_config = QueryServiceLLMConfig()
+        # Use provided llm_config or default if None
+        qs_llm_config = llm_config if llm_config is not None else QueryServiceLLMConfig()
 
         payload = QueryLLMDirectPayload(
             messages=messages,
@@ -157,7 +148,7 @@ class QueryClient:
                 error_message = f"QueryService error para acción {action.action_id} ({ACTION_QUERY_LLM_DIRECT}): {error_detail.message if error_detail else 'Unknown error or no data'}"
                 logger.error(error_message, extra={"action_id": str(action.action_id), "error_detail": error_detail.model_dump() if error_detail else None})
                 raise ExternalServiceError(error_message, error_detail=error_detail.model_dump() if error_detail else None)
-            return LLMDirectResponseData.model_validate(response_action.data)
+            return QueryLLMDirectResponseData.model_validate(response_action.data)
         except TimeoutError as e:
             logger.error(f"Timeout esperando respuesta de QueryService para {ACTION_QUERY_LLM_DIRECT} ({action.action_id}): {e}")
             raise ExternalServiceError(f"Timeout esperando respuesta de QueryService para {ACTION_QUERY_LLM_DIRECT}: {str(e)}", original_exception=e)

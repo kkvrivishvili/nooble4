@@ -16,7 +16,7 @@ from common.errors.exceptions import ExternalServiceError
 
 from ..models import (
     QueryLLMDirectPayload, # Added
-    LLMDirectResponseData,
+    QueryLLMDirectResponseData,
     QueryServiceToolCall,
     QueryServiceChatMessage,
     QueryServiceToolDefinition
@@ -56,6 +56,7 @@ class LLMHandler(BaseHandler):
         self.llm_top_p = app_settings.llm_top_p
         self.llm_frequency_penalty = app_settings.llm_frequency_penalty
         self.llm_presence_penalty = app_settings.llm_presence_penalty
+        self.llm_default_stop_sequences = app_settings.llm_default_stop_sequences # Added
         self.available_models = app_settings.available_llm_models
         
         self._logger.info("LLMHandler inicializado")
@@ -68,7 +69,7 @@ class LLMHandler(BaseHandler):
         # user_id: Optional[str] = None, # Not directly used, can be in payload.llm_config.user if needed by LLM provider
         trace_id: Optional[UUID] = None, # Retained for operational context
         correlation_id: Optional[UUID] = None # Used for query_id
-    ) -> LLMDirectResponseData:
+    ) -> QueryLLMDirectResponseData:
         """
         Procesa una consulta directa al LLM utilizando QueryLLMDirectPayload.
         """
@@ -81,15 +82,26 @@ class LLMHandler(BaseHandler):
         tool_choice = payload.tool_choice
         
         # Effective LLM parameters from payload.llm_config or handler defaults
-        qs_llm_config = payload.llm_config
-        llm_model_eff = qs_llm_config.model_name if qs_llm_config.model_name else self.default_llm_model
-        temperature_eff = qs_llm_config.temperature if qs_llm_config.temperature is not None else self.llm_temperature
-        max_tokens_eff = qs_llm_config.max_tokens if qs_llm_config.max_tokens is not None else self.llm_max_tokens
-        top_p_eff = qs_llm_config.top_p if qs_llm_config.top_p is not None else self.llm_top_p
-        frequency_penalty_eff = qs_llm_config.frequency_penalty if qs_llm_config.frequency_penalty is not None else self.llm_frequency_penalty
-        presence_penalty_eff = qs_llm_config.presence_penalty if qs_llm_config.presence_penalty is not None else self.llm_presence_penalty
-        stop_sequences_eff = qs_llm_config.stop_sequences # Can be None
-        # user_eff = qs_llm_config.user # If Groq client supports user field
+        qs_llm_config = payload.llm_config # This can be None
+
+        if qs_llm_config:
+            llm_model_eff = qs_llm_config.model_name if qs_llm_config.model_name else self.default_llm_model
+            temperature_eff = qs_llm_config.temperature if qs_llm_config.temperature is not None else self.llm_temperature
+            max_tokens_eff = qs_llm_config.max_tokens if qs_llm_config.max_tokens is not None else self.llm_max_tokens
+            top_p_eff = qs_llm_config.top_p if qs_llm_config.top_p is not None else self.llm_top_p
+            frequency_penalty_eff = qs_llm_config.frequency_penalty if qs_llm_config.frequency_penalty is not None else self.llm_frequency_penalty
+            presence_penalty_eff = qs_llm_config.presence_penalty if qs_llm_config.presence_penalty is not None else self.llm_presence_penalty
+            stop_sequences_eff = qs_llm_config.stop_sequences
+            # user_eff = qs_llm_config.user # If Groq client supports user field
+        else:
+            llm_model_eff = self.default_llm_model
+            temperature_eff = self.llm_temperature
+            max_tokens_eff = self.llm_max_tokens
+            top_p_eff = self.llm_top_p
+            frequency_penalty_eff = self.llm_frequency_penalty
+            presence_penalty_eff = self.llm_presence_penalty
+            stop_sequences_eff = self.llm_default_stop_sequences # Use default from settings
+            # user_eff = None # Default to None
 
         self._logger.info(
             f"Procesando LLM directo: {len(messages)} mensajes",
@@ -145,7 +157,7 @@ class LLMHandler(BaseHandler):
             llm_info_for_response = {"model_name": llm_model_eff, "provider": "groq"} # Example
             generation_time_ms = int((time.time() - start_time) * 1000)
             
-            response = LLMDirectResponseData(
+            response = QueryLLMDirectResponseData(
                 query_id=query_id,
                 message=assistant_response_message,
                 usage=token_usage_for_response,
@@ -165,9 +177,9 @@ class LLMHandler(BaseHandler):
                 f"LLM directo completado en {generation_time_ms}ms",
                 extra={
                     "query_id": query_id,
-                    "tokens": token_usage.get("total_tokens"),
-                    "finish_reason": finish_reason,
-                    "has_tool_calls": bool(processed_tool_calls)
+                    "tokens": token_usage_dict.get("total_tokens"),
+                    "finish_reason": finish_reason_str,
+                    "has_tool_calls": bool(processed_tool_calls_for_message)
                 }
             )
             
