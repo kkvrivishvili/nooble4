@@ -11,9 +11,12 @@ from common.errors.exceptions import ExternalServiceError, AppValidationError
 
 from ..models import (
     QueryAdvancePayload,
-    QueryAdvanceResponseData,
-    QueryServiceChatMessage,
-    TokenUsage
+    QueryAdvanceResponseData
+)
+from common.models.chat_models import (
+    ChatMessage,
+    TokenUsage,
+    ToolCall
 )
 from ..clients.groq_client import GroqClient
 
@@ -83,7 +86,7 @@ class AdvanceHandler(BaseHandler):
             message = choice.message
             
             # Construir mensaje de respuesta
-            response_message = QueryServiceChatMessage(
+            response_message = ChatMessage(
                 role="assistant",
                 content=message.content
             )

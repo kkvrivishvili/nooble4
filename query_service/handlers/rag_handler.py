@@ -11,9 +11,9 @@ from common.errors.exceptions import ExternalServiceError
 
 from ..models import (
     QueryRAGPayload,
-    QueryRAGResponseData,
-    RAGChunk
+    QueryRAGResponseData
 )
+from common.models.chat_models import RAGChunk
 from ..clients.vector_client import VectorClient
 from ..clients.embedding_client import EmbeddingClient
 

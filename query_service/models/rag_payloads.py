@@ -6,8 +6,8 @@ from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from uuid import UUID
 
-from .base_models import (
-    QueryServiceEmbeddingConfig,
+from common.models.chat_models import (
+    EmbeddingConfig,
     RAGChunk
 )
 
@@ -16,7 +16,7 @@ class QueryRAGPayload(BaseModel):
     query_text: str = Field(..., description="Search query text")
     collection_ids: List[str] = Field(..., description="List of collection IDs to search")
     document_ids: Optional[List[str]] = Field(None, description="Optional document IDs to filter")
-    embedding_config: QueryServiceEmbeddingConfig = Field(..., description="Embedding configuration")
+    embedding_config: EmbeddingConfig = Field(..., description="Embedding configuration from common models")
     top_k: int = Field(..., gt=0, description="Number of chunks to retrieve")
     similarity_threshold: Optional[float] = Field(None, ge=0.0, le=1.0, description="Similarity threshold")
 
@@ -31,7 +31,7 @@ class QueryRAGPayload(BaseModel):
 
 class QueryRAGResponseData(BaseModel):
     """Response data for query.rag."""
-    chunks: List[RAGChunk] = Field(default_factory=list, description="Retrieved chunks")
+    chunks: List[RAGChunk] = Field(default_factory=list, description="Retrieved chunks from common models")
     total_found: int = Field(..., description="Total number of chunks found")
     query_id: str = Field(..., description="Unique query ID")
     search_time_ms: int = Field(..., description="Search execution time in milliseconds")

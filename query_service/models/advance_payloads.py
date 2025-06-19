@@ -6,22 +6,22 @@ from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from uuid import UUID
 
-from .base_models import (
-    QueryServiceLLMConfig,
-    QueryServiceChatMessage,
-    QueryServiceToolDefinition,
-    QueryServiceToolCall,
+from common.models.chat_models import (
+    AgentConfig,  # Replaces QueryServiceLLMConfig
+    ChatMessage,  # Replaces QueryServiceChatMessage
+    ToolDefinition,  # Replaces QueryServiceToolDefinition
+    ToolCall,  # Replaces QueryServiceToolCall
     TokenUsage
 )
 
 class QueryAdvancePayload(BaseModel):
     """Payload for query.advance - advanced chat with tools support."""
-    messages: List[QueryServiceChatMessage] = Field(
+    messages: List[ChatMessage] = Field(
         ..., 
         description="Conversation history including system, user, assistant and tool messages"
     )
-    agent_config: QueryServiceLLMConfig = Field(..., description="LLM configuration")
-    tools: List[QueryServiceToolDefinition] = Field(
+    agent_config: AgentConfig = Field(..., description="LLM configuration from common models")
+    tools: List[ToolDefinition] = Field(
         ..., 
         description="List of tools available for the LLM"
     )
@@ -41,12 +41,12 @@ class QueryAdvancePayload(BaseModel):
 
 class QueryAdvanceResponseData(BaseModel):
     """Response data for query.advance."""
-    message: QueryServiceChatMessage = Field(
+    message: ChatMessage = Field(
         ..., 
         description="The assistant's response (may include tool_calls)"
     )
     finish_reason: str = Field(..., description="Reason for completion")
-    usage: TokenUsage = Field(..., description="Token usage statistics")
+    usage: TokenUsage = Field(..., description="Token usage statistics from common models")
     query_id: str = Field(..., description="Unique query ID")
     execution_time_ms: int = Field(..., description="Total execution time in milliseconds")
     timestamp: datetime = Field(default_factory=datetime.utcnow)
