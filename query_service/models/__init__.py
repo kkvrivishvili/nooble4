@@ -1,73 +1,56 @@
 """
 Models for Query Service Interface.
-
-This package defines the Pydantic models used for communication with the Query Service,
-structured into base reusable models and specific payloads for different actions.
 """
 
 from .base_models import (
-    ACTION_QUERY_GENERATE,
-    ACTION_QUERY_LLM_DIRECT,
-    ACTION_QUERY_SEARCH,
-    ACTION_QUERY_STATUS,
-    QueryServiceLLMProvider,
+    ACTION_QUERY_SIMPLE,
+    ACTION_QUERY_ADVANCE,
+    ACTION_QUERY_RAG,
     QueryServiceLLMConfig,
+    QueryServiceEmbeddingConfig,
     QueryServiceChatMessage,
-    QueryServiceToolFunctionParameters,
-    QueryServiceToolFunction,
+    QueryServiceToolCall,
     QueryServiceToolDefinition,
-    RetrievedDoc,
-    QueryErrorResponseData,
-    TokenUsage
+    TokenUsage,
+    RAGChunk
 )
-from .generate_payloads import (
-    QueryGeneratePayload,
-    QueryGenerateResponseData
+from .simple_payloads import (
+    QuerySimplePayload,
+    QuerySimpleResponseData
 )
-from .llm_direct_payloads import (
-    QueryLLMDirectPayload,
-    QueryLLMDirectResponseData
+from .advance_payloads import (
+    QueryAdvancePayload,
+    QueryAdvanceResponseData
 )
-from .search_payloads import (
-    QuerySearchPayload,
-    QuerySearchResponseData
-)
-from .status_payloads import (
-    QueryStatusPayload,
-    QueryStatusResponseData
+from .rag_payloads import (
+    QueryRAGPayload,
+    QueryRAGResponseData
 )
 
 __all__ = [
     # Action Constants
-    "ACTION_QUERY_GENERATE",
-    "ACTION_QUERY_LLM_DIRECT",
-    "ACTION_QUERY_SEARCH",
-    "ACTION_QUERY_STATUS",
+    "ACTION_QUERY_SIMPLE",
+    "ACTION_QUERY_ADVANCE",
+    "ACTION_QUERY_RAG",
     
     # Base Models
-    "QueryServiceLLMProvider",
     "QueryServiceLLMConfig",
+    "QueryServiceEmbeddingConfig",
     "QueryServiceChatMessage",
-    "QueryServiceToolFunctionParameters",
-    "QueryServiceToolFunction",
+    "QueryServiceToolCall",
     "QueryServiceToolDefinition",
-    "RetrievedDoc",
-    "QueryErrorResponseData",
     "TokenUsage",
+    "RAGChunk",
     
-    # Generate Payloads
-    "QueryGeneratePayload",
-    "QueryGenerateResponseData",
+    # Simple Payloads
+    "QuerySimplePayload",
+    "QuerySimpleResponseData",
     
-    # LLM Direct Payloads
-    "QueryLLMDirectPayload",
-    "QueryLLMDirectResponseData",
+    # Advance Payloads
+    "QueryAdvancePayload",
+    "QueryAdvanceResponseData",
     
-    # Search Payloads
-    "QuerySearchPayload",
-    "QuerySearchResponseData",
-    
-    # Status Payloads
-    "QueryStatusPayload",
-    "QueryStatusResponseData",
+    # RAG Payloads
+    "QueryRAGPayload",
+    "QueryRAGResponseData",
 ]

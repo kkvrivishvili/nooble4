@@ -2,8 +2,8 @@
 Handlers del Query Service.
 """
 
+from .simple_handler import SimpleHandler
+from .advance_handler import AdvanceHandler
 from .rag_handler import RAGHandler
-from .search_handler import SearchHandler
-from .llm_handler import LLMHandler  # NUEVO
 
-__all__ = ['RAGHandler', 'SearchHandler', 'LLMHandler']
+__all__ = ['SimpleHandler', 'AdvanceHandler', 'RAGHandler']
