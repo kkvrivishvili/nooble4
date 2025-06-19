@@ -26,7 +26,7 @@ ENV QUERY_ENVIRONMENT=development
 ENV QUERY_LOG_LEVEL=INFO
 
 # Puerto por defecto
-EXPOSE 8002
+EXPOSE 8000
 
 # Comando de inicio
 CMD ["python", "-m", "query_service.main"]

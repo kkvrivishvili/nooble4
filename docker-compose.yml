@@ -1,0 +1,93 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7.2-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  qdrant:
+    image: qdrant/qdrant:v1.7.4
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  query_service:
+    build:
+      context: ./query_service
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+      - qdrant
+    volumes:
+      - ./common:/app/common
+
+  agent_orchestrator_service:
+    build:
+      context: ./agent_orchestrator_service
+    ports:
+      - "8001:8001"
+    depends_on:
+      - redis
+    volumes:
+      - ./common:/app/common
+
+  ingestion_service:
+    build:
+      context: ./ingestion_service
+    ports:
+      - "8002:8002"
+    depends_on:
+      - redis
+      - qdrant
+    volumes:
+      - ./common:/app/common
+
+  agent_management_service:
+    build:
+      context: ./agent_management_service
+    ports:
+      - "8003:8003"
+    depends_on:
+      - redis
+    volumes:
+      - ./common:/app/common
+
+  conversation_service:
+    build:
+      context: ./conversation_service
+    ports:
+      - "8004:8004"
+    depends_on:
+      - redis
+    volumes:
+      - ./common:/app/common
+
+  agent_execution_service:
+    build:
+      context: ./agent_execution_service
+    ports:
+      - "8005:8005"
+    depends_on:
+      - redis
+    volumes:
+      - ./common:/app/common
+
+  embedding_service:
+    build:
+      context: ./embedding_service
+    ports:
+      - "8006:8006"
+    depends_on:
+      - redis
+    volumes:
+      - ./common:/app/common
+
+volumes:
+  redis_data:
+  qdrant_data:
