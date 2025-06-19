@@ -14,6 +14,8 @@ from .handlers import AdvanceChatHandler, SimpleChatHandler
 from .models import OperationMode, SimpleExecutionResponse, AdvanceExecutionResponse
 from .services import ExecutionService
 from .tools import BaseTool, KnowledgeTool, ToolRegistry
+from .utils import format_tool_result, format_chunks_for_llm
+from .workers import ExecutionWorker
 
 __all__ = [
     "QueryClient",
@@ -28,4 +30,7 @@ __all__ = [
     "BaseTool",
     "KnowledgeTool",
     "ToolRegistry",
+    "format_tool_result",
+    "format_chunks_for_llm",
+    "ExecutionWorker",
 ]
