@@ -230,7 +230,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "embedding_service.main:app",
         host="0.0.0.0",
-        port=8003,
+        port=8006,
         reload=False,  # En producción debe ser False
         log_level=settings.log_level.lower()
     )

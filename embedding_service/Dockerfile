@@ -26,7 +26,7 @@ ENV EMBEDDING_ENVIRONMENT=development
 ENV EMBEDDING_LOG_LEVEL=INFO
 
 # Puerto por defecto
-EXPOSE 8003
+EXPOSE 8006
 
 # Comando de inicio
 CMD ["python", "-m", "embedding_service.main"]
