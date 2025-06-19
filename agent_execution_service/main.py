@@ -118,8 +118,8 @@ async def lifespan(app: FastAPI):
 # Crear aplicación FastAPI
 app = FastAPI(
     title="Agent Execution Service",
-    description="Servicio de ejecución de agentes conversacionales y ReAct",
-    version="1.0.0",
+    description="Servicio de ejecución de agentes con modos simple (Chat+RAG) y avanzado (ReAct)",
+    version="2.0.0",
     lifespan=lifespan
 )
 
@@ -128,8 +128,9 @@ async def root():
     """Endpoint raíz."""
     return {
         "service": "agent_execution_service",
-        "version": "1.0.0",
-        "status": "running"
+        "version": "2.0.0",
+        "status": "running",
+        "modes": ["simple", "advance"]
     }
 
 @app.get("/health")

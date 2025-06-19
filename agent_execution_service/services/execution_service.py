@@ -8,7 +8,8 @@ from typing import Optional, Dict, Any
 from common.services.base_service import BaseService
 from common.models.actions import DomainAction
 from common.errors.exceptions import InvalidActionError, ExternalServiceError
-from common.clients import BaseRedisClient
+from common.clients.base_redis_client import BaseRedisClient
+# CORRECCIÓN: No necesitamos importar BaseRedisClient otra vez, ya viene del parent
 
 from ..config.settings import ExecutionServiceSettings
 from ..clients.query_client import QueryClient
@@ -27,19 +28,18 @@ class ExecutionService(BaseService):
     def __init__(
         self,
         app_settings: ExecutionServiceSettings,
-        service_redis_client: BaseRedisClient,
+        service_redis_client: Optional[BaseRedisClient] = None,  # CORRECCIÓN: Optional
         direct_redis_conn=None
     ):
         super().__init__(app_settings, service_redis_client, direct_redis_conn)
         self._logger = logging.getLogger(f"{self.service_name}.{self.__class__.__name__}")
         
+        # CORRECCIÓN: Validar que tenemos redis_client
+        if not service_redis_client:
+            raise ValueError("service_redis_client es requerido para ExecutionService")
+        
         # Inicializar clientes
         self.query_client = QueryClient(
-            redis_client=service_redis_client,
-            settings=app_settings
-        )
-        
-        self.conversation_client = ConversationClient(
             redis_client=service_redis_client,
             settings=app_settings
         )

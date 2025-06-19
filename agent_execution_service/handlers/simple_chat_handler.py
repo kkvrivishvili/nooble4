@@ -67,7 +67,7 @@ class SimpleChatHandler(BaseHandler):
                 tenant_id=tenant_id,
                 session_id=session_id,
                 task_id=task_id,
-                agent_config=payload.agent_config.model_dump(),
+                agent_config=agent_config_to_query_format(payload.agent_config),
                 embedding_config=payload.embedding_config.model_dump(),
                 document_ids=payload.document_ids,
                 conversation_history=payload.conversation_history

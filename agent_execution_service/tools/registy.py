@@ -2,8 +2,7 @@
 Registro de herramientas disponibles.
 """
 import logging
-from typing import Dict, Optional, List
-
+from typing import Dict, Optional, List, Any  
 from .base_tool import BaseTool
 
 logger = logging.getLogger(__name__)

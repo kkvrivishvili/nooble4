@@ -103,3 +103,17 @@ class AdvanceChatPayload(BaseModel):
             )
             v.append(knowledge_tool)
         return v
+
+
+    def agent_config_to_query_format(agent_config: AgentConfig) -> Dict[str, Any]:
+        """Convierte AgentConfig al formato esperado por Query Service."""
+        return {
+            "provider": agent_config.provider,
+            "model_name": agent_config.model,  # Query Service espera 'model_name'
+            "temperature": agent_config.temperature,
+            "max_tokens": agent_config.max_tokens,
+            "top_p": agent_config.top_p,
+            "frequency_penalty": agent_config.frequency_penalty,
+            "presence_penalty": agent_config.presence_penalty,
+            "stop_sequences": agent_config.stop_sequences
+        }

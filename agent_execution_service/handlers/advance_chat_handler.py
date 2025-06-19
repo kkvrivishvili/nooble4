@@ -5,7 +5,7 @@ import logging
 import time
 import uuid
 import json
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional  # Ya está incluido Any
 
 from common.handlers.base_handler import BaseHandler
 from common.errors.exceptions import ExternalServiceError, ToolExecutionError
