@@ -1,33 +1,47 @@
 """
 Configuración específica para Agent Execution Service.
 """
-from typing import Optional, Dict, Any
-from pydantic import Field, model_validator
+from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 from common.config.base_settings import CommonAppSettings
 
-class ExecutionServiceSettings(CommonAppSettings):
 
+class ExecutionServiceSettings(CommonAppSettings):
     """Configuración específica para Agent Execution Service."""
 
-   
-   # Domain específico
-    domain_name: str = Field(default="execution")
+    model_config = SettingsConfigDict(
+        env_prefix='AES_',
+        extra='ignore',
+        env_file='.env'
+    )
 
-    # Nombres de servicios para comunicación interna
-    query_service_name: str = Field(default="query-service")
+    # Domain específico
+    domain_name: str = Field(default="execution")
     
     # Timeouts
-    query_client_timeout_seconds: int = Field(default=30, description="Default timeout in seconds for QueryClient Redis operations")
-
-    # Límites de ejecución
-    max_iterations: int = Field(default=10, gt=0)
-    max_execution_time: int = Field(default=120, gt=0)
-    max_tools: int = Field(default=10, gt=0)
-
-    # Configuración de workers
-    worker_count: int = Field(default=2, gt=0)
+    query_timeout_seconds: int = Field(
+        default=30, 
+        description="Timeout para operaciones con Query Service"
+    )
+    tool_execution_timeout: int = Field(
+        default=30,
+        description="Timeout para ejecución de herramientas"
+    )
     
-    # Timeouts específicos
-    llm_timeout_seconds: int = Field(default=60, gt=0)
-    tool_timeout_seconds: int = Field(default=30, gt=0)
+    # ReAct configuration
+    max_react_iterations: int = Field(
+        default=10,
+        gt=0,
+        le=20,
+        description="Máximo de iteraciones para el loop ReAct"
+    )
+    
+    # Worker configuration
+    worker_count: int = Field(
+        default=2,
+        gt=0,
+        description="Número de workers para procesar acciones"
+    )
+    
+    # Service info
+    service_version: str = Field(default="2.0.0")

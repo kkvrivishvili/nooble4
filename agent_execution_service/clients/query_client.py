@@ -3,205 +3,246 @@ Cliente para comunicación con Query Service usando Redis para DomainActions.
 """
 import logging
 import uuid
-import asyncio # Aunque BaseRedisClient maneja timeouts, puede ser útil para el cliente
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
-import redis.asyncio as redis_async # Para el tipado de redis_conn
-
-from common.models.actions import DomainAction, DomainActionResponse
+from common.models.actions import DomainAction
 from common.errors.exceptions import ExternalServiceError
 from common.clients.base_redis_client import BaseRedisClient
-from ..config.settings import ExecutionServiceSettings # Para tipar settings
-from query_service.models import (
-    QueryGeneratePayload, QueryGenerateResponseData,
-    QueryLLMDirectPayload, QueryLLMDirectResponseData,  # Note: QueryLLMDirectResponseData
-    QuerySearchPayload, QuerySearchResponseData,
-    QueryServiceLLMConfig, QueryServiceChatMessage, QueryServiceToolDefinition,
-    ACTION_QUERY_GENERATE, ACTION_QUERY_LLM_DIRECT, ACTION_QUERY_SEARCH
-)
-from typing import Union # For tool_choice
+from ..config.settings import ExecutionServiceSettings
 
 logger = logging.getLogger(__name__)
 
+# Action types para Query Service
+ACTION_QUERY_SIMPLE = "query.simple"
+ACTION_QUERY_ADVANCE = "query.advance"
+ACTION_QUERY_RAG = "query.rag"
+
+
 class QueryClient:
-    """Cliente para Query Service vía Redis DomainActions, utilizando BaseRedisClient."""
+    """Cliente para Query Service vía Redis DomainActions."""
 
     def __init__(
         self,
-        aes_service_name: str, # Nombre del servicio actual (AgentExecutionService)
-        redis_conn: redis_async.Redis,
-        settings: ExecutionServiceSettings # Configuración de AES
+        redis_client: BaseRedisClient,
+        settings: ExecutionServiceSettings
     ):
-        if not aes_service_name:
-            raise ValueError("aes_service_name es requerido")
-        if not redis_conn:
-            raise ValueError("redis_conn es requerido")
+        """
+        Inicializa el cliente.
+        
+        Args:
+            redis_client: Cliente Redis base para comunicación
+            settings: Configuración del servicio
+        """
+        if not redis_client:
+            raise ValueError("redis_client es requerido")
         if not settings:
             raise ValueError("settings son requeridas")
             
-        self.aes_service_name = aes_service_name
-        # BaseRedisClient necesita el nombre del servicio que lo USA (AES), la conexión y los settings comunes.
-        self.redis_comms = BaseRedisClient(service_name=aes_service_name, redis_client=redis_conn, settings=settings)
-        self.default_timeout = settings.query_client_timeout_seconds
-        # query_service_name se definirá en el action_type de la DomainAction, ej "query.llm.direct" -> target service "query"
+        self.redis_client = redis_client
+        self.default_timeout = settings.query_timeout_seconds
+        self._logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
-
-
-    async def query_with_rag(
+    async def query_simple(
         self,
-        query_text: str,
+        user_message: str,
+        collection_ids: List[str],
         tenant_id: str,
         session_id: str,
         task_id: uuid.UUID,
-        collection_ids: List[str],
-        llm_config: Optional[QueryServiceLLMConfig] = None,
-        conversation_history: Optional[List[QueryServiceChatMessage]] = None,
-        system_prompt_template: Optional[str] = None,
-        top_k_retrieval: int = 5,
-        similarity_threshold: Optional[float] = None,
+        agent_config: Dict[str, Any],
+        embedding_config: Dict[str, Any],
+        document_ids: Optional[List[str]] = None,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
         timeout: Optional[int] = None
-    ) -> QueryGenerateResponseData:
+    ) -> Dict[str, Any]:
         """
-        Realiza una consulta RAG al Query Service usando DomainActions vía Redis.
+        Realiza una consulta simple con RAG integrado.
+        
+        Query Service realiza:
+        1. Búsqueda vectorial en las colecciones
+        2. Envío de chunks relevantes a Groq
+        3. Retorno de respuesta final del LLM
+        
+        Returns:
+            Dict con la respuesta del Query Service
         """
-        # Use provided llm_config or default if None
-        qs_llm_config = llm_config if llm_config is not None else QueryServiceLLMConfig()
-
-        payload = QueryGeneratePayload(
-            query_text=query_text,
-            collection_ids=collection_ids,
-            conversation_history=conversation_history if conversation_history is not None else [],
-            llm_config=qs_llm_config, # Use created config object
-            system_prompt_template=system_prompt_template,
-            top_k_retrieval=top_k_retrieval,
-            similarity_threshold=similarity_threshold
-        )
+        payload = {
+            "user_message": user_message,
+            "collection_ids": collection_ids,
+            "document_ids": document_ids,
+            "conversation_history": conversation_history or [],
+            "agent_config": agent_config,
+            "embedding_config": embedding_config
+        }
 
         action = DomainAction(
             action_id=uuid.uuid4(),
-            action_type=ACTION_QUERY_GENERATE,
+            action_type=ACTION_QUERY_SIMPLE,
             timestamp=datetime.now(timezone.utc),
             tenant_id=tenant_id,
             session_id=session_id,
             task_id=task_id,
-            origin_service=self.aes_service_name,
-            data=payload.model_dump(exclude_none=True),
+            origin_service=self.redis_client.service_name,
+            data=payload
         )
+
         actual_timeout = timeout if timeout is not None else self.default_timeout
+        
         try:
-            response_action = await self.redis_comms.send_action_pseudo_sync(action, timeout=actual_timeout)
-            if not response_action.success or response_action.data is None:
-                error_detail = response_action.error
-                error_message = f"QueryService error para acción {action.action_id} ({ACTION_QUERY_GENERATE}): {error_detail.message if error_detail else 'Unknown error or no data'}"
-                logger.error(error_message, extra={"action_id": str(action.action_id), "error_detail": error_detail.model_dump() if error_detail else None})
-                raise ExternalServiceError(error_message, error_detail=error_detail.model_dump() if error_detail else None)
-            return QueryGenerateResponseData.model_validate(response_action.data)
+            response = await self.redis_client.send_action_pseudo_sync(
+                action, 
+                timeout=actual_timeout
+            )
+            
+            if not response.success or response.data is None:
+                error_detail = response.error
+                error_message = f"Query Service error: {error_detail.message if error_detail else 'Unknown error'}"
+                self._logger.error(error_message, extra={
+                    "action_id": str(action.action_id),
+                    "error_detail": error_detail.model_dump() if error_detail else None
+                })
+                raise ExternalServiceError(error_message, error_detail=error_detail)
+                
+            return response.data
+            
         except TimeoutError as e:
-            logger.error(f"Timeout esperando respuesta de QueryService para {ACTION_QUERY_GENERATE} ({action.action_id}): {e}")
-            raise ExternalServiceError(f"Timeout esperando respuesta de QueryService para {ACTION_QUERY_GENERATE}: {str(e)}", original_exception=e)
+            self._logger.error(f"Timeout en query.simple: {e}")
+            raise ExternalServiceError(f"Timeout esperando respuesta de Query Service: {str(e)}")
         except Exception as e:
-            logger.error(f"Error inesperado comunicándose con QueryService para {ACTION_QUERY_GENERATE} ({action.action_id}): {e}", exc_info=True)
-            raise ExternalServiceError(f"Error inesperado comunicándose con QueryService para {ACTION_QUERY_GENERATE}: {str(e)}", original_exception=e)
+            self._logger.error(f"Error en query.simple: {e}", exc_info=True)
+            raise ExternalServiceError(f"Error comunicándose con Query Service: {str(e)}")
 
-
-    async def llm_direct(
+    async def query_advance(
         self,
-        messages: List[QueryServiceChatMessage],
+        messages: List[Dict[str, str]],
         tenant_id: str,
         session_id: str,
         task_id: uuid.UUID,
-        llm_config: Optional[QueryServiceLLMConfig] = None,
-        tools: Optional[List[QueryServiceToolDefinition]] = None,
-        tool_choice: Optional[Union[str, Dict[str, Any]]] = None, # OpenAI type: Literal['none', 'auto'] | ChatCompletionNamedToolChoice
+        agent_config: Dict[str, Any],
+        tools: List[Dict[str, Any]],
+        tool_choice: Optional[str] = "auto",
         timeout: Optional[int] = None
-    ) -> QueryLLMDirectResponseData:
+    ) -> Dict[str, Any]:
         """
-        Realiza una llamada directa al LLM (sin RAG) usando DomainActions vía Redis.
-        Espera una respuesta de forma pseudo-asíncrona.
+        Realiza una consulta avanzada para ReAct sin RAG automático.
+        
+        Query Service realiza:
+        1. Llamada directa a Groq con tools disponibles
+        2. Retorno de respuesta con posibles tool_calls
+        
+        Returns:
+            Dict con respuesta y tool_calls si las hay
         """
-        # Use provided llm_config or default if None
-        qs_llm_config = llm_config if llm_config is not None else QueryServiceLLMConfig()
-
-        payload = QueryLLMDirectPayload(
-            messages=messages,
-            llm_config=qs_llm_config, # Use created config object
-            tools=tools,
-            tool_choice=tool_choice
-        )
+        payload = {
+            "messages": messages,
+            "agent_config": agent_config,
+            "tools": tools,
+            "tool_choice": tool_choice
+        }
 
         action = DomainAction(
             action_id=uuid.uuid4(),
-            action_type=ACTION_QUERY_LLM_DIRECT,
+            action_type=ACTION_QUERY_ADVANCE,
             timestamp=datetime.now(timezone.utc),
             tenant_id=tenant_id,
             session_id=session_id,
             task_id=task_id,
-            origin_service=self.aes_service_name,
-            data=payload.model_dump(exclude_none=True),
+            origin_service=self.redis_client.service_name,
+            data=payload
         )
+
         actual_timeout = timeout if timeout is not None else self.default_timeout
+        
         try:
-            response_action = await self.redis_comms.send_action_pseudo_sync(action, timeout=actual_timeout)
-            if not response_action.success or response_action.data is None:
-                error_detail = response_action.error
-                error_message = f"QueryService error para acción {action.action_id} ({ACTION_QUERY_LLM_DIRECT}): {error_detail.message if error_detail else 'Unknown error or no data'}"
-                logger.error(error_message, extra={"action_id": str(action.action_id), "error_detail": error_detail.model_dump() if error_detail else None})
-                raise ExternalServiceError(error_message, error_detail=error_detail.model_dump() if error_detail else None)
-            return QueryLLMDirectResponseData.model_validate(response_action.data)
+            response = await self.redis_client.send_action_pseudo_sync(
+                action, 
+                timeout=actual_timeout
+            )
+            
+            if not response.success or response.data is None:
+                error_detail = response.error
+                error_message = f"Query Service error: {error_detail.message if error_detail else 'Unknown error'}"
+                self._logger.error(error_message, extra={
+                    "action_id": str(action.action_id),
+                    "error_detail": error_detail.model_dump() if error_detail else None
+                })
+                raise ExternalServiceError(error_message, error_detail=error_detail)
+                
+            return response.data
+            
         except TimeoutError as e:
-            logger.error(f"Timeout esperando respuesta de QueryService para {ACTION_QUERY_LLM_DIRECT} ({action.action_id}): {e}")
-            raise ExternalServiceError(f"Timeout esperando respuesta de QueryService para {ACTION_QUERY_LLM_DIRECT}: {str(e)}", original_exception=e)
+            self._logger.error(f"Timeout en query.advance: {e}")
+            raise ExternalServiceError(f"Timeout esperando respuesta de Query Service: {str(e)}")
         except Exception as e:
-            logger.error(f"Error inesperado comunicándose con QueryService para {ACTION_QUERY_LLM_DIRECT} ({action.action_id}): {e}", exc_info=True)
-            raise ExternalServiceError(f"Error inesperado comunicándose con QueryService para {ACTION_QUERY_LLM_DIRECT}: {str(e)}", original_exception=e)
+            self._logger.error(f"Error en query.advance: {e}", exc_info=True)
+            raise ExternalServiceError(f"Error comunicándose con Query Service: {str(e)}")
 
-
-    async def search_only(
+    async def query_rag(
         self,
         query_text: str,
+        collection_ids: List[str],
         tenant_id: str,
         session_id: str,
         task_id: uuid.UUID,
-        collection_ids: List[str],
+        embedding_config: Dict[str, Any],
+        document_ids: Optional[List[str]] = None,
         top_k: int = 5,
-        filters: Optional[Dict[str, Any]] = None,
         similarity_threshold: Optional[float] = None,
         timeout: Optional[int] = None
-    ) -> QuerySearchResponseData:
+    ) -> Dict[str, Any]:
         """
-        Realiza solo búsqueda vectorial usando DomainActions vía Redis.
+        Realiza búsqueda RAG cuando se invoca la tool "knowledge".
+        
+        Query Service realiza:
+        1. Búsqueda vectorial en las colecciones
+        2. Retorno de chunks relevantes
+        
+        Returns:
+            Dict con chunks encontrados y metadata
         """
-        payload = QuerySearchPayload(
-            query_text=query_text,
-            collection_ids=collection_ids,
-            top_k=top_k,
-            filters=filters,
-            similarity_threshold=similarity_threshold
-        )
+        payload = {
+            "query_text": query_text,
+            "collection_ids": collection_ids,
+            "document_ids": document_ids,
+            "embedding_config": embedding_config,
+            "top_k": top_k,
+            "similarity_threshold": similarity_threshold
+        }
 
         action = DomainAction(
             action_id=uuid.uuid4(),
-            action_type=ACTION_QUERY_SEARCH,
+            action_type=ACTION_QUERY_RAG,
             timestamp=datetime.now(timezone.utc),
             tenant_id=tenant_id,
             session_id=session_id,
             task_id=task_id,
-            origin_service=self.aes_service_name,
-            data=payload.model_dump(exclude_none=True),
+            origin_service=self.redis_client.service_name,
+            data=payload
         )
+
         actual_timeout = timeout if timeout is not None else self.default_timeout
+        
         try:
-            response_action = await self.redis_comms.send_action_pseudo_sync(action, timeout=actual_timeout)
-            if not response_action.success or response_action.data is None:
-                error_detail = response_action.error
-                error_message = f"QueryService error para acción {action.action_id} ({ACTION_QUERY_SEARCH}): {error_detail.message if error_detail else 'Unknown error or no data'}"
-                logger.error(error_message, extra={"action_id": str(action.action_id), "error_detail": error_detail.model_dump() if error_detail else None})
-                raise ExternalServiceError(error_message, error_detail=error_detail.model_dump() if error_detail else None)
-            return QuerySearchResponseData.model_validate(response_action.data)
+            response = await self.redis_client.send_action_pseudo_sync(
+                action, 
+                timeout=actual_timeout
+            )
+            
+            if not response.success or response.data is None:
+                error_detail = response.error
+                error_message = f"Query Service error: {error_detail.message if error_detail else 'Unknown error'}"
+                self._logger.error(error_message, extra={
+                    "action_id": str(action.action_id),
+                    "error_detail": error_detail.model_dump() if error_detail else None
+                })
+                raise ExternalServiceError(error_message, error_detail=error_detail)
+                
+            return response.data
+            
         except TimeoutError as e:
-            logger.error(f"Timeout esperando respuesta de QueryService para {ACTION_QUERY_SEARCH} ({action.action_id}): {e}")
-            raise ExternalServiceError(f"Timeout esperando respuesta de QueryService para {ACTION_QUERY_SEARCH}: {str(e)}", original_exception=e)
+            self._logger.error(f"Timeout en query.rag: {e}")
+            raise ExternalServiceError(f"Timeout esperando respuesta de Query Service: {str(e)}")
         except Exception as e:
-            logger.error(f"Error inesperado comunicándose con QueryService para {ACTION_QUERY_SEARCH} ({action.action_id}): {e}", exc_info=True)
-            raise ExternalServiceError(f"Error inesperado comunicándose con QueryService para {ACTION_QUERY_SEARCH}: {str(e)}", original_exception=e)
+            self._logger.error(f"Error en query.rag: {e}", exc_info=True)
+            raise ExternalServiceError(f"Error comunicándose con Query Service: {str(e)}")
