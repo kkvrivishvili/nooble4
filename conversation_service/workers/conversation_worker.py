@@ -11,10 +11,12 @@ import logging
 import json
 from typing import Dict, Any, Optional
 
+import redis.asyncio as redis_async
+
+from common.config import CommonAppSettings
 from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction, DomainActionResponse, ErrorDetail
 from common.models.execution_context import ExecutionContext
-from common.services.domain_queue_manager import DomainQueueManager
 from conversation_service.models.actions_model import (
     SaveMessageAction, GetContextAction, SessionClosedAction, GetHistoryAction
 )
@@ -36,48 +38,42 @@ class ConversationWorker(BaseWorker):
     - Manejo de cierre de sesiones
     """
     
-    def __init__(self, redis_client, queue_manager=None, db_client=None):
+    def __init__(
+        self,
+        app_settings: CommonAppSettings,
+        async_redis_conn: redis_async.Redis,
+        consumer_id_suffix: Optional[str] = None,
+        db_client: Optional[Any] = None  # Acepta un cliente de DB opcional
+    ):
         """
-        Inicializa worker con servicios necesarios.
+        Inicializa el ConversationWorker.
         
         Args:
-            redis_client: Cliente Redis configurado (requerido)
-            queue_manager: Gestor de colas por dominio (opcional)
-            db_client: Cliente de base de datos (opcional)
+            app_settings: Configuración de la aplicación.
+            async_redis_conn: Conexión Redis asíncrona.
+            consumer_id_suffix: Sufijo para el ID del consumidor.
+            db_client: Cliente de base de datos opcional.
         """
-        queue_manager = queue_manager or DomainQueueManager(redis_client)
-        super().__init__(redis_client, queue_manager)
+        super().__init__(app_settings, async_redis_conn, consumer_id_suffix)
         
-        # Definir domain específico
-        self.domain = settings.domain_name  # "conversation"
-        
-        # Almacenar db_client para usar en la inicialización
         self.db_client = db_client
-        
-        # Variables para inicialización asíncrona
-        self.conversation_service = None
-        self.conversation_handler = None
-        self.initialized = False
-    
+        self.conversation_service: Optional[ConversationService] = None
+        self.conversation_handler: Optional[ConversationHandler] = None
+        self.logger = logging.getLogger(f"{__name__}.{self.consumer_name}")
+
     async def initialize(self):
-        """Inicializa el worker de forma asíncrona."""
+        """Inicializa el worker y sus dependencias de forma asíncrona."""
         if self.initialized:
             return
-            
+        
+        await super().initialize()
+        
         # Inicializar servicios requeridos
-        self.conversation_service = ConversationService(self.redis_client, self.db_client)
+        self.conversation_service = ConversationService(self.async_redis_conn, self.db_client)
         self.conversation_handler = ConversationHandler(self.conversation_service)
         
         self.initialized = True
-        logger.info("ConversationWorker inicializado correctamente")
-    
-    async def start(self):
-        """Extiende el start para asegurar inicialización."""
-        # Asegurar inicialización antes de procesar acciones
-        await self.initialize()
-        
-        # Continuar con el comportamiento normal del BaseWorker
-        await super().start()
+        self.logger.info(f"ConversationWorker ({self.consumer_name}) inicializado correctamente")
 
     async def _send_pseudo_sync_response(self, action: DomainAction, handler_result: Dict[str, Any]):
         response = DomainActionResponse(

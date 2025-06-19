@@ -58,8 +58,7 @@ async def lifespan(app: FastAPI):
         ingestion_service = IngestionService(
             app_settings=settings,
             service_redis_client=redis_client,
-            direct_redis_conn=redis_conn,
-            qdrant_url=getattr(settings, 'qdrant_url', 'http://localhost:6333')
+            direct_redis_conn=redis_conn
         )
         set_ingestion_service(ingestion_service)
         
@@ -68,8 +67,7 @@ async def lifespan(app: FastAPI):
             ingestion_worker = IngestionWorker(
                 app_settings=settings,
                 async_redis_conn=redis_conn,
-                redis_client=redis_client,
-                qdrant_url=getattr(settings, 'qdrant_url', 'http://localhost:6333')
+                redis_client=redis_client
             )
             await ingestion_worker.initialize()
             await ingestion_worker.start()

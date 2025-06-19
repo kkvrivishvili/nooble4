@@ -18,12 +18,10 @@ class IngestionWorker(BaseWorker):
         app_settings: CommonAppSettings,
         async_redis_conn: redis_async.Redis,
         redis_client: BaseRedisClient,
-        qdrant_url: str = "http://localhost:6333",
         consumer_id_suffix: Optional[str] = None
     ):
         super().__init__(app_settings, async_redis_conn, consumer_id_suffix)
         self.redis_client = redis_client
-        self.qdrant_url = qdrant_url
         self.ingestion_service = None
         self._logger = logging.getLogger(f"{self.service_name}.IngestionWorker")
     
@@ -36,8 +34,7 @@ class IngestionWorker(BaseWorker):
         self.ingestion_service = IngestionService(
             app_settings=self.app_settings,
             service_redis_client=self.redis_client,
-            direct_redis_conn=self.async_redis_conn,
-            qdrant_url=self.qdrant_url
+            direct_redis_conn=self.async_redis_conn
         )
         
         self._logger.info("IngestionWorker initialized successfully")

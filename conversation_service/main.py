@@ -12,8 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from common.errors import setup_error_handling
 from common.utils.logging import init_logging
 from common.helpers.health import register_health_routes
-from common.redis_pool import get_redis_client
-from common.services.domain_queue_manager import DomainQueueManager
+from common.clients.redis_client import RedisManager
 from conversation_service.workers.conversation_worker import ConversationWorker
 from conversation_service.workers.migration_worker import MigrationWorker
 from conversation_service.routes.crm_routes import router as crm_router
@@ -22,55 +21,65 @@ from conversation_service.config.settings import get_settings
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-conversation_worker = None
-migration_worker = None
-queue_manager = None
+# Lista global de workers y gestor de Redis
+worker_tasks = []
+redis_manager: RedisManager = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global conversation_worker, migration_worker, queue_manager
+    global worker_tasks, redis_manager
     
     logger.info("Iniciando Conversation Service")
     
     try:
-        redis_client = await get_redis_client()
-        await redis_client.ping()
-        logger.info("Redis conectado")
+        # Inicializar RedisManager
+        redis_manager = RedisManager(settings.redis_url)
+        await redis_manager.initialize()
+        logger.info("Redis Manager inicializado y conexión establecida")
         
-        # Inicializar DomainQueueManager
-        queue_manager = DomainQueueManager(redis_client)
-        logger.info("DomainQueueManager inicializado")
+        app.state.redis_manager = redis_manager
+
+        # Crear e iniciar ConversationWorkers
+        conversation_worker_count = settings.get("conversation_workers", 1)
+        for i in range(conversation_worker_count):
+            worker = ConversationWorker(
+                app_settings=settings,
+                async_redis_conn=redis_manager.get_connection(),
+                consumer_id_suffix=f"conv-{i+1}"
+            )
+            task = asyncio.create_task(worker.run())
+            worker_tasks.append(task)
+        logger.info(f"{conversation_worker_count} ConversationWorkers iniciados")
+
+        # Crear e iniciar MigrationWorkers
+        migration_worker_count = settings.get("migration_workers", 1)
+        for i in range(migration_worker_count):
+            worker = MigrationWorker(
+                app_settings=settings,
+                async_redis_conn=redis_manager.get_connection(),
+                consumer_id_suffix=f"mig-{i+1}"
+            )
+            task = asyncio.create_task(worker.run())
+            worker_tasks.append(task)
+        logger.info(f"{migration_worker_count} MigrationWorkers iniciados")
         
-        # Inicializar workers con queue_manager
-        conversation_worker = ConversationWorker(redis_client, queue_manager)
-        migration_worker = MigrationWorker(redis_client, queue_manager)
-        
-        # Iniciar workers
-        worker_tasks = [
-            asyncio.create_task(conversation_worker.start()),
-            asyncio.create_task(migration_worker.start())
-        ]
-        
-        logger.info("Workers iniciados con DomainQueueManager")
-        
-        app.state.redis_client = redis_client
-        app.state.queue_manager = queue_manager
         yield
         
     finally:
         logger.info("Deteniendo Conversation Service")
         
-        if conversation_worker:
-            await conversation_worker.stop()
-        if migration_worker:
-            await migration_worker.stop()
-        
+        # Detener todos los workers
         for task in worker_tasks:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+            if not task.done():
+                task.cancel()
+        
+        await asyncio.gather(*worker_tasks, return_exceptions=True)
+        logger.info("Todos los workers han sido detenidos")
+        
+        # Cerrar conexiones Redis
+        if redis_manager:
+            await redis_manager.close()
+            logger.info("Conexiones Redis cerradas")
 
 app = FastAPI(
     title="Conversation Service", 

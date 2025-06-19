@@ -27,15 +27,14 @@ class IngestionService(BaseService):
         self,
         app_settings: CommonAppSettings,
         service_redis_client: BaseRedisClient,
-        direct_redis_conn: AIORedis,
-        qdrant_url: str = "http://localhost:6333"
+        direct_redis_conn: AIORedis
     ):
         super().__init__(app_settings, service_redis_client, direct_redis_conn)
         
         # Initialize handlers
         self.document_processor = DocumentProcessorHandler(app_settings)
         self.chunk_enricher = ChunkEnricherHandler(app_settings)
-        self.qdrant_handler = QdrantHandler(app_settings, qdrant_url)
+        self.qdrant_handler = QdrantHandler(app_settings)
         
         # State managers
         self.task_state_manager = RedisStateManager[IngestionTask](

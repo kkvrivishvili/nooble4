@@ -26,6 +26,8 @@ services:
       - qdrant
     volumes:
       - ./common:/app/common
+    env_file:
+      - ./.env
 
   agent_orchestrator_service:
     build:
@@ -36,6 +38,8 @@ services:
       - redis
     volumes:
       - ./common:/app/common
+    env_file:
+      - ./.env
 
   ingestion_service:
     build:
@@ -47,6 +51,8 @@ services:
       - qdrant
     volumes:
       - ./common:/app/common
+    env_file:
+      - ./.env
 
   agent_management_service:
     build:
@@ -57,6 +63,8 @@ services:
       - redis
     volumes:
       - ./common:/app/common
+    env_file:
+      - ./.env
 
   conversation_service:
     build:
@@ -67,6 +75,8 @@ services:
       - redis
     volumes:
       - ./common:/app/common
+    env_file:
+      - ./.env
 
   agent_execution_service:
     build:
@@ -77,6 +87,8 @@ services:
       - redis
     volumes:
       - ./common:/app/common
+    env_file:
+      - ./.env
 
   embedding_service:
     build:
@@ -87,6 +99,8 @@ services:
       - redis
     volumes:
       - ./common:/app/common
+    env_file:
+      - ./.env
 
 volumes:
   redis_data:

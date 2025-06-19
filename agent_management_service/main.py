@@ -6,71 +6,79 @@ INTEGRADO: Con sistema de colas por tier y Domain Actions existentes.
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from typing import List
 
+import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from common.clients import RedisManager
 from common.errors import setup_error_handling
 from common.utils.logging import init_logging
-from common.helpers.health import register_health_routes
-from common.redis_pool import get_redis_client
-from common.services.domain_queue_manager import DomainQueueManager
 from agent_management_service.workers.management_worker import ManagementWorker
 from agent_management_service.config.settings import get_settings
 from agent_management_service.routes import agents, templates, health
 
+# Configuración y logger
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-# Worker global
-management_worker = None
-queue_manager = None
+# Variables globales para el ciclo de vida
+redis_manager: RedisManager = None
+workers: List[ManagementWorker] = []
+worker_tasks: List[asyncio.Task] = []
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Gestiona el ciclo de vida de la aplicación."""
-    global management_worker, queue_manager
+    global redis_manager, workers, worker_tasks
     
-    logger.info("Iniciando Agent Management Service")
+    init_logging(settings.log_level, settings.service_name)
+    logger.info(f"Iniciando {settings.service_name} v{settings.service_version}")
     
     try:
-        # Inicializar Redis y Queue Manager
-        redis_client = await get_redis_client()
-        queue_manager = DomainQueueManager(redis_client)
+        # Inicializar Redis Manager
+        redis_manager = RedisManager(settings=settings)
+        redis_conn = await redis_manager.get_client()
+        logger.info("Redis Manager inicializado")
         
-        # Verificar conexión Redis
-        await redis_client.ping()
-        logger.info("Conexión a Redis establecida")
-        
-        # Inicializar worker con queue_manager
-        management_worker = ManagementWorker(redis_client, queue_manager)
-        
-        # Iniciar worker en background
-        worker_task = asyncio.create_task(management_worker.start())
-        logger.info("ManagementWorker iniciado con DomainQueueManager")
+        # Crear workers
+        for i in range(settings.worker_count):
+            worker = ManagementWorker(
+                app_settings=settings,
+                async_redis_conn=redis_conn,
+                consumer_id_suffix=f"worker-{i}"
+            )
+            workers.append(worker)
+            
+            await worker.initialize()
+            task = asyncio.create_task(worker.run())
+            worker_tasks.append(task)
+            
+        logger.info(f"{len(workers)} ManagementWorkers iniciados")
         
         # Hacer disponibles para la app
-        app.state.queue_manager = queue_manager
-        app.state.redis_client = redis_client
-        app.state.management_worker = management_worker
+        app.state.redis_manager = redis_manager
         
         yield
         
     finally:
-        logger.info("Deteniendo Agent Management Service")
+        logger.info(f"Deteniendo {settings.service_name}...")
         
-        if management_worker:
-            await management_worker.stop()
+        for worker in workers:
+            await worker.stop()
         
-        if 'worker_task' in locals():
-            worker_task.cancel()
+        for task in worker_tasks:
+            task.cancel()
             try:
-                await worker_task
+                await task
             except asyncio.CancelledError:
                 pass
         
-        if queue_manager and hasattr(queue_manager, 'redis'):
-            await queue_manager.redis.close()
+        if redis_manager:
+            await redis_manager.close()
+        
+        logger.info(f"{settings.service_name} detenido completamente")
 
 # Crear aplicación
 app = FastAPI(

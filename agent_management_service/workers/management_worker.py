@@ -8,18 +8,19 @@ VERSIÓN: 4.0 - Adaptado al patrón BaseWorker con procesamiento directo
 """
 
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+import time # For execution_time
+import redis.asyncio as redis_async
 
+from common.config import CommonAppSettings
 from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction, DomainActionResponse, ErrorDetail
 from common.models.execution_context import ExecutionContext
-from common.services.domain_queue_manager import DomainQueueManager
 from agent_management_service.models.actions_model import (
     AgentValidationAction, CacheInvalidationAction, GetAgentConfigAction, 
     UpdateAgentConfigAction, DeleteAgentConfigAction, CollectionIngestionStatusAction
 )
 from agent_management_service.services.agent_service import AgentService
-import time # For execution_time
 from agent_management_service.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -35,42 +36,34 @@ class ManagementWorker(BaseWorker):
     - Invalidación de cache
     """
     
-    def __init__(self, redis_client, queue_manager=None):
+    def __init__(
+        self,
+        app_settings: CommonAppSettings,
+        async_redis_conn: redis_async.Redis,
+        consumer_id_suffix: Optional[str] = None
+    ):
         """
-        Inicializa worker con servicios necesarios.
+        Inicializa el ManagementWorker.
         
         Args:
-            redis_client: Cliente Redis configurado (requerido)
-            queue_manager: Gestor de colas por dominio (opcional)
+            app_settings: Configuración de la aplicación.
+            async_redis_conn: Conexión Redis asíncrona.
+            consumer_id_suffix: Sufijo para el ID del consumidor.
         """
-        queue_manager = queue_manager or DomainQueueManager(redis_client)
-        super().__init__(redis_client, queue_manager)
+        super().__init__(app_settings, async_redis_conn, consumer_id_suffix)
         
-        # Definir domain específico
-        self.domain = settings.domain_name  # "management"
-        
-        # Control de inicialización
-        self.initialized = False
+        # El servicio se inicializará en el método initialize
         self.agent_service: Optional[AgentService] = None
+        self.initialized = False # For internal checks
+        self.logger = logging.getLogger(f"{__name__}.{self.consumer_name}")
     
     async def initialize(self):
-        """Inicializa el worker de forma asíncrona."""
-        if self.initialized:
-            return
+        """Inicializa el worker y sus dependencias."""
+        await super().initialize()
         
-        # Ya no registramos handlers sino que procesamos directamente
-        # las acciones en el método _process_action
-        self.agent_service = AgentService(redis_client=self.redis_client)
+        self.agent_service = AgentService(redis_client=self.async_redis_conn)
         self.initialized = True
-        logger.info("ManagementWorker inicializado correctamente")
-    
-    async def start(self):
-        """Extiende el start para asegurar inicialización."""
-        # Asegurar inicialización antes de procesar acciones
-        await self.initialize()
-        
-        # Continuar con el comportamiento normal del BaseWorker
-        await super().start()
+        self.logger.info("ManagementWorker inicializado correctamente")
 
     async def _send_pseudo_sync_response(self, action: DomainAction, handler_result: Dict[str, Any]):
         response = DomainActionResponse(

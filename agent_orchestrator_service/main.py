@@ -14,8 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from common.errors import setup_error_handling
 from common.utils.logging import init_logging
 from common.helpers.health import register_health_routes
-from common.redis_pool import get_redis_client
-from common.services.domain_queue_manager import DomainQueueManager
+from common.clients.redis_client import RedisManager
 from agent_orchestrator_service.workers.orchestrator_worker import OrchestratorWorker
 from agent_orchestrator_service.routes import chat_router, websocket_router, health_router
 from agent_orchestrator_service.config.settings import get_settings
@@ -23,57 +22,55 @@ from agent_orchestrator_service.config.settings import get_settings
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-# Worker global
-orchestrator_worker = None
-queue_manager = None
+# Lista global de workers y gestor de Redis
+worker_tasks = []
+redis_manager: RedisManager = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Gestiona el ciclo de vida de la aplicación."""
-    global orchestrator_worker, queue_manager
+    global worker_tasks, redis_manager
     
     logger.info("Iniciando Agent Orchestrator Service")
     
     try:
-        # Inicializar Redis y Queue Manager
-        redis_client = await get_redis_client()
-        queue_manager = DomainQueueManager(redis_client)
+        # Inicializar RedisManager
+        redis_manager = RedisManager(settings.redis_url)
+        await redis_manager.initialize()
+        logger.info("Redis Manager inicializado y conexión establecida")
         
-        # Verificar conexión Redis
-        await redis_client.ping()
-        logger.info("Conexión a Redis establecida")
+        app.state.redis_manager = redis_manager
+
+        # Crear e iniciar workers
+        worker_count = settings.workers_per_service
+        for i in range(worker_count):
+            worker = OrchestratorWorker(
+                app_settings=settings,
+                async_redis_conn=redis_manager.get_connection(),
+                consumer_id_suffix=f"{i+1}"
+            )
+            task = asyncio.create_task(worker.run())
+            worker_tasks.append(task)
         
-        # Inicializar worker pasando explícitamente el queue_manager
-        orchestrator_worker = OrchestratorWorker(redis_client, queue_manager)
-        
-        # Iniciar worker en background
-        worker_task = asyncio.create_task(orchestrator_worker.start())
-        logger.info("OrchestratorWorker iniciado")
-        
-        # Hacer queue_manager disponible para la app
-        app.state.queue_manager = queue_manager
-        app.state.redis_client = redis_client
+        logger.info(f"{worker_count} OrchestratorWorkers iniciados")
         
         yield
         
     finally:
         logger.info("Deteniendo Agent Orchestrator Service")
         
-        # Detener worker
-        if orchestrator_worker:
-            await orchestrator_worker.stop()
+        # Detener workers
+        for task in worker_tasks:
+            if not task.done():
+                task.cancel()
         
-        # Cancelar task
-        if 'worker_task' in locals():
-            worker_task.cancel()
-            try:
-                await worker_task
-            except asyncio.CancelledError:
-                pass
+        await asyncio.gather(*worker_tasks, return_exceptions=True)
+        logger.info("Todos los workers han sido detenidos")
         
         # Cerrar conexiones Redis
-        if queue_manager and hasattr(queue_manager, 'redis'):
-            await queue_manager.redis.close()
+        if redis_manager:
+            await redis_manager.close()
+            logger.info("Conexiones Redis cerradas")
 
 # Crear aplicación
 app = FastAPI(
@@ -101,21 +98,7 @@ app.include_router(chat_router)
 app.include_router(websocket_router)
 
 # Health checks específicos del orchestrator
-@app.get("/metrics/overview")
-async def get_metrics_overview():
-    """Métricas generales del orchestrator."""
-    if orchestrator_worker:
-        return await orchestrator_worker.get_orchestrator_stats()
-    else:
-        return {"error": "Worker no inicializado"}
 
-@app.get("/metrics/queues")
-async def get_queue_metrics():
-    """Métricas específicas de colas."""
-    if queue_manager:
-        return await queue_manager.get_queue_stats(settings.domain_name)
-    else:
-        return {"error": "Queue manager no inicializado"}
 
 # Configurar logging
 init_logging(settings.log_level, service_name="agent-orchestrator-service")

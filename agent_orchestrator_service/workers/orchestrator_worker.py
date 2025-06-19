@@ -13,10 +13,12 @@ import json
 import asyncio
 from typing import Dict, Any, List, Optional
 
+import redis.asyncio as redis_async
+
+from common.config import CommonAppSettings
 from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
 from common.models.execution_context import ExecutionContext
-from common.services.domain_queue_manager import DomainQueueManager
 from agent_orchestrator_service.services.orchestration_service import OrchestrationService
 from agent_orchestrator_service.handlers.callback_handler import CallbackHandler
 from agent_orchestrator_service.services.websocket_manager import get_websocket_manager
@@ -37,73 +39,65 @@ class OrchestratorWorker(BaseWorker):
     - Estadísticas detalladas
     """
     
-    def __init__(self, redis_client, queue_manager=None):
+    def __init__(
+        self,
+        app_settings: CommonAppSettings,
+        async_redis_conn: redis_async.Redis,
+        consumer_id_suffix: Optional[str] = None
+    ):
         """
-        Inicializa worker con servicios necesarios.
+        Inicializa el OrchestratorWorker.
         
         Args:
-            redis_client: Cliente Redis configurado (requerido)
-            queue_manager: Gestor de colas por dominio (opcional)
+            app_settings: Configuración de la aplicación.
+            async_redis_conn: Conexión Redis asíncrona.
+            consumer_id_suffix: Sufijo para el ID del consumidor.
         """
-        queue_manager = queue_manager or DomainQueueManager(redis_client)
-        super().__init__(redis_client, queue_manager)
+        super().__init__(app_settings, async_redis_conn, consumer_id_suffix)
         
-        # Definir domain específico
-        self.domain = settings.domain_name  # "orchestrator"
-        
-        # Variables que se inicializarán de forma asíncrona
         self.orchestration_service: Optional[OrchestrationService] = None
-        self.callback_handler = None
+        self.callback_handler: Optional[CallbackHandler] = None
         self.websocket_manager = None
         self.initialized = False
-    
+        self.logger = logging.getLogger(f"{__name__}.{self.consumer_name}")
+
     async def initialize(self):
-        """Inicializa el worker de forma asíncrona."""
+        """Inicializa el worker y sus dependencias de forma asíncrona."""
         if self.initialized:
             return
         
-        # Inicializar handlers necesarios para el procesamiento
+        await super().initialize()
+        
         self.websocket_manager = get_websocket_manager()
-        self.callback_handler = CallbackHandler(self.websocket_manager, self.redis_client)
+        self.callback_handler = CallbackHandler(self.websocket_manager, self.async_redis_conn)
+        self.orchestration_service = OrchestrationService(self.async_redis_conn)
         
-        # Inicializar componente de orquestación
-        await self._initialize_components()
-        
-        # Configurar estado inicializado
         self.initialized = True
-        logger.info("OrchestratorWorker inicializado correctamente")
-    
-    async def _initialize_components(self):
-        """Inicializa los componentes y servicios necesarios para el worker."""
-        self.orchestration_service = OrchestrationService(self.redis_client)
-    
-    async def start(self):
-        """Extiende el start para asegurar inicialización e iniciar dos procesadores."""
-        # Asegurar inicialización antes de procesar acciones
+        self.logger.info(f"OrchestratorWorker ({self.consumer_name}) inicializado correctamente")
+
+    async def run(self):
+        """
+        Ejecuta el worker, incluyendo el procesador principal de acciones
+        y un procesador secundario para callbacks directos.
+        """
         await self.initialize()
         
-        # Iniciar dos tareas en paralelo: el procesador estándar de BaseWorker
-        # y el procesador especializado de callbacks
         self.running = True
-        logger.info("Iniciando OrchestratorWorker con procesadores dual")
+        self.logger.info(f"Iniciando OrchestratorWorker ({self.consumer_name}) con procesadores dual")
+        
+        callback_task = asyncio.create_task(self._process_callbacks_loop())
         
         try:
-            # Crear tarea para procesar callbacks directos
-            callback_task = asyncio.create_task(self._process_callbacks_loop())
-            
-            # Iniciar el procesador estándar de BaseWorker
-            # (este llama a _process_queue_loop del BaseWorker)
-            await super().start()
-            
-            # Si el super().start() termina, cancelar la otra tarea
+            # Llama al run() de BaseWorker que contiene el bucle principal de procesamiento de acciones
+            await super().run()
+        finally:
+            self.logger.info(f"Deteniendo procesador de callbacks para worker {self.consumer_name}")
             if not callback_task.done():
                 callback_task.cancel()
-        except asyncio.CancelledError:
-            logger.info("OrchestratorWorker detenido")
-            self.running = False
-        except Exception as e:
-            logger.error(f"Error en orchestrator worker: {str(e)}")
-            self.running = False
+                try:
+                    await callback_task
+                except asyncio.CancelledError:
+                    pass # Expected on cancellation
     
     async def _process_callbacks_loop(self):
         """Procesa callbacks directamente de las colas específicas."""

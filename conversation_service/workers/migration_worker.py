@@ -12,10 +12,13 @@ import logging
 from typing import Dict, Any
 from datetime import datetime
 
+import time
+import redis.asyncio as redis_async
+
+from common.config import CommonAppSettings
 from common.workers.base_worker import BaseWorker
 from common.models.actions import DomainAction
 from common.models.execution_context import ExecutionContext
-from common.services.domain_queue_manager import DomainQueueManager
 from conversation_service.services.persistence_manager import PersistenceManager
 from conversation_service.services.memory_manager import MemoryManager
 from conversation_service.config.settings import get_settings
@@ -37,80 +40,65 @@ class MigrationWorker(BaseWorker):
     mantiene su funcionalidad especializada de migración automática programada.
     """
     
-    def __init__(self, redis_client, queue_manager=None, db_client=None):
+    def __init__(
+        self,
+        app_settings: CommonAppSettings,
+        async_redis_conn: redis_async.Redis,
+        consumer_id_suffix: Optional[str] = None,
+        db_client: Optional[Any] = None
+    ):
         """
-        Inicializa worker con servicios necesarios.
+        Inicializa el MigrationWorker.
         
         Args:
-            redis_client: Cliente Redis configurado (requerido)
-            queue_manager: Gestor de colas por dominio (opcional)
-            db_client: Cliente de base de datos PostgreSQL (opcional)
+            app_settings: Configuración de la aplicación.
+            async_redis_conn: Conexión Redis asíncrona.
+            consumer_id_suffix: Sufijo para el ID del consumidor.
+            db_client: Cliente de base de datos opcional.
         """
-        queue_manager = queue_manager or DomainQueueManager(redis_client)
-        super().__init__(redis_client, queue_manager)
+        super().__init__(app_settings, async_redis_conn, consumer_id_suffix)
         
-        # Definir domain específico
-        self.domain = settings.domain_name  # "conversation"
-        
-        # Almacenar db_client para usar en la inicialización
         self.db_client = db_client
-        
-        # Variables que se inicializarán de forma asíncrona
-        self.persistence = None
-        self.memory_manager = None
-        self.migration_task = None
-        self.initialized = False
-        self.running = False
-    
+        self.persistence: Optional[PersistenceManager] = None
+        self.memory_manager: Optional[MemoryManager] = None
+        self.logger = logging.getLogger(f"{__name__}.{self.consumer_name}")
+
     async def initialize(self):
-        """Inicializa el worker de forma asíncrona."""
+        """Inicializa el worker y sus dependencias de forma asíncrona."""
         if self.initialized:
             return
-            
-        # Inicializar componentes
-        await self._initialize_components()
+        
+        await super().initialize()
+        
+        self.persistence = PersistenceManager(self.async_redis_conn, self.db_client)
+        self.memory_manager = MemoryManager()
         
         self.initialized = True
-        logger.info("ImprovedMigrationWorker inicializado")
-    
-    async def _initialize_components(self):
-        """Inicializa los componentes necesarios para la migración."""
-        # Inicializar servicios
-        self.persistence = PersistenceManager(self.redis_client, self.db_client)
-        self.memory_manager = MemoryManager()
-    
-    async def start(self):
-        """Inicia el worker de migración en un task separado."""
-        if not self.initialized:
-            await self.initialize()
-            
-        if self.running:
-            logger.warning("Worker de migración ya está en ejecución")
-            return
-            
-        self.running = True
-        self.migration_task = asyncio.create_task(self._migration_loop())
-        logger.info("ImprovedMigrationWorker iniciado")
-    
-    async def stop(self):
-        """Detiene el worker."""
-        if not self.running:
-            return
-            
-        self.running = False
+        self.logger.info(f"MigrationWorker ({self.consumer_name}) inicializado correctamente")
+
+    async def run(self):
+        """
+        Ejecuta el worker, combinando el ciclo de migración proactivo con
+        el procesamiento de acciones reactivo del BaseWorker.
+        """
+        await self.initialize()
         
-        if self.migration_task:
-            try:
-                # Esperar a que termine la tarea actual
-                await asyncio.wait_for(self.migration_task, timeout=5.0)
-            except asyncio.TimeoutError:
-                logger.warning("Timeout al esperar finalización de migración, forzando cierre")
-            except Exception as e:
-                logger.error(f"Error al detener worker de migración: {str(e)}")
-            
-            self.migration_task = None
-            
-        logger.info("MigrationWorker detenido")
+        self.running = True
+        self.logger.info(f"Iniciando MigrationWorker ({self.consumer_name}) con procesador dual")
+        
+        migration_task = asyncio.create_task(self._migration_loop())
+        
+        try:
+            # Llama al run() de BaseWorker para el procesamiento de acciones
+            await super().run()
+        finally:
+            self.logger.info(f"Deteniendo ciclo de migración para worker {self.consumer_name}")
+            if not migration_task.done():
+                migration_task.cancel()
+                try:
+                    await migration_task
+                except asyncio.CancelledError:
+                    pass # Esperado al cancelar
     
     async def _handle_action(self, action: DomainAction, context: Optional[ExecutionContext] = None) -> Dict[str, Any]:
         """

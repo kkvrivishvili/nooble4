@@ -20,13 +20,14 @@ class QdrantHandler(BaseHandler):
     def __init__(
         self, 
         app_settings: CommonAppSettings,
-        qdrant_url: str = "http://localhost:6333",
         collection_name: str = "documents"
     ):
         super().__init__(app_settings)
-        self.qdrant_url = qdrant_url
         self.collection_name = collection_name
-        self.client = QdrantClient(url=qdrant_url)
+        self.client = QdrantClient(
+            url=str(app_settings.qdrant_url),
+            api_key=app_settings.qdrant_api_key
+        )
         self.vector_size = 1536  # Default for OpenAI embeddings
         
         # Ensure collection exists
