@@ -18,10 +18,12 @@ from common.handlers import BaseHandler
 from common.errors.exceptions import ExternalServiceError
 
 from ..models import (
+    QueryGeneratePayload, # Added
     QueryGenerateResponseData,
     SearchResultData,
     QueryServiceChatMessage
 )
+from ..models.base_models import TokenUsage, RetrievedDoc # Added
 from ..clients.groq_client import GroqClient
 from ..clients.vector_client import VectorClient
 
@@ -70,61 +72,62 @@ class RAGHandler(BaseHandler):
     
     async def process_rag_query(
         self,
-        query_text: str,
-        collection_ids: List[str],
-        tenant_id: str,
-        session_id: str,
-        top_k: Optional[int] = None,
-        similarity_threshold: Optional[float] = None,
-        llm_model: Optional[str] = None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        system_prompt: Optional[str] = None,
-        conversation_history: Optional[List[QueryServiceChatMessage]] = None,
-        trace_id: Optional[UUID] = None,
-        correlation_id: Optional[UUID] = None,
-        embedding_client=None,
-        task_id: Optional[UUID] = None
+        payload: QueryGeneratePayload,
+        tenant_id: str, # Retained for logging/operational context
+        session_id: str, # Retained for logging/operational context
+        task_id: Optional[UUID] = None, # Retained for logging/operational context
+        trace_id: Optional[UUID] = None, # Retained for operational context
+        correlation_id: Optional[UUID] = None, # Used for query_id
+        embedding_client=None # Specific to handler's embedding strategy
     ) -> QueryGenerateResponseData:
         """
-        Procesa una consulta RAG completa.
+        Procesa una consulta RAG completa utilizando QueryGeneratePayload.
         
         Args:
-            query_text: Texto de la consulta
-            collection_ids: IDs de colecciones donde buscar
-            tenant_id: ID del tenant
-            session_id: ID de sesión
-            top_k: Número de resultados a recuperar
-            similarity_threshold: Umbral de similitud mínimo
-            llm_model: Modelo LLM a usar
-            temperature: Temperatura para generación
-            max_tokens: Máximo de tokens
-            system_prompt: Prompt de sistema personalizado
-            conversation_history: Historial de conversación
-            trace_id: ID de traza
-            correlation_id: ID de correlación
-            embedding_client: Cliente para obtener embeddings
-            task_id: ID de la tarea
+            payload: QueryGeneratePayload con todos los datos de la consulta.
+            tenant_id: ID del tenant.
+            session_id: ID de sesión.
+            task_id: ID de la tarea (opcional).
+            trace_id: ID de traza (opcional).
+            correlation_id: ID de correlación (opcional), usado para query_id.
+            embedding_client: Cliente de embedding (opcional).
             
         Returns:
-            QueryGenerateResponse con la respuesta generada
+            QueryGenerateResponseData con la respuesta generada.
         """
         start_time = time.time()
         query_id = str(correlation_id) if correlation_id else str(UUID())
+
+        # Extract parameters from payload
+        query_text = payload.query_text
+        collection_ids = payload.collection_ids
+        conversation_history = payload.conversation_history
+        system_prompt_template = payload.system_prompt_template
         
-        # Usar valores por defecto si no se especifican
-        top_k = top_k or self.default_top_k
-        similarity_threshold = similarity_threshold or self.similarity_threshold
-        llm_model = llm_model or self.default_llm_model
-        temperature = temperature if temperature is not None else self.llm_temperature
-        max_tokens = max_tokens or self.llm_max_tokens
-        
+        # Effective RAG parameters from payload or handler defaults
+        top_k_eff = payload.top_k_retrieval # Uses default from QueryGeneratePayload if not set by caller
+        similarity_threshold_eff = payload.similarity_threshold if payload.similarity_threshold is not None else self.similarity_threshold
+
+        # Effective LLM parameters from payload.llm_config or handler defaults
+        qs_llm_config = payload.llm_config
+        llm_model_eff = qs_llm_config.model_name if qs_llm_config.model_name else self.default_llm_model
+        temperature_eff = qs_llm_config.temperature if qs_llm_config.temperature is not None else self.llm_temperature
+        max_tokens_eff = qs_llm_config.max_tokens if qs_llm_config.max_tokens is not None else self.llm_max_tokens
+        top_p_eff = qs_llm_config.top_p # Can be None, Groq client handles default
+        frequency_penalty_eff = qs_llm_config.frequency_penalty # Can be None
+        presence_penalty_eff = qs_llm_config.presence_penalty # Can be None
+
+        effective_system_prompt = system_prompt_template if system_prompt_template is not None else self._get_default_system_prompt()
+
         self._logger.info(
             f"Procesando consulta RAG: '{query_text[:50]}...' en colecciones {collection_ids}",
             extra={
                 "query_id": query_id,
                 "tenant_id": tenant_id,
-                "collections": collection_ids
+                "session_id": session_id,
+                "task_id": str(task_id) if task_id else None,
+                "collections": collection_ids,
+                "llm_model": llm_model_eff
             }
         )
         
@@ -140,56 +143,76 @@ class RAGHandler(BaseHandler):
                 task_id
             )
             
-            # 2. Buscar documentos relevantes
-            search_results = await self._search_documents(
+            # 2. Buscar documentos relevantes (returns List[SearchResultData])
+            search_results_raw = await self._search_documents(
                 query_text=query_text,
                 query_embedding=query_embedding,
                 collection_ids=collection_ids,
-                top_k=top_k,
-                similarity_threshold=similarity_threshold,
+                top_k=top_k_eff,
+                similarity_threshold=similarity_threshold_eff,
                 tenant_id=tenant_id
             )
             search_time_ms = int((time.time() - search_start) * 1000)
+
+            # Convert SearchResultData to RetrievedDoc for the response model
+            retrieved_docs_for_response = [
+                RetrievedDoc(
+                    doc_id=sr.id,
+                    content=sr.content,
+                    metadata=sr.metadata,
+                    score=sr.score,
+                    collection_name=sr.collection_id
+                ) for sr in search_results_raw
+            ]
             
-            # 3. Construir prompt con contexto
+            # 3. Construir prompt con contexto (using List[SearchResultData] or List[RetrievedDoc] - should be consistent)
+            # _build_rag_prompt expects List[SearchResultData], so pass search_results_raw
             prompt = self._build_rag_prompt(
                 query_text=query_text,
-                search_results=search_results,
+                search_results=search_results_raw, # Pass raw results here
                 conversation_history=conversation_history
             )
             
             # 4. Generar respuesta
             generation_start = time.time()
-            generated_response, token_usage = await self._generate_response(
+            generated_text_response, token_usage_dict = await self._generate_response(
                 prompt=prompt,
-                system_prompt=system_prompt or self._get_default_system_prompt(),
-                model=llm_model,
-                temperature=temperature,
-                max_tokens=max_tokens
+                system_prompt=effective_system_prompt,
+                model=llm_model_eff,
+                temperature=temperature_eff,
+                max_tokens=max_tokens_eff,
+                top_p=top_p_eff,
+                frequency_penalty=frequency_penalty_eff,
+                presence_penalty=presence_penalty_eff
             )
             generation_time_ms = int((time.time() - generation_start) * 1000)
             
             # 5. Construir respuesta
             total_time_ms = int((time.time() - start_time) * 1000)
+
+            llm_info_for_response = {"model_name": llm_model_eff, "provider": "groq"} # Example
+            token_usage_for_response = TokenUsage(
+                prompt_tokens=token_usage_dict.get("prompt_tokens", 0),
+                completion_tokens=token_usage_dict.get("completion_tokens", 0),
+                total_tokens=token_usage_dict.get("total_tokens", 0)
+            )
             
             response = QueryGenerateResponseData(
                 query_id=query_id,
-                query_text=query_text,
-                generated_response=generated_response,
-                search_results=search_results,
-                llm_model=llm_model,
-                temperature=temperature,
-                prompt_tokens=token_usage.get("prompt_tokens"),
-                completion_tokens=token_usage.get("completion_tokens"),
-                total_tokens=token_usage.get("total_tokens"),
+                ai_response=generated_text_response,
+                retrieved_documents=retrieved_docs_for_response,
+                llm_model_info=llm_info_for_response,
+                usage=token_usage_for_response,
                 search_time_ms=search_time_ms,
                 generation_time_ms=generation_time_ms,
                 total_time_ms=total_time_ms,
                 metadata={
+                    "original_query_text": query_text,
                     "collections_searched": collection_ids,
-                    "top_k": top_k,
-                    "similarity_threshold": similarity_threshold
+                    "top_k_retrieval_used": top_k_eff,
+                    "similarity_threshold_used": similarity_threshold_eff
                 }
+                # timestamp is default_factory
             )
             
             self._logger.info(
@@ -344,7 +367,10 @@ class RAGHandler(BaseHandler):
         system_prompt: str,
         model: str,
         temperature: float,
-        max_tokens: int
+        max_tokens: int,
+        top_p: Optional[float],             # Added
+        frequency_penalty: Optional[float], # Added
+        presence_penalty: Optional[float]   # Added
     ) -> tuple[str, Dict[str, int]]:
         """
         Genera la respuesta usando el LLM.
@@ -355,7 +381,7 @@ class RAGHandler(BaseHandler):
         try:
             # Validar que el modelo esté disponible
             if model not in self.available_models:
-                self._logger.warning(f"Modelo {model} no está en la lista de disponibles, usando default")
+                self._logger.warning(f"Modelo {model} no está en la lista de disponibles ({self.available_models}), usando default {self.default_llm_model}")
                 model = self.default_llm_model
             
             response, token_usage = await self.groq_client.generate(
@@ -364,9 +390,9 @@ class RAGHandler(BaseHandler):
                 model=model,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                top_p=self.llm_top_p,
-                frequency_penalty=self.llm_frequency_penalty,
-                presence_penalty=self.llm_presence_penalty
+                top_p=top_p, # Use passed value (GroqClient handles default if None)
+                frequency_penalty=frequency_penalty, # Use passed value
+                presence_penalty=presence_penalty # Use passed value
             )
             
             return response, token_usage

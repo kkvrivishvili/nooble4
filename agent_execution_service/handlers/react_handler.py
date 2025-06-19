@@ -108,14 +108,20 @@ class ReactHandler(BaseHandler):
                     task_id=task_id
                 )
                 total_llm_calls += 1
-                if llm_response.token_usage and llm_response.token_usage.total_tokens is not None:
-                    total_llm_tokens += llm_response.token_usage.total_tokens
+                if llm_response.usage and llm_response.usage.total_tokens is not None:
+                    total_llm_tokens += llm_response.usage.total_tokens
                 
                 self._logger.debug(f"Iteración {iteration}: Respuesta LLM recibida: {llm_response.model_dump_json(indent=2)}") # Log the Pydantic model
                 
                 # llm_response is LLMDirectResponseData
-                llm_message_content = llm_response.response
-                tool_calls_from_llm = llm_response.tool_calls # This is Optional[List[QueryServiceToolCall]]
+                llm_message_content: Optional[str] = None
+                tool_calls_from_llm: Optional[List[QueryServiceToolCall]] = None
+                if llm_response.message:
+                    llm_message_content = llm_response.message.content
+                    tool_calls_from_llm = llm_response.message.tool_calls # This is Optional[List[QueryServiceToolCall]]
+                else:
+                    # This case should ideally not happen if the LLM always returns a message structure
+                    self._logger.warning("LLM response did not contain a message object.")
 
                 # El 'thought' puede ser el contenido del mensaje del LLM si no hay tool_calls
                 current_step.thought = llm_message_content if llm_message_content else "No thought provided by LLM."

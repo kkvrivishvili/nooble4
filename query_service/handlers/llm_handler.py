@@ -15,11 +15,13 @@ from common.handlers import BaseHandler
 from common.errors.exceptions import ExternalServiceError
 
 from ..models import (
+    QueryLLMDirectPayload, # Added
     LLMDirectResponseData,
     QueryServiceToolCall,
     QueryServiceChatMessage,
     QueryServiceToolDefinition
 )
+from ..models.base_models import TokenUsage # Added
 from ..clients.groq_client import GroqClient
 
 
@@ -60,88 +62,103 @@ class LLMHandler(BaseHandler):
     
     async def process_llm_direct(
         self,
-        messages: List[QueryServiceChatMessage],
-        tenant_id: str,
-        session_id: str,
-        llm_model: Optional[str] = None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        top_p: Optional[float] = None,
-        frequency_penalty: Optional[float] = None,
-        presence_penalty: Optional[float] = None,
-        stop_sequences: Optional[List[str]] = None,
-        tools: Optional[List[QueryServiceToolDefinition]] = None,
-        tool_choice: Optional[str] = None,
-        user_id: Optional[str] = None,
-        trace_id: Optional[UUID] = None,
-        correlation_id: Optional[UUID] = None
+        payload: QueryLLMDirectPayload,
+        tenant_id: str, # Retained for logging/operational context
+        session_id: str, # Retained for logging/operational context
+        # user_id: Optional[str] = None, # Not directly used, can be in payload.llm_config.user if needed by LLM provider
+        trace_id: Optional[UUID] = None, # Retained for operational context
+        correlation_id: Optional[UUID] = None # Used for query_id
     ) -> LLMDirectResponseData:
         """
-        Procesa una consulta directa al LLM.
+        Procesa una consulta directa al LLM utilizando QueryLLMDirectPayload.
         """
         start_time = time.time()
-        query_id = str(correlation_id) if correlation_id else str(uuid4()) # Using uuid4() for new UUIDs
+        query_id = str(correlation_id) if correlation_id else str(uuid4())
+
+        # Extract parameters from payload
+        messages = payload.messages
+        tools = payload.tools
+        tool_choice = payload.tool_choice
         
-        llm_model = llm_model or self.default_llm_model
-        temperature = temperature if temperature is not None else self.llm_temperature
-        max_tokens = max_tokens or self.llm_max_tokens
-        top_p = top_p if top_p is not None else self.llm_top_p
-        frequency_penalty = frequency_penalty if frequency_penalty is not None else self.llm_frequency_penalty
-        presence_penalty = presence_penalty if presence_penalty is not None else self.llm_presence_penalty
-        
+        # Effective LLM parameters from payload.llm_config or handler defaults
+        qs_llm_config = payload.llm_config
+        llm_model_eff = qs_llm_config.model_name if qs_llm_config.model_name else self.default_llm_model
+        temperature_eff = qs_llm_config.temperature if qs_llm_config.temperature is not None else self.llm_temperature
+        max_tokens_eff = qs_llm_config.max_tokens if qs_llm_config.max_tokens is not None else self.llm_max_tokens
+        top_p_eff = qs_llm_config.top_p if qs_llm_config.top_p is not None else self.llm_top_p
+        frequency_penalty_eff = qs_llm_config.frequency_penalty if qs_llm_config.frequency_penalty is not None else self.llm_frequency_penalty
+        presence_penalty_eff = qs_llm_config.presence_penalty if qs_llm_config.presence_penalty is not None else self.llm_presence_penalty
+        stop_sequences_eff = qs_llm_config.stop_sequences # Can be None
+        # user_eff = qs_llm_config.user # If Groq client supports user field
+
         self._logger.info(
             f"Procesando LLM directo: {len(messages)} mensajes",
             extra={
                 "query_id": query_id,
                 "tenant_id": tenant_id,
-                "model": llm_model,
+                "session_id": session_id,
+                "task_id": str(payload.task_id) if hasattr(payload, 'task_id') and payload.task_id else None, # Assuming task_id might be part of payload
+                "model": llm_model_eff,
                 "has_tools": bool(tools)
             }
         )
         
         try:
-            response_text, token_usage, finish_reason, tool_calls_data = await self._generate_llm_response(
+            response_content_str, token_usage_dict, finish_reason_str, tool_calls_raw_data = await self._generate_llm_response(
                 messages=messages,
-                model=llm_model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                top_p=top_p,
-                frequency_penalty=frequency_penalty,
-                presence_penalty=presence_penalty,
-                stop_sequences=stop_sequences,
+                model=llm_model_eff,
+                temperature=temperature_eff,
+                max_tokens=max_tokens_eff,
+                top_p=top_p_eff,
+                frequency_penalty=frequency_penalty_eff,
+                presence_penalty=presence_penalty_eff,
+                stop_sequences=stop_sequences_eff,
                 tools=tools,
                 tool_choice=tool_choice
+                # user=user_eff # Pass if Groq client supports it
             )
             
-            processed_tool_calls = None
-            if tool_calls_data:
-                processed_tool_calls = [
+            processed_tool_calls_for_message = None
+            if tool_calls_raw_data:
+                processed_tool_calls_for_message = [
                     QueryServiceToolCall(
-                        id=tc.get("id", ""), # Assuming tc is a dict from Groq response
-                        type=tc.get("type", "function"),
-                        function=tc.get("function", {}) # This will be validated by QueryServiceToolCall
+                        id=tc_raw.get("id", ""), 
+                        type=tc_raw.get("type", "function"),
+                        function=tc_raw.get("function", {}) # Validated by QueryServiceToolCall
                     )
-                    for tc in tool_calls_data
+                    for tc_raw in tool_calls_raw_data
                 ]
             
+            # Create the assistant's message for the response
+            assistant_response_message = QueryServiceChatMessage(
+                role="assistant",
+                content=response_content_str,
+                tool_calls=processed_tool_calls_for_message
+            )
+
+            token_usage_for_response = TokenUsage(
+                prompt_tokens=token_usage_dict.get("prompt_tokens", 0),
+                completion_tokens=token_usage_dict.get("completion_tokens", 0),
+                total_tokens=token_usage_dict.get("total_tokens", 0)
+            )
+            
+            llm_info_for_response = {"model_name": llm_model_eff, "provider": "groq"} # Example
             generation_time_ms = int((time.time() - start_time) * 1000)
             
             response = LLMDirectResponseData(
                 query_id=query_id,
-                response=response_text,
-                tool_calls=processed_tool_calls,
-                llm_model=llm_model,
-                finish_reason=finish_reason,
-                prompt_tokens=token_usage.get("prompt_tokens"),
-                completion_tokens=token_usage.get("completion_tokens"),
-                total_tokens=token_usage.get("total_tokens"),
+                message=assistant_response_message,
+                usage=token_usage_for_response,
+                finish_reason=finish_reason_str,
+                llm_model_info=llm_info_for_response,
                 generation_time_ms=generation_time_ms,
                 metadata={
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                    "tool_choice": tool_choice,
-                    "has_tools": bool(tools)
+                    "temperature_used": temperature_eff,
+                    "max_tokens_used": max_tokens_eff,
+                    "tool_choice_used": tool_choice,
+                    "has_tools_provided": bool(tools)
                 }
+                # timestamp is default_factory
             )
             
             self._logger.info(

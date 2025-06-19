@@ -58,7 +58,7 @@ class QueryClient:
         session_id: str,
         task_id: uuid.UUID,
         collection_ids: List[str],
-        llm_config: QueryServiceLLMConfig,
+        llm_config_params: Optional[Dict[str, Any]] = None, # Changed
         conversation_history: Optional[List[QueryServiceChatMessage]] = None,
         system_prompt_template: Optional[str] = None,
         top_k_retrieval: int = 5,
@@ -68,11 +68,17 @@ class QueryClient:
         """
         Realiza una consulta RAG al Query Service usando DomainActions vía Redis.
         """
+        # Create QueryServiceLLMConfig from params or use default
+        if llm_config_params:
+            qs_llm_config = QueryServiceLLMConfig(**llm_config_params)
+        else:
+            qs_llm_config = QueryServiceLLMConfig()
+
         payload = QueryGeneratePayload(
             query_text=query_text,
             collection_ids=collection_ids,
             conversation_history=conversation_history if conversation_history is not None else [],
-            llm_config=llm_config,
+            llm_config=qs_llm_config, # Use created config object
             system_prompt_template=system_prompt_template,
             top_k_retrieval=top_k_retrieval,
             similarity_threshold=similarity_threshold
@@ -111,7 +117,7 @@ class QueryClient:
         tenant_id: str,
         session_id: str,
         task_id: uuid.UUID,
-        llm_config: QueryServiceLLMConfig,
+        llm_config_params: Optional[Dict[str, Any]] = None, # Changed
         tools: Optional[List[QueryServiceToolDefinition]] = None,
         tool_choice: Optional[Union[str, Dict[str, Any]]] = None, # OpenAI type: Literal['none', 'auto'] | ChatCompletionNamedToolChoice
         timeout: Optional[int] = None
@@ -120,9 +126,15 @@ class QueryClient:
         Realiza una llamada directa al LLM (sin RAG) usando DomainActions vía Redis.
         Espera una respuesta de forma pseudo-asíncrona.
         """
+        # Create QueryServiceLLMConfig from params or use default
+        if llm_config_params:
+            qs_llm_config = QueryServiceLLMConfig(**llm_config_params)
+        else:
+            qs_llm_config = QueryServiceLLMConfig()
+
         payload = QueryLLMDirectPayload(
             messages=messages,
-            llm_config=llm_config,
+            llm_config=qs_llm_config, # Use created config object
             tools=tools,
             tool_choice=tool_choice
         )
