@@ -4,12 +4,6 @@ Constantes para Agent Execution Service.
 from enum import Enum
 from typing import Dict
 
-class LLMProviders(str, Enum):
-    """Proveedores de LLM soportados."""
-    OPENAI = "openai"
-    GROQ = "groq"
-    ANTHROPIC = "anthropic"
-
 class AgentTypes(str, Enum):
     """Tipos de agentes soportados."""
     CONVERSATIONAL = "conversational"  # Modo simple: Chat + RAG
@@ -19,13 +13,6 @@ class ExecutionModes(str, Enum):
     """Modos de ejecución."""
     SIMPLE = "simple"  # Chat + RAG básico
     ADVANCED = "advanced"  # ReAct con herramientas
-
-# Modelos por defecto por proveedor
-DEFAULT_MODELS: Dict[str, str] = {
-    LLMProviders.OPENAI: "gpt-4-turbo-preview",
-    LLMProviders.GROQ: "llama-3.3-70b-versatile", 
-    LLMProviders.ANTHROPIC: "claude-3-5-sonnet-20241022"
-}
 
 # Prompts del sistema para ReAct
 REACT_SYSTEM_PROMPT = """You are a helpful AI assistant that can reason about problems and use tools to solve them.

@@ -14,8 +14,8 @@ from ..models.payloads import (
     ExecuteSimpleChatPayload, ExecuteReactPayload, ExecuteAgentPayload,
     ExecutionErrorResponse
 )
-from ..handlers.chat_simple_handler import SimpleChatHandler
-from ..handlers.chat_advance_handler import ChatAdvanceHandler
+from ..handlers.executor_simple_handler import SimpleChatHandler
+from ..handlers.executor_advance_handler import AdvanceChatHandler
 from ..config.settings import ExecutionServiceSettings
 from ..clients.query_client import QueryClient
 from ..tools.tool_registry import ToolRegistry
