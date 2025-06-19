@@ -9,9 +9,11 @@ Exporta:
 """
 
 from .base_tool import BaseTool
-from .tool_registry import ToolRegistry
+from .knowledge_tool import KnowledgeTool
+from .registry import ToolRegistry # Corrected filename
 
 __all__ = [
     "BaseTool",
-    "ToolRegistry"
+    "KnowledgeTool",
+    "ToolRegistry",
 ]
