@@ -1,10 +1,5 @@
 """
-Exports from the models module.
-Solo exportamos modelos de respuesta específicos del servicio.
+Los modelos que estaban aca ahora se usan desde la carpeta common ya que teiene modelos estandarizados.
 """
-from .execution_responses import SimpleExecutionResponse, AdvanceExecutionResponse
 
-__all__ = [
-    "SimpleExecutionResponse",
-    "AdvanceExecutionResponse",
-]
+__all__ = []

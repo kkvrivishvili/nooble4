@@ -1,5 +1,6 @@
 """
 Handler para chat avanzado con capacidades ReAct.
+Simplificado para usar modelos estándar.
 """
 import logging
 import time
@@ -8,19 +9,19 @@ import json
 from typing import Dict, Any, List, Optional
 
 from common.handlers.base_handler import BaseHandler
-from common.errors.exceptions import ExternalServiceError, ToolExecutionError
+from common.errors.exceptions import ExternalServiceError
 from common.models.chat_models import (
-    AdvanceChatPayload,
+    ChatRequest,
+    ChatResponse,
     ChatMessage,
-    QueryAdvancePayload,
-    QueryRAGPayload,
-    ToolDefinition
+    TokenUsage,
+    RAGConfig,
+    RAGSearchResult
 )
 
 from ..config.settings import ExecutionServiceSettings
 from ..clients.query_client import QueryClient
 from ..clients.conversation_client import ConversationClient
-from ..models.execution_responses import AdvanceExecutionResponse
 from ..tools.base_tool import BaseTool
 from ..tools.knowledge_tool import KnowledgeTool
 from ..tools.registry import ToolRegistry
@@ -46,51 +47,50 @@ class AdvanceChatHandler(BaseHandler):
 
     async def handle_advance_chat(
         self,
-        payload: AdvanceChatPayload,
+        payload: Dict[str, Any],  # Este es el action.data
         tenant_id: str,
         session_id: str,
         task_id: uuid.UUID
-    ) -> AdvanceExecutionResponse:
+    ) -> ChatResponse:
         """
         Ejecuta chat avanzado con loop ReAct.
+        Simplificado para usar ChatRequest/ChatResponse directamente.
         """
         start_time = time.time()
         conversation_id = str(uuid.uuid4())
         message_id = str(uuid.uuid4())
-        thinking_steps = []
-        tools_used = []
         
         try:
+            # Parsear ChatRequest
+            chat_request = ChatRequest.model_validate(payload)
+            
             self._logger.info(
                 f"Procesando chat avanzado con ReAct",
                 extra={
                     "tenant_id": tenant_id,
                     "session_id": session_id,
                     "conversation_id": conversation_id,
-                    "tools_count": len(payload.tools)
+                    "tools_count": len(chat_request.tools) if chat_request.tools else 0
                 }
             )
 
-            # Registrar herramientas disponibles
-            await self._register_tools(payload, tenant_id, session_id, task_id)
-
-            # Construir mensajes iniciales con system prompt
-            messages = [
-                ChatMessage(role="system", content=payload.system_prompt)
-            ]
-            
-            # Agregar historial
-            messages.extend(payload.conversation_history)
-            
-            # Agregar mensaje del usuario
-            messages.append(ChatMessage(role="user", content=payload.user_message))
-
-            # Preparar tools para Query Service (agregar knowledge tool)
-            all_tools = list(payload.tools)
-            if self.tool_registry.get("knowledge"):
-                knowledge_tool_def = ToolDefinition(
-                    type="function",
-                    function={
+            # Registrar herramientas si hay configuración RAG
+            if chat_request.rag_config:
+                await self._register_knowledge_tool(
+                    rag_config=chat_request.rag_config,
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    task_id=task_id
+                )
+                
+                # Agregar knowledge tool a las herramientas disponibles
+                if not chat_request.tools:
+                    chat_request.tools = []
+                
+                # Agregar definición de knowledge tool si no está
+                knowledge_tool_def = {
+                    "type": "function",
+                    "function": {
                         "name": "knowledge",
                         "description": "Search relevant information from the knowledge base",
                         "parameters": {
@@ -104,37 +104,50 @@ class AdvanceChatHandler(BaseHandler):
                             "required": ["query"]
                         }
                     }
-                )
-                all_tools.append(knowledge_tool_def)
+                }
+                
+                # Solo agregar si no existe ya
+                if not any(t.get("function", {}).get("name") == "knowledge" for t in chat_request.tools):
+                    chat_request.tools.append(knowledge_tool_def)
 
             # Loop ReAct
             iteration = 0
-            final_answer = None
+            max_iterations = self.app_settings.max_react_iterations
+            messages = chat_request.messages.copy()  # Copiar para no mutar original
+            final_message = None
+            tools_used = []
             
-            while iteration < payload.max_iterations and final_answer is None:
+            while iteration < max_iterations and final_message is None:
                 iteration += 1
-                thinking_steps.append(f"Iteration {iteration}: Processing...")
                 
-                # 1. Llamar a Query Service
-                query_payload = QueryAdvancePayload(
+                # Crear request para Query Service
+                current_request = ChatRequest(
                     messages=messages,
-                    agent_config=payload.agent_config,
-                    tools=all_tools,
-                    tool_choice=payload.tool_choice
+                    model=chat_request.model,
+                    temperature=chat_request.temperature,
+                    max_tokens=chat_request.max_tokens,
+                    top_p=chat_request.top_p,
+                    frequency_penalty=chat_request.frequency_penalty,
+                    presence_penalty=chat_request.presence_penalty,
+                    stop=chat_request.stop,
+                    tools=chat_request.tools,
+                    tool_choice=chat_request.tool_choice
                 )
                 
+                # Llamar a Query Service
                 query_response = await self.query_client.query_advance(
-                    payload=query_payload.model_dump(),
+                    payload=current_request.model_dump(),
                     tenant_id=tenant_id,
                     session_id=session_id,
                     task_id=task_id
                 )
                 
-                # 2. Procesar respuesta
-                assistant_message = ChatMessage.model_validate(query_response["message"])
+                # Parsear respuesta
+                response = ChatResponse.model_validate(query_response)
+                assistant_message = response.message
                 messages.append(assistant_message)
                 
-                # 3. Si hay tool calls, ejecutarlas
+                # Si hay tool calls, ejecutarlas
                 if assistant_message.tool_calls:
                     for tool_call in assistant_message.tool_calls:
                         tool_name = tool_call["function"]["name"]
@@ -153,47 +166,57 @@ class AdvanceChatHandler(BaseHandler):
                         tool_message = ChatMessage(
                             role="tool",
                             content=json.dumps(tool_result),
-                            tool_call_id=tool_call["id"]
+                            tool_call_id=tool_call["id"],
+                            name=tool_name
                         )
                         messages.append(tool_message)
-                        
-                        thinking_steps.append(f"Used tool '{tool_name}': {tool_result.get('summary', 'OK')}")
                 
-                # 4. Si no hay tool calls, tenemos respuesta final
+                # Si no hay tool calls y hay contenido, tenemos respuesta final
                 elif assistant_message.content:
-                    final_answer = assistant_message.content
+                    final_message = assistant_message
                     break
 
             # Si no hay respuesta después del loop
-            if not final_answer:
-                final_answer = "I couldn't generate a complete response within the iteration limit."
+            if not final_message:
+                final_message = ChatMessage(
+                    role="assistant",
+                    content="I couldn't generate a complete response within the iteration limit."
+                )
+
+            # Extraer mensaje del usuario
+            user_message = next(
+                (msg.content for msg in reversed(chat_request.messages) if msg.role == "user"),
+                "Sin mensaje"
+            )
 
             # Guardar conversación
             await self.conversation_client.save_conversation(
                 conversation_id=conversation_id,
                 message_id=message_id,
-                user_message=payload.user_message,
-                agent_message=final_answer,
+                user_message=user_message,
+                agent_message=final_message.content or "",
                 tenant_id=tenant_id,
                 session_id=session_id,
                 task_id=task_id,
                 metadata={
                     "mode": "advance",
-                    "collections": payload.collection_ids,
+                    "collections": chat_request.rag_config.collection_ids if chat_request.rag_config else [],
                     "tools_used": tools_used,
-                    "iterations": iteration,
-                    "thinking_steps": thinking_steps
+                    "iterations": iteration
                 }
             )
 
             execution_time_ms = int((time.time() - start_time) * 1000)
 
-            return AdvanceExecutionResponse(
-                message=final_answer,
-                thinking=thinking_steps,
-                tools_used=tools_used,
+            # Calcular uso total de tokens (sumando todas las iteraciones)
+            total_usage = TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
+            
+            return ChatResponse(
+                message=final_message,
+                usage=total_usage,  # TODO: Sumar tokens de todas las iteraciones
                 conversation_id=conversation_id,
                 execution_time_ms=execution_time_ms,
+                sources=[],  # TODO: Recolectar sources si se usa knowledge tool
                 iterations=iteration
             )
 
@@ -203,23 +226,21 @@ class AdvanceChatHandler(BaseHandler):
             self._logger.error(f"Error en advance chat handler: {e}", exc_info=True)
             raise ExternalServiceError(f"Error procesando chat avanzado: {str(e)}")
 
-    async def _register_tools(
+    async def _register_knowledge_tool(
         self, 
-        payload: AdvanceChatPayload,
+        rag_config: RAGConfig,
         tenant_id: str,
         session_id: str,
         task_id: uuid.UUID
     ) -> None:
-        """Registra las herramientas disponibles."""
+        """Registra la herramienta de conocimiento si hay configuración RAG."""
         # Limpiar registro previo
         self.tool_registry.clear()
         
         # Registrar knowledge tool
         knowledge_tool = KnowledgeTool(
             query_client=self.query_client,
-            collection_ids=payload.collection_ids,
-            document_ids=payload.document_ids,
-            embedding_config=payload.embedding_config,
+            rag_config=rag_config,
             tenant_id=tenant_id,
             session_id=session_id,
             task_id=task_id
@@ -244,49 +265,9 @@ class AdvanceChatHandler(BaseHandler):
             }
         
         try:
-            if tool_name == "knowledge":
-                # Para knowledge tool, hacer búsqueda RAG
-                rag_payload = QueryRAGPayload(
-                    query_text=arguments.get("query", ""),
-                    collection_ids=tool.collection_ids,
-                    document_ids=tool.document_ids,
-                    embedding_config=tool.embedding_config,
-                    top_k=arguments.get("top_k", 5),
-                    similarity_threshold=arguments.get("similarity_threshold", 0.7)
-                )
-                
-                response = await self.query_client.query_rag(
-                    payload=rag_payload.model_dump(),
-                    tenant_id=tenant_id,
-                    session_id=session_id,
-                    task_id=task_id
-                )
-                
-                # Formatear respuesta
-                chunks = response.get("chunks", [])
-                if chunks:
-                    formatted_chunks = "\n\n".join([
-                        f"[Source: {c['source']}, Score: {c['score']:.2f}]\n{c['content']}"
-                        for c in chunks[:3]  # Top 3
-                    ])
-                    return {
-                        "found": len(chunks),
-                        "content": formatted_chunks,
-                        "summary": f"Found {len(chunks)} relevant results"
-                    }
-                else:
-                    return {
-                        "found": 0,
-                        "content": "No relevant information found",
-                        "summary": "No results"
-                    }
-            else:
-                # Otras tools custom
-                result = await tool.execute(**arguments)
-                return {
-                    "result": result,
-                    "summary": f"Tool '{tool_name}' executed successfully"
-                }
+            # Ejecutar la herramienta
+            result = await tool.execute(**arguments)
+            return result
                 
         except Exception as e:
             self._logger.error(f"Error executing tool '{tool_name}': {e}")

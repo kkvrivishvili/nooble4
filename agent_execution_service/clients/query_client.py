@@ -44,195 +44,156 @@ class QueryClient:
         self._logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     async def query_simple(
-        self,
-        payload: Dict[str, Any],
-        tenant_id: str,
-        session_id: str,
-        task_id: uuid.UUID,
-        timeout: Optional[int] = None
-    ) -> Dict[str, Any]:
-        """
-        Realiza una consulta simple con RAG integrado.
-        
-        Args:
-            payload: SimpleChatPayload serializado
-            tenant_id: ID del tenant
-            session_id: ID de sesión
-            task_id: ID de tarea
-            timeout: Timeout opcional
-            
-        Returns:
-            Dict con SimpleChatResponse serializado
-        """
-        action = DomainAction(
-            action_id=uuid.uuid4(),
-            action_type=ACTION_QUERY_SIMPLE,
-            timestamp=datetime.now(timezone.utc),
-            tenant_id=tenant_id,
-            session_id=session_id,
-            task_id=task_id,
-            origin_service=self.redis_client.service_name,
-            data=payload
+    self,
+    payload: Dict[str, Any],  # Ya es ChatRequest serializado
+    tenant_id: str,
+    session_id: str,
+    task_id: uuid.UUID,
+    timeout: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Realiza una consulta simple con RAG integrado.
+    """
+    action = DomainAction(
+        action_id=uuid.uuid4(),
+        action_type=ACTION_QUERY_SIMPLE,
+        timestamp=datetime.now(timezone.utc),
+        tenant_id=tenant_id,
+        session_id=session_id,
+        task_id=task_id,
+        origin_service=self.redis_client.service_name,
+        data=payload  # Ya no necesita transformación
+    )
+
+    actual_timeout = timeout if timeout is not None else self.default_timeout
+    
+    try:
+        response = await self.redis_client.send_action_pseudo_sync(
+            action, 
+            timeout=actual_timeout
         )
-
-        actual_timeout = timeout if timeout is not None else self.default_timeout
         
-        try:
-            response = await self.redis_client.send_action_pseudo_sync(
-                action, 
-                timeout=actual_timeout
-            )
+        if not response.success or response.data is None:
+            error_detail = response.error
+            error_message = f"Query Service error: {error_detail.message if error_detail else 'Unknown error'}"
+            self._logger.error(error_message, extra={
+                "action_id": str(action.action_id),
+                "error_detail": error_detail.model_dump() if error_detail else None
+            })
+            raise ExternalServiceError(error_message, error_detail=error_detail)
             
-            if not response.success or response.data is None:
-                error_detail = response.error
-                error_message = f"Query Service error: {error_detail.message if error_detail else 'Unknown error'}"
-                self._logger.error(error_message, extra={
-                    "action_id": str(action.action_id),
-                    "error_detail": error_detail.model_dump() if error_detail else None
-                })
-                raise ExternalServiceError(error_message, error_detail=error_detail)
-                
-            return response.data
-            
-        except TimeoutError as e:
-            self._logger.error(f"Timeout en query.simple: {e}")
-            raise ExternalServiceError(f"Timeout esperando respuesta de Query Service: {str(e)}")
-        except Exception as e:
-            self._logger.error(f"Error en query.simple: {e}", exc_info=True)
-            raise ExternalServiceError(f"Error comunicándose con Query Service: {str(e)}")
-
-    # Los otros métodos (query_advance, query_rag) se actualizarán similarmente...
-
-    async def query_advance(
-        self,
-        messages: List[Dict[str, str]],
-        tenant_id: str,
-        session_id: str,
-        task_id: uuid.UUID,
-        agent_config: Dict[str, Any],
-        tools: List[Dict[str, Any]],
-        tool_choice: Optional[str] = "auto",
-        timeout: Optional[int] = None
-    ) -> Dict[str, Any]:
-        """
-        Realiza una consulta avanzada para ReAct sin RAG automático.
+        return response.data
         
-        Query Service realiza:
-        1. Llamada directa a Groq con tools disponibles
-        2. Retorno de respuesta con posibles tool_calls
-        
-        Returns:
-            Dict con respuesta y tool_calls si las hay
-        """
-        payload = {
-            "messages": messages,
-            "agent_config": agent_config,
-            "tools": tools,
-            "tool_choice": tool_choice
-        }
+    except TimeoutError as e:
+        self._logger.error(f"Timeout en query.simple: {e}")
+        raise ExternalServiceError(f"Timeout esperando respuesta de Query Service: {str(e)}")
+    except Exception as e:
+        self._logger.error(f"Error en query.simple: {e}", exc_info=True)
+        raise ExternalServiceError(f"Error comunicándose con Query Service: {str(e)}")
 
-        action = DomainAction(
-            action_id=uuid.uuid4(),
-            action_type=ACTION_QUERY_ADVANCE,
-            timestamp=datetime.now(timezone.utc),
-            tenant_id=tenant_id,
-            session_id=session_id,
-            task_id=task_id,
-            origin_service=self.redis_client.service_name,
-            data=payload
+async def query_advance(
+    self,
+    payload: Dict[str, Any],  # Ya es ChatRequest serializado
+    tenant_id: str,
+    session_id: str,
+    task_id: uuid.UUID,
+    timeout: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Realiza una consulta avanzada para ReAct.
+    """
+    action = DomainAction(
+        action_id=uuid.uuid4(),
+        action_type=ACTION_QUERY_ADVANCE,
+        timestamp=datetime.now(timezone.utc),
+        tenant_id=tenant_id,
+        session_id=session_id,
+        task_id=task_id,
+        origin_service=self.redis_client.service_name,
+        data=payload
+    )
+
+    actual_timeout = timeout if timeout is not None else self.default_timeout
+    
+    try:
+        response = await self.redis_client.send_action_pseudo_sync(
+            action, 
+            timeout=actual_timeout
         )
-
-        actual_timeout = timeout if timeout is not None else self.default_timeout
         
-        try:
-            response = await self.redis_client.send_action_pseudo_sync(
-                action, 
-                timeout=actual_timeout
-            )
+        if not response.success or response.data is None:
+            error_detail = response.error
+            error_message = f"Query Service error: {error_detail.message if error_detail else 'Unknown error'}"
+            self._logger.error(error_message, extra={
+                "action_id": str(action.action_id),
+                "error_detail": error_detail.model_dump() if error_detail else None
+            })
+            raise ExternalServiceError(error_message, error_detail=error_detail)
             
-            if not response.success or response.data is None:
-                error_detail = response.error
-                error_message = f"Query Service error: {error_detail.message if error_detail else 'Unknown error'}"
-                self._logger.error(error_message, extra={
-                    "action_id": str(action.action_id),
-                    "error_detail": error_detail.model_dump() if error_detail else None
-                })
-                raise ExternalServiceError(error_message, error_detail=error_detail)
-                
-            return response.data
-            
-        except TimeoutError as e:
-            self._logger.error(f"Timeout en query.advance: {e}")
-            raise ExternalServiceError(f"Timeout esperando respuesta de Query Service: {str(e)}")
-        except Exception as e:
-            self._logger.error(f"Error en query.advance: {e}", exc_info=True)
-            raise ExternalServiceError(f"Error comunicándose con Query Service: {str(e)}")
-
-    async def query_rag(
-        self,
-        query_text: str,
-        collection_ids: List[str],
-        tenant_id: str,
-        session_id: str,
-        task_id: uuid.UUID,
-        embedding_config: Dict[str, Any],
-        document_ids: Optional[List[str]] = None,
-        top_k: int = 5,
-        similarity_threshold: Optional[float] = None,
-        timeout: Optional[int] = None
-    ) -> Dict[str, Any]:
-        """
-        Realiza búsqueda RAG cuando se invoca la tool "knowledge".
+        return response.data
         
-        Query Service realiza:
-        1. Búsqueda vectorial en las colecciones
-        2. Retorno de chunks relevantes
-        
-        Returns:
-            Dict con chunks encontrados y metadata
-        """
-        payload = {
-            "query_text": query_text,
-            "collection_ids": collection_ids,
-            "document_ids": document_ids,
-            "embedding_config": embedding_config,
-            "top_k": top_k,
-            "similarity_threshold": similarity_threshold
-        }
+    except TimeoutError as e:
+        self._logger.error(f"Timeout en query.advance: {e}")
+        raise ExternalServiceError(f"Timeout esperando respuesta de Query Service: {str(e)}")
+    except Exception as e:
+        self._logger.error(f"Error en query.advance: {e}", exc_info=True)
+        raise ExternalServiceError(f"Error comunicándose con Query Service: {str(e)}")
 
-        action = DomainAction(
-            action_id=uuid.uuid4(),
-            action_type=ACTION_QUERY_RAG,
-            timestamp=datetime.now(timezone.utc),
-            tenant_id=tenant_id,
-            session_id=session_id,
-            task_id=task_id,
-            origin_service=self.redis_client.service_name,
-            data=payload
+async def query_rag(
+    self,
+    query_text: str,
+    rag_config: Dict[str, Any],  # RAGConfig serializado
+    tenant_id: str,
+    session_id: str,
+    task_id: uuid.UUID,
+    top_k: Optional[int] = None,
+    similarity_threshold: Optional[float] = None,
+    timeout: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Realiza búsqueda RAG cuando se invoca la tool "knowledge".
+    """
+    payload = {
+        "query_text": query_text,
+        "rag_config": rag_config,
+        # Permitir override de algunos parámetros
+        "top_k": top_k,
+        "similarity_threshold": similarity_threshold
+    }
+
+    action = DomainAction(
+        action_id=uuid.uuid4(),
+        action_type=ACTION_QUERY_RAG,
+        timestamp=datetime.now(timezone.utc),
+        tenant_id=tenant_id,
+        session_id=session_id,
+        task_id=task_id,
+        origin_service=self.redis_client.service_name,
+        data=payload
+    )
+
+    actual_timeout = timeout if timeout is not None else self.default_timeout
+    
+    try:
+        response = await self.redis_client.send_action_pseudo_sync(
+            action, 
+            timeout=actual_timeout
         )
-
-        actual_timeout = timeout if timeout is not None else self.default_timeout
         
-        try:
-            response = await self.redis_client.send_action_pseudo_sync(
-                action, 
-                timeout=actual_timeout
-            )
+        if not response.success or response.data is None:
+            error_detail = response.error
+            error_message = f"Query Service error: {error_detail.message if error_detail else 'Unknown error'}"
+            self._logger.error(error_message, extra={
+                "action_id": str(action.action_id),
+                "error_detail": error_detail.model_dump() if error_detail else None
+            })
+            raise ExternalServiceError(error_message, error_detail=error_detail)
             
-            if not response.success or response.data is None:
-                error_detail = response.error
-                error_message = f"Query Service error: {error_detail.message if error_detail else 'Unknown error'}"
-                self._logger.error(error_message, extra={
-                    "action_id": str(action.action_id),
-                    "error_detail": error_detail.model_dump() if error_detail else None
-                })
-                raise ExternalServiceError(error_message, error_detail=error_detail)
-                
-            return response.data
-            
-        except TimeoutError as e:
-            self._logger.error(f"Timeout en query.rag: {e}")
-            raise ExternalServiceError(f"Timeout esperando respuesta de Query Service: {str(e)}")
-        except Exception as e:
-            self._logger.error(f"Error en query.rag: {e}", exc_info=True)
-            raise ExternalServiceError(f"Error comunicándose con Query Service: {str(e)}")
+        return response.data
+        
+    except TimeoutError as e:
+        self._logger.error(f"Timeout en query.rag: {e}")
+        raise ExternalServiceError(f"Timeout esperando respuesta de Query Service: {str(e)}")
+    except Exception as e:
+        self._logger.error(f"Error en query.rag: {e}", exc_info=True)
+        raise ExternalServiceError(f"Error comunicándose con Query Service: {str(e)}")

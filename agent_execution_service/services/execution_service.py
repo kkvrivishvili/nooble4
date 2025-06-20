@@ -124,3 +124,23 @@ async def _handle_simple_chat(self, action: DomainAction) -> Dict[str, Any]:
     except Exception as e:
         self.logger.error(f"Error en chat simple: {e}")
         raise
+
+    async def _handle_advance_chat(self, action: DomainAction) -> Dict[str, Any]:
+    """Maneja chat avanzado."""
+    try:
+        # El payload ya es un ChatRequest serializado
+        # No necesitamos transformaciones adicionales
+        
+        # Ejecutar handler directamente con el payload
+        response = await self.advance_handler.handle_advance_chat(
+            payload=action.data,  # Pasamos el dict directamente
+            tenant_id=action.tenant_id,
+            session_id=action.session_id,
+            task_id=action.task_id
+        )
+        
+        return response.model_dump()
+        
+    except Exception as e:
+        self.logger.error(f"Error en chat avanzado: {e}")
+        raise
