@@ -56,7 +56,7 @@ class KnowledgeTool(BaseTool):
             # Llamar a query_rag con configuración simplificada
             result = await self.query_client.query_rag(
                 query_text=query,
-                rag_config=self.rag_config,
+                rag_config=self.rag_config.model_dump(),  # Serializar a dict
                 tenant_id=self.tenant_id,
                 session_id=self.session_id,
                 task_id=self.task_id,
