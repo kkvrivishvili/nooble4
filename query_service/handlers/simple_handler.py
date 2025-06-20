@@ -9,12 +9,12 @@ from uuid import UUID, uuid4
 from common.handlers import BaseHandler
 from common.errors.exceptions import ExternalServiceError, AppValidationError
 from common.models.chat_models import (
-    SimpleChatPayload,
-    SimpleChatResponse,
+    ChatRequest,
+    ChatResponse,
     ChatMessage,
-    ChatCompletionRequest,
     EmbeddingRequest,
-    TokenUsage
+    TokenUsage,
+    RAGConfig
 )
 
 from ..clients.groq_client import GroqClient
@@ -44,34 +44,47 @@ class SimpleHandler(BaseHandler):
         
         self.logger.info("SimpleHandler inicializado")
     
-    async def process_simple_query(
-        self,
-        payload: SimpleChatPayload,
-        tenant_id: str,
-        session_id: str,
-        task_id: UUID,
-        trace_id: UUID,
-        correlation_id: UUID
-    ) -> SimpleChatResponse:
-        """Procesa una consulta simple con RAG automático."""
-        start_time = time.time()
-        query_id = str(correlation_id) if correlation_id else str(uuid4())
+async def process_simple_query(
+    self,
+    payload: ChatRequest,
+    tenant_id: str,
+    session_id: str,
+    task_id: UUID,
+    trace_id: UUID,
+    correlation_id: UUID
+) -> ChatResponse:
+    """Procesa una consulta simple con RAG automático."""
+    start_time = time.time()
+    conversation_id = str(correlation_id) if correlation_id else str(uuid4())
+    
+    try:
+        # Extraer mensaje del usuario (último mensaje con role="user")
+        user_message = None
+        for msg in reversed(payload.messages):
+            if msg.role == "user" and msg.content:
+                user_message = msg.content
+                break
         
-        try:
-            self.logger.info(
-                f"Procesando simple query: '{payload.user_message[:50]}...'",
-                extra={
-                    "query_id": query_id,
-                    "tenant_id": tenant_id,
-                    "collections": payload.collection_ids
-                }
-            )
-            
+        if not user_message:
+            raise AppValidationError("No se encontró mensaje del usuario")
+        
+        self.logger.info(
+            f"Procesando simple query: '{user_message[:50]}...'",
+            extra={
+                "query_id": conversation_id,
+                "tenant_id": tenant_id,
+                "collections": payload.rag_config.collection_ids if payload.rag_config else []
+            }
+        )
+        
+        # Si hay configuración RAG, hacer búsqueda
+        sources = []
+        if payload.rag_config:
             # 1. Obtener embedding de la consulta
             embedding_request = EmbeddingRequest(
-                model=payload.embedding_model,
-                input=payload.user_message,
-                dimensions=payload.embedding_dimensions
+                input=user_message,
+                model=payload.rag_config.embedding_model,
+                dimensions=payload.rag_config.embedding_dimensions
             )
             
             query_embedding = await self._get_query_embedding(
@@ -85,86 +98,80 @@ class SimpleHandler(BaseHandler):
             # 2. Buscar en vector store
             search_results = await self.vector_client.search(
                 query_embedding=query_embedding,
-                collection_ids=payload.collection_ids,
-                top_k=payload.top_k,
-                similarity_threshold=payload.similarity_threshold,
+                collection_ids=payload.rag_config.collection_ids,
+                top_k=payload.rag_config.top_k,
+                similarity_threshold=payload.rag_config.similarity_threshold,
                 tenant_id=tenant_id,
-                filters={"document_ids": payload.document_ids} if payload.document_ids else None
+                filters={"document_ids": payload.rag_config.document_ids} if payload.rag_config.document_ids else None
             )
             
-            # 3. Construir mensajes para Groq
-            messages = []
-            
-            # System prompt siempre presente
-            messages.append(ChatMessage(
-                role="system",
-                content=payload.system_prompt
-            ))
-            
-            # Agregar contexto RAG si hay resultados
+            # 3. Si hay resultados, agregar contexto
             if search_results:
                 context = self._build_context(search_results)
-                messages.append(ChatMessage(
+                # Insertar contexto como mensaje del sistema después del primer mensaje
+                context_msg = ChatMessage(
                     role="system",
                     content=f"Context information:\n{context}"
+                )
+                # Clonar mensajes y agregar contexto
+                messages_with_context = payload.messages.copy()
+                messages_with_context.insert(1, context_msg)  # Después del system prompt
+                payload.messages = messages_with_context
+                
+                # Extraer sources
+                sources = list(set(
+                    r.document_id for r in search_results 
+                    if hasattr(r, 'document_id') and r.document_id
                 ))
-            
-            # Agregar historial de conversación
-            messages.extend(payload.conversation_history)
-            
-            # Agregar mensaje del usuario
-            messages.append(ChatMessage(
-                role="user",
-                content=payload.user_message
-            ))
-            
-            # 4. Crear request para Groq
-            chat_request = ChatCompletionRequest(
-                model=payload.chat_model,
-                messages=messages,
-                temperature=payload.temperature,
-                max_tokens=payload.max_tokens,
-                top_p=payload.top_p,
-                frequency_penalty=payload.frequency_penalty,
-                presence_penalty=payload.presence_penalty,
-                stop=payload.stop
-            )
-            
-            # 5. Llamar a Groq
-            groq_client = GroqClient(
-                api_key=self.app_settings.groq_api_key,
-                timeout=60
-            )
-            
-            groq_response = await groq_client.client.chat.completions.create(
-                **chat_request.model_dump(exclude_none=True)
-            )
-            
-            # 6. Extraer sources únicas
-            sources = list(set(
-                r.document_id for r in search_results 
-                if hasattr(r, 'document_id') and r.document_id
-            ))
-            
-            # 7. Construir respuesta
-            execution_time_ms = int((time.time() - start_time) * 1000)
-            
-            return SimpleChatResponse(
-                message=groq_response.choices[0].message.content,
-                sources=sources,
-                usage=TokenUsage(
-                    prompt_tokens=groq_response.usage.prompt_tokens,
-                    completion_tokens=groq_response.usage.completion_tokens,
-                    total_tokens=groq_response.usage.total_tokens
-                ),
-                query_id=query_id,
-                conversation_id=str(uuid4()),  # Query Service genera su propio ID
-                execution_time_ms=execution_time_ms
-            )
-            
-        except Exception as e:
-            self.logger.error(f"Error en simple query: {e}", exc_info=True)
-            raise ExternalServiceError(f"Error procesando query simple: {str(e)}")
+        
+        # 4. Crear cliente Groq y llamar
+        groq_client = GroqClient(
+            api_key=self.app_settings.groq_api_key,
+            timeout=60
+        )
+        
+        # Preparar mensajes para Groq (convertir a dict)
+        groq_messages = [
+            {"role": msg.role, "content": msg.content}
+            for msg in payload.messages
+            if msg.content  # Solo mensajes con contenido
+        ]
+        
+        # Llamar a Groq
+        groq_response = await groq_client.client.chat.completions.create(
+            messages=groq_messages,
+            model=payload.model.value,  # Usar el valor del enum
+            temperature=payload.temperature,
+            max_tokens=payload.max_tokens,
+            top_p=payload.top_p,
+            frequency_penalty=payload.frequency_penalty,
+            presence_penalty=payload.presence_penalty,
+            stop=payload.stop
+        )
+        
+        # 5. Construir respuesta
+        execution_time_ms = int((time.time() - start_time) * 1000)
+        
+        response_message = ChatMessage(
+            role="assistant",
+            content=groq_response.choices[0].message.content
+        )
+        
+        return ChatResponse(
+            message=response_message,
+            usage=TokenUsage(
+                prompt_tokens=groq_response.usage.prompt_tokens,
+                completion_tokens=groq_response.usage.completion_tokens,
+                total_tokens=groq_response.usage.total_tokens
+            ),
+            conversation_id=conversation_id,
+            execution_time_ms=execution_time_ms,
+            sources=sources
+        )
+        
+    except Exception as e:
+        self.logger.error(f"Error en simple query: {e}", exc_info=True)
+        raise ExternalServiceError(f"Error procesando query simple: {str(e)}")
     
     async def _get_query_embedding(
         self,

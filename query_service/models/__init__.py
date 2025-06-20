@@ -7,17 +7,19 @@ from .base_models import (
     ACTION_QUERY_RAG,
 )
 
-# Importar modelos compartidos
+# Todos los modelos necesarios vienen de common
 from common.models.chat_models import (
-    SimpleChatPayload,
-    SimpleChatResponse,
+    ChatRequest,
+    ChatResponse,
     ChatMessage,
-    ChatCompletionRequest,
-    EmbeddingRequest,
-    TokenUsage,
-    RAGChunk,
     ChatModel,
-    EmbeddingModel
+    EmbeddingModel,
+    EmbeddingRequest,
+    EmbeddingResponse,
+    RAGConfig,
+    RAGChunk,
+    RAGSearchResult,
+    TokenUsage
 )
 
 __all__ = [
@@ -26,14 +28,16 @@ __all__ = [
     "ACTION_QUERY_ADVANCE", 
     "ACTION_QUERY_RAG",
     
-    # Shared Models
-    "SimpleChatPayload",
-    "SimpleChatResponse",
+    # Models from common
+    "ChatRequest",
+    "ChatResponse",
     "ChatMessage",
-    "ChatCompletionRequest",
-    "EmbeddingRequest",
-    "TokenUsage",
-    "RAGChunk",
     "ChatModel",
-    "EmbeddingModel"
+    "EmbeddingModel",
+    "EmbeddingRequest",
+    "EmbeddingResponse",
+    "RAGConfig",
+    "RAGChunk",
+    "RAGSearchResult",
+    "TokenUsage"
 ]

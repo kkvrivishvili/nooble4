@@ -9,12 +9,11 @@ from common.services.base_service import BaseService
 from common.models.actions import DomainAction
 from common.errors.exceptions import InvalidActionError, ExternalServiceError
 from common.clients.base_redis_client import BaseRedisClient
-from common.models.chat_models import SimpleChatResponse
+from common.models.chat_models import ChatRequest, ChatResponse
 
 from ..config.settings import ExecutionServiceSettings
 from ..clients.query_client import QueryClient
 from ..clients.conversation_client import ConversationClient
-from ..models.execution_payloads import ExecutionSimpleChatPayload, OperationMode
 from ..handlers.simple_chat_handler import SimpleChatHandler
 from ..handlers.advance_chat_handler import AdvanceChatHandler
 from ..tools.registry import ToolRegistry
@@ -106,22 +105,22 @@ class ExecutionService(BaseService):
         if not action.task_id:
             raise InvalidActionError("task_id es requerido")
 
-    async def _handle_simple_chat(self, action: DomainAction) -> Dict[str, Any]:
-        """Maneja chat simple."""
-        try:
-            # Validar y parsear payload
-            payload = ExecutionSimpleChatPayload.model_validate(action.data)
-            
-            # Ejecutar handler
-            response = await self.simple_handler.handle_simple_chat(
-                payload=payload,
-                tenant_id=action.tenant_id,
-                session_id=action.session_id,
-                task_id=action.task_id
-            )
-            
-            return response.model_dump()
-            
-        except Exception as e:
-            self.logger.error(f"Error en chat simple: {e}")
-            raise
+async def _handle_simple_chat(self, action: DomainAction) -> Dict[str, Any]:
+    """Maneja chat simple."""
+    try:
+        # El payload ya es un ChatRequest serializado
+        # No necesitamos ExecutionSimpleChatPayload
+        
+        # Ejecutar handler directamente con el payload
+        response = await self.simple_handler.handle_simple_chat(
+            payload=action.data,  # Pasamos el dict directamente
+            tenant_id=action.tenant_id,
+            session_id=action.session_id,
+            task_id=action.task_id
+        )
+        
+        return response.model_dump()
+        
+    except Exception as e:
+        self.logger.error(f"Error en chat simple: {e}")
+        raise
