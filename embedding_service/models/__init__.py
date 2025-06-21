@@ -2,30 +2,28 @@
 Modelos de datos para Embedding Service.
 """
 
+# Importar modelos específicos del servicio (batch processing)
 from .payloads import (
-    EmbeddingGeneratePayload,
-    EmbeddingGenerateQueryPayload,
     EmbeddingBatchPayload,
-    EmbeddingValidatePayload,
-    EmbeddingResult,
+    EmbeddingBatchResult
+)
+
+# Importar modelos comunes desde common
+from common.models.chat_models import (
+    EmbeddingRequest,
     EmbeddingResponse,
-    EmbeddingQueryResponse,
-    EmbeddingBatchResponse,
-    EmbeddingValidationResponse,
-    EmbeddingErrorResponse,
-    EmbeddingMetrics
+    EmbeddingModel,
+    TokenUsage
 )
 
 __all__ = [
-    'EmbeddingGeneratePayload',
-    'EmbeddingGenerateQueryPayload',
+    # Modelos específicos del servicio
     'EmbeddingBatchPayload',
-    'EmbeddingValidatePayload',
-    'EmbeddingResult',
+    'EmbeddingBatchResult',
+    
+    # Modelos de common
+    'EmbeddingRequest',
     'EmbeddingResponse',
-    'EmbeddingQueryResponse',
-    'EmbeddingBatchResponse',
-    'EmbeddingValidationResponse',
-    'EmbeddingErrorResponse',
-    'EmbeddingMetrics'
+    'EmbeddingModel',
+    'TokenUsage'
 ]

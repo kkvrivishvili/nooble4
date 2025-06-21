@@ -15,7 +15,6 @@ from common.clients import BaseRedisClient
 from ..services.embedding_service import EmbeddingService
 from ..config.settings import get_settings
 
-
 class EmbeddingWorker(BaseWorker):
     """
     Worker que procesa acciones de embedding desde Redis Streams.

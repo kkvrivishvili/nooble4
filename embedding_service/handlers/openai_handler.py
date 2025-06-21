@@ -27,10 +27,6 @@ class OpenAIHandler(BaseHandler):
     def __init__(self, app_settings, direct_redis_conn=None):
         """
         Inicializa el handler con sus dependencias.
-        
-        Args:
-            app_settings: EmbeddingServiceSettings
-            direct_redis_conn: Conexión Redis para operaciones directas
         """
         super().__init__(app_settings, direct_redis_conn)
         
@@ -42,11 +38,12 @@ class OpenAIHandler(BaseHandler):
             max_retries=self.app_settings.openai_max_retries
         )
         
-        # Configuración
+        # Configuración por defecto
         self.default_model = self.app_settings.openai_default_model
-        self.default_dimensions = app_settings.default_dimensions_by_model
-        self.preferred_dimensions = app_settings.preferred_dimensions
-        self.encoding_format = app_settings.encoding_format.value
+        self.default_dimensions = self.app_settings.default_dimensions_by_model.get(
+            self.default_model, 
+            1536  # Default para text-embedding-3-small
+        )
         
         self._logger.info("OpenAIHandler inicializado")
     
@@ -64,7 +61,7 @@ class OpenAIHandler(BaseHandler):
         
         Args:
             texts: Lista de textos
-            model: Modelo específico a usar
+            model: Modelo específico a usar (string, no enum)
             dimensions: Dimensiones del embedding
             encoding_format: Formato de codificación
             tenant_id: ID del tenant
@@ -75,15 +72,19 @@ class OpenAIHandler(BaseHandler):
         """
         # Configurar parámetros
         model = model or self.default_model
-        dimensions = dimensions or self.preferred_dimensions
-        encoding_format = encoding_format or self.encoding_format
+        encoding_format = encoding_format or "float"
+        
+        # Para modelos v3, usar dimensiones configuradas o default
+        if dimensions is None and "text-embedding-3" in model:
+            dimensions = self.app_settings.preferred_dimensions or self.default_dimensions
         
         self._logger.info(
             f"Generando embeddings para {len(texts)} textos con modelo {model}",
             extra={
                 "tenant_id": tenant_id,
                 "trace_id": str(trace_id) if trace_id else None,
-                "model": model
+                "model": model,
+                "dimensions": dimensions
             }
         )
         
@@ -93,7 +94,8 @@ class OpenAIHandler(BaseHandler):
                 texts=texts,
                 model=model,
                 dimensions=dimensions,
-                encoding_format=encoding_format
+                encoding_format=encoding_format,
+                user=tenant_id  # Usar tenant_id como user para tracking en OpenAI
             )
             
             self._logger.info(
@@ -102,7 +104,8 @@ class OpenAIHandler(BaseHandler):
                     "tenant_id": tenant_id,
                     "model": model,
                     "text_count": len(texts),
-                    "total_tokens": result.get("total_tokens", 0)
+                    "total_tokens": result.get("total_tokens", 0),
+                    "dimensions": result.get("dimensions", 0)
                 }
             )
             

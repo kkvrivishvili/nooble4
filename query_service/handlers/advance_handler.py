@@ -8,16 +8,13 @@ from uuid import UUID, uuid4
 
 from common.handlers import BaseHandler
 from common.errors.exceptions import ExternalServiceError, AppValidationError
-
-from ..models import (
-    QueryAdvancePayload,
-    QueryAdvanceResponseData
-)
 from common.models.chat_models import (
+    ChatRequest,
+    ChatResponse,
     ChatMessage,
-    TokenUsage,
-    ToolCall
+    TokenUsage
 )
+
 from ..clients.groq_client import GroqClient
 
 
@@ -37,47 +34,55 @@ class AdvanceHandler(BaseHandler):
     
     async def process_advance_query(
         self,
-        payload: QueryAdvancePayload,
+        payload: ChatRequest,
         tenant_id: str,
         session_id: str,
         task_id: UUID,
         trace_id: UUID,
         correlation_id: UUID
-    ) -> QueryAdvanceResponseData:
+    ) -> ChatResponse:
         """Procesa una consulta avanzada con soporte de tools."""
         start_time = time.time()
         query_id = str(correlation_id) if correlation_id else str(uuid4())
         
         try:
-            # Validar payload
-            self._validate_payload(payload)
+            # Validar que tenga tools (requerido para advance)
+            if not payload.tools:
+                raise AppValidationError("Al menos una tool es requerida para chat avanzado")
+            
+            self._logger.info(
+                f"Procesando chat avanzado",
+                extra={
+                    "tenant_id": tenant_id,
+                    "session_id": session_id,
+                    "query_id": query_id,
+                    "tools_count": len(payload.tools)
+                }
+            )
             
             # Crear cliente Groq
             groq_client = GroqClient(
                 api_key=self.app_settings.groq_api_key,
-                timeout=payload.agent_config.max_tokens // 100
+                timeout=max(60, payload.max_tokens // 100)  # Timeout dinámico
             )
             
             # Preparar mensajes para Groq
             groq_messages = [
-                {"role": msg.role, "content": msg.content}
+                self._message_to_groq_format(msg)
                 for msg in payload.messages
             ]
-            
-            # Preparar tools para Groq
-            groq_tools = [tool.model_dump() for tool in payload.tools]
             
             # Llamar a Groq con tools
             response = await groq_client.client.chat.completions.create(
                 messages=groq_messages,
-                model=payload.agent_config.model_name,
-                temperature=payload.agent_config.temperature,
-                max_tokens=payload.agent_config.max_tokens,
-                top_p=payload.agent_config.top_p,
-                frequency_penalty=payload.agent_config.frequency_penalty,
-                presence_penalty=payload.agent_config.presence_penalty,
-                stop=payload.agent_config.stop_sequences,
-                tools=groq_tools,
+                model=payload.model.value,
+                temperature=payload.temperature,
+                max_tokens=payload.max_tokens,
+                top_p=payload.top_p,
+                frequency_penalty=payload.frequency_penalty,
+                presence_penalty=payload.presence_penalty,
+                stop=payload.stop,
+                tools=payload.tools,  # Ya están en formato Groq
                 tool_choice=payload.tool_choice
             )
             
@@ -114,21 +119,32 @@ class AdvanceHandler(BaseHandler):
             
             execution_time_ms = int((time.time() - start_time) * 1000)
             
-            return QueryAdvanceResponseData(
+            return ChatResponse(
                 message=response_message,
-                finish_reason=choice.finish_reason,
                 usage=token_usage,
-                query_id=query_id,
-                execution_time_ms=execution_time_ms
+                conversation_id=query_id,
+                execution_time_ms=execution_time_ms,
+                sources=[]  # No hay sources en advance (las herramientas manejan sus propias fuentes)
             )
             
         except Exception as e:
             self._logger.error(f"Error en advance query: {e}", exc_info=True)
             raise ExternalServiceError(f"Error procesando query advance: {str(e)}")
     
-    def _validate_payload(self, payload: QueryAdvancePayload):
-        """Valida que el payload tenga todos los campos requeridos."""
-        if not payload.agent_config:
-            raise AppValidationError("agent_config es requerido")
-        if not payload.tools:
-            raise AppValidationError("Al menos una tool es requerida")
+    def _message_to_groq_format(self, msg: ChatMessage) -> Dict[str, Any]:
+        """Convierte un ChatMessage al formato esperado por Groq."""
+        groq_msg = {"role": msg.role}
+        
+        if msg.content:
+            groq_msg["content"] = msg.content
+        
+        if msg.tool_calls:
+            groq_msg["tool_calls"] = msg.tool_calls
+        
+        if msg.tool_call_id:
+            groq_msg["tool_call_id"] = msg.tool_call_id
+        
+        if msg.name:
+            groq_msg["name"] = msg.name
+        
+        return groq_msg

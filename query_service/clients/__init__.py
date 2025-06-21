@@ -1,9 +1,48 @@
 """
-Clientes para servicios externos del Query Service.
+Models for Query Service Interface.
 """
+from .base_models import (
+    ACTION_QUERY_SIMPLE,
+    ACTION_QUERY_ADVANCE,
+    ACTION_QUERY_RAG,
+)
 
-from .groq_client import GroqClient
-from .vector_client import VectorClient
-from .embedding_client import EmbeddingClient
+from .payloads import SearchResult
 
-__all__ = ['GroqClient', 'VectorClient', 'EmbeddingClient']
+# Todos los demás modelos vienen de common
+from common.models.chat_models import (
+    ChatRequest,
+    ChatResponse,
+    ChatMessage,
+    ChatModel,
+    EmbeddingModel,
+    EmbeddingRequest,
+    EmbeddingResponse,
+    RAGConfig,
+    RAGChunk,
+    RAGSearchResult,
+    TokenUsage
+)
+
+__all__ = [
+    # Action Constants
+    "ACTION_QUERY_SIMPLE",
+    "ACTION_QUERY_ADVANCE", 
+    "ACTION_QUERY_RAG",
+    
+    # Local model
+    "SearchResult",
+    
+    # Models from common
+    "ChatRequest",
+    "ChatResponse",
+    "ChatMessage",
+    "ChatModel",
+    "EmbeddingModel",
+    "EmbeddingRequest",
+    "EmbeddingResponse",
+    "RAGConfig",
+    "RAGChunk",
+    "RAGSearchResult",
+    "TokenUsage"
+]

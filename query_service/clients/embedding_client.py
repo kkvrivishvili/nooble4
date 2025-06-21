@@ -6,13 +6,11 @@ Embedding Service cuando se necesitan generar embeddings.
 """
 
 import logging
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID, uuid4
 
 from common.models import DomainAction, DomainActionResponse
 from common.clients import BaseRedisClient
-
-from ..models.payloads import EmbeddingRequest
 
 
 class EmbeddingClient:
@@ -41,6 +39,7 @@ class EmbeddingClient:
         task_id: UUID,
         trace_id: UUID,
         model: Optional[str] = None,
+        dimensions: Optional[int] = None,
         callback_queue: Optional[str] = None
     ) -> str:
         """
@@ -52,17 +51,20 @@ class EmbeddingClient:
             session_id: ID de sesión
             task_id: ID de la tarea
             trace_id: ID de traza
-            model: Modelo de embedding específico
+            model: Modelo de embedding específico (string, no enum)
+            dimensions: Dimensiones del embedding
             callback_queue: Cola para recibir el resultado
             
         Returns:
             ID de la acción enviada
         """
-        # Crear payload
-        embedding_request = EmbeddingRequest(
-            texts=texts,
-            model=model
-        )
+        # Crear payload compatible con EmbeddingRequest
+        embedding_request = {
+            "input": texts,
+            "model": model or "text-embedding-3-small",
+            "dimensions": dimensions,
+            "encoding_format": "float"
+        }
         
         # Crear DomainAction
         action = DomainAction(
@@ -72,9 +74,9 @@ class EmbeddingClient:
             session_id=session_id,
             task_id=task_id,
             user_id=None,  # Query service actúa como sistema
-            origin_service="query",
+            origin_service=self.redis_client.service_name,
             trace_id=trace_id,
-            data=embedding_request.model_dump(),
+            data=embedding_request,
             callback_queue_name=callback_queue,
             callback_action_type="embedding.result" if callback_queue else None
         )
@@ -104,7 +106,8 @@ class EmbeddingClient:
         session_id: str,
         task_id: UUID,
         trace_id: UUID,
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        dimensions: Optional[int] = None
     ) -> DomainActionResponse:
         """
         Solicita embedding para una consulta específica.
@@ -118,16 +121,19 @@ class EmbeddingClient:
             session_id: ID de sesión
             task_id: ID de la tarea
             trace_id: ID de traza
-            model: Modelo de embedding
+            model: Modelo de embedding (string)
+            dimensions: Dimensiones del embedding
             
         Returns:
             DomainActionResponse con el embedding
         """
-        # Crear payload
-        embedding_request = EmbeddingRequest(
-            texts=[query_text],
-            model=model
-        )
+        # Crear payload compatible con EmbeddingRequest
+        embedding_request = {
+            "input": query_text,  # Para single query, input es un string
+            "model": model or "text-embedding-3-small",
+            "dimensions": dimensions,
+            "encoding_format": "float"
+        }
         
         # Crear DomainAction con correlation_id para pseudo-sync
         action = DomainAction(
@@ -137,10 +143,10 @@ class EmbeddingClient:
             session_id=session_id,
             task_id=task_id,
             user_id=None,
-            origin_service="query",
+            origin_service=self.redis_client.service_name,
             correlation_id=uuid4(),  # Para pseudo-sync
             trace_id=trace_id,
-            data=embedding_request.model_dump()
+            data=embedding_request
         )
         
         # Enviar y esperar respuesta

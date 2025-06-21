@@ -14,13 +14,16 @@ from pydantic import ValidationError
 from common.services import BaseService
 from common.models import DomainAction
 from common.errors.exceptions import InvalidActionError, ExternalServiceError
+from common.models.chat_models import (
+    EmbeddingRequest,
+    EmbeddingResponse,
+    EmbeddingModel,
+    TokenUsage
+)
 
 from ..models.payloads import (
-    EmbeddingGeneratePayload,
-    EmbeddingGenerateQueryPayload,
     EmbeddingBatchPayload,
-    EmbeddingValidatePayload,
-    EmbeddingErrorResponse
+    EmbeddingBatchResult
 )
 from ..handlers.openai_handler import OpenAIHandler
 from ..handlers.validation_handler import ValidationHandler
@@ -34,17 +37,11 @@ class EmbeddingService(BaseService):
     - embedding.generate: Generación de embeddings para múltiples textos
     - embedding.generate_query: Generación de embedding para consulta única
     - embedding.batch_process: Procesamiento por lotes
-    - embedding.validate: Validación de capacidad
     """
     
     def __init__(self, app_settings, service_redis_client=None, direct_redis_conn=None):
         """
         Inicializa el servicio con sus handlers.
-        
-        Args:
-            app_settings: EmbeddingServiceSettings con la configuración
-            service_redis_client: Cliente Redis para enviar acciones a otros servicios
-            direct_redis_conn: Conexión Redis directa para operaciones internas
         """
         super().__init__(app_settings, service_redis_client, direct_redis_conn)
         
@@ -64,16 +61,6 @@ class EmbeddingService(BaseService):
     async def process_action(self, action: DomainAction) -> Optional[Dict[str, Any]]:
         """
         Procesa una DomainAction según su tipo.
-        
-        Args:
-            action: La acción a procesar
-            
-        Returns:
-            Diccionario con los datos de respuesta o None
-            
-        Raises:
-            InvalidActionError: Si el tipo de acción no es soportado
-            ValidationError: Si el payload no es válido
         """
         self._logger.info(
             f"Procesando acción: {action.action_type} ({action.action_id})",
@@ -96,9 +83,6 @@ class EmbeddingService(BaseService):
             elif action.action_type == "embedding.batch_process":
                 return await self._handle_batch_process(action)
                 
-            elif action.action_type == "embedding.validate":
-                return await self._handle_validate(action)
-                
             else:
                 self._logger.warning(f"Tipo de acción no soportado: {action.action_type}")
                 raise InvalidActionError(
@@ -107,60 +91,39 @@ class EmbeddingService(BaseService):
                 
         except ValidationError as e:
             self._logger.error(f"Error de validación en {action.action_type}: {e}")
-            # Crear respuesta de error
-            error_response = EmbeddingErrorResponse(
-                error_type="ValidationError",
-                error_message="Error de validación en el payload",
-                error_details={"validation_errors": e.errors()},
-                action_type=action.action_type
-            )
-            return error_response.model_dump()
+            raise InvalidActionError(f"Error de validación en el payload: {str(e)}")
             
-        except ExternalServiceError as e:
-            self._logger.error(f"Error de servicio externo en {action.action_type}: {e}")
-            error_response = EmbeddingErrorResponse(
-                error_type="ExternalServiceError",
-                error_message=str(e),
-                error_details={"original_error": str(e.original_exception) if e.original_exception else None},
-                action_type=action.action_type
-            )
-            return error_response.model_dump()
+        except ExternalServiceError:
+            raise
             
         except Exception as e:
             self._logger.exception(f"Error inesperado procesando {action.action_type}")
-            # Re-lanzar para que BaseWorker maneje el error
-            raise
+            raise ExternalServiceError(f"Error interno en Embedding Service: {str(e)}")
     
     async def _handle_generate(self, action: DomainAction) -> Dict[str, Any]:
         """
         Maneja la acción embedding.generate para múltiples textos.
-        
-        Args:
-            action: DomainAction con EmbeddingGeneratePayload
-            
-        Returns:
-            Diccionario con EmbeddingResponse
         """
         # Validar y parsear payload
-        payload = EmbeddingGeneratePayload(**action.data)
+        payload = EmbeddingRequest.model_validate(action.data)
         
-        # Obtener configuración de metadata si existe
-        config_overrides = action.metadata or {}
+        # Convertir input a lista si es string
+        texts = [payload.input] if isinstance(payload.input, str) else payload.input
         
-        # Primero validar los textos
+        # Validar los textos
         validation_result = await self.validation_handler.validate_texts(
-            texts=payload.texts,
-            model=payload.model or config_overrides.get("model"),
+            texts=texts,
+            model=payload.model.value,
             tenant_id=action.tenant_id
         )
         
         if not validation_result["is_valid"]:
             raise ValueError(f"Validación fallida: {validation_result['messages'][0]}")
         
-        # Generar embeddings directamente
-        response = await self.openai_handler.generate_embeddings(
-            texts=payload.texts,
-            model=payload.model,
+        # Generar embeddings
+        result = await self.openai_handler.generate_embeddings(
+            texts=texts,
+            model=payload.model.value,
             dimensions=payload.dimensions,
             encoding_format=payload.encoding_format,
             tenant_id=action.tenant_id,
@@ -168,192 +131,112 @@ class EmbeddingService(BaseService):
         )
         
         # Construir respuesta
-        from ..models.payloads import EmbeddingResponse
-        embedding_response = EmbeddingResponse(
-            embeddings=response["embeddings"],
-            model=response["model"],
-            dimensions=response["dimensions"],
-            total_tokens=response.get("total_tokens", 0),
-            processing_time_ms=response.get("processing_time_ms", 0),
-            metadata={
-                "collection_id": str(payload.collection_id) if payload.collection_id else None,
-                "chunk_ids": payload.chunk_ids
-            }
+        response = EmbeddingResponse(
+            embeddings=result["embeddings"],
+            model=result["model"],
+            dimensions=result["dimensions"],
+            usage=TokenUsage(
+                prompt_tokens=result.get("prompt_tokens", 0),
+                completion_tokens=0,  # Embeddings no tienen completion tokens
+                total_tokens=result.get("total_tokens", 0)
+            )
         )
         
-        # Tracking de métricas
-        await self._track_metrics(action, embedding_response)
-        
-        return embedding_response.model_dump()
+        return response.model_dump()
     
     async def _handle_generate_query(self, action: DomainAction) -> Dict[str, Any]:
         """
         Maneja la acción embedding.generate_query para consulta única.
-        
-        Args:
-            action: DomainAction con EmbeddingGenerateQueryPayload
-            
-        Returns:
-            Diccionario con EmbeddingQueryResponse
         """
         # Validar y parsear payload
-        payload = EmbeddingGenerateQueryPayload(**action.data)
+        payload = EmbeddingRequest.model_validate(action.data)
         
-        # Obtener el único texto
-        query_text = payload.texts[0]
+        # Para query, el input debe ser un string
+        if isinstance(payload.input, list):
+            query_text = payload.input[0] if payload.input else ""
+        else:
+            query_text = payload.input
         
         # Generar embedding
         result = await self.openai_handler.generate_embeddings(
             texts=[query_text],
-            model=payload.model,
+            model=payload.model.value,
+            dimensions=payload.dimensions,
+            encoding_format=payload.encoding_format,
             tenant_id=action.tenant_id,
             trace_id=action.trace_id
         )
         
-        embedding = result["embeddings"][0]
+        # Para query única, retornar solo el primer embedding
+        response_data = {
+            "embedding": result["embeddings"][0] if result["embeddings"] else [],
+            "model": result["model"],
+            "dimensions": result["dimensions"],
+            "usage": {
+                "prompt_tokens": result.get("prompt_tokens", 0),
+                "completion_tokens": 0,
+                "total_tokens": result.get("total_tokens", 0)
+            }
+        }
         
-        from ..models.payloads import EmbeddingQueryResponse
-        response = EmbeddingQueryResponse(
-            embedding=embedding,
-            model=result["model"],
-            dimensions=result["dimensions"],
-            tokens=result.get("prompt_tokens", 0),
-            processing_time_ms=result.get("processing_time_ms", 0)
-        )
-        
-        return response.model_dump()
+        return response_data
     
     async def _handle_batch_process(self, action: DomainAction) -> Dict[str, Any]:
         """
         Maneja la acción embedding.batch_process para procesamiento por lotes.
-        
-        Args:
-            action: DomainAction con EmbeddingBatchPayload
-            
-        Returns:
-            Diccionario con EmbeddingBatchResponse
-        """
-        # Validar y parsear payload. task_id se tomará de action.task_id.
-        # chunk_ids y otros datos específicos del lote están en action.data.
-        payload = EmbeddingBatchPayload(**action.data) # task_id ya no está aquí
-        current_task_id = str(action.task_id) if action.task_id else None
-
-        try:
-            # Crear una acción interna para _handle_generate.
-            # _handle_generate espera un EmbeddingGeneratePayload en su action.data.
-            # Nota: _handle_generate también espera chunk_ids en su payload.metadata si se quieren propagar.
-            #       Para simplificar, pasamos solo lo esencial para la generación de embeddings aquí.
-            generate_action_data = {
-                "texts": payload.texts,
-                "model": payload.model,
-                "collection_id": payload.collection_id # Opcional, pero _handle_generate lo maneja
-                # Si _handle_generate necesitara chunk_ids, se pasarían aquí o en metadata
-            }
-            
-            internal_generate_action = DomainAction(
-                action_id=action.action_id, # Reutilizar IDs para trazabilidad
-                action_type="embedding.generate", # Tipo interno para _handle_generate
-                tenant_id=action.tenant_id,
-                session_id=action.session_id,
-                task_id=action.task_id, # Propagar task_id original de la acción
-                user_id=action.user_id,
-                origin_service=action.origin_service,
-                trace_id=action.trace_id,
-                data=generate_action_data,
-                metadata=action.metadata # Propagar metadata original (que podría tener batch_index, etc.)
-            )
-            
-            # result es un dict serializado de EmbeddingResponse
-            result_from_generate = await self._handle_generate(internal_generate_action)
-            
-            # Convertir a batch response
-            from ..models.payloads import EmbeddingBatchResponse, EmbeddingResult
-            
-            embedding_results_list = []
-            # result_from_generate["embeddings"] es List[List[float]]
-            for i, embedding_vector in enumerate(result_from_generate.get("embeddings", [])):
-                embedding_results_list.append(
-                    EmbeddingResult(
-                        text_index=i,
-                        embedding=embedding_vector,
-                        dimensions=result_from_generate.get("dimensions", 0)
-                    )
-                )
-            
-            response = EmbeddingBatchResponse(
-                # batch_id=payload.batch_id, # ingestion_service no envía batch_id, así que puede ser None
-                status="completed",
-                task_id=current_task_id,  # Usar task_id del DomainAction entrante
-                chunk_ids=payload.chunk_ids, # Propagar chunk_ids del payload original
-                embeddings=embedding_results_list,
-                successful_count=len(embedding_results_list),
-                failed_count=0,
-                total_tokens=result_from_generate.get("total_tokens", 0),
-                processing_time_ms=result_from_generate.get("processing_time_ms", 0),
-                metadata=action.metadata # Propagar metadata original de la acción entrante
-            )
-            
-            return response.model_dump()
-            
-        except Exception as e:
-            self._logger.error(f"Error en _handle_batch_process para task {current_task_id}: {e}", exc_info=True)
-            from ..models.payloads import EmbeddingBatchResponse
-            # En caso de error, devolver respuesta parcial con identificadores si es posible
-            response = EmbeddingBatchResponse(
-                # batch_id=payload.batch_id,
-                status="failed",
-                task_id=current_task_id, # Usar task_id del DomainAction entrante
-                chunk_ids=payload.chunk_ids if payload else None, # Intentar incluir chunk_ids si están disponibles
-                embeddings=[],
-                successful_count=0,
-                failed_count=len(payload.texts) if payload and payload.texts else 0,
-                total_tokens=0,
-                processing_time_ms=0,
-                errors=[{"error_message": str(e), "error_type": type(e).__name__}],
-                metadata=action.metadata # Propagar metadata original
-            )
-            return response.model_dump()
-    
-    async def _handle_validate(self, action: DomainAction) -> Dict[str, Any]:
-        """
-        Maneja la acción embedding.validate para validación de capacidad.
-        
-        Args:
-            action: DomainAction con EmbeddingValidatePayload
-            
-        Returns:
-            Diccionario con EmbeddingValidationResponse
         """
         # Validar y parsear payload
-        payload = EmbeddingValidatePayload(**action.data)
+        payload = EmbeddingBatchPayload.model_validate(action.data)
         
-        # Usar validation handler
-        validation_result = await self.validation_handler.validate_texts(
-            texts=payload.texts,
-            model=payload.model,
-            tenant_id=action.tenant_id
-        )
-        
-        from ..models.payloads import EmbeddingValidationResponse
-        response = EmbeddingValidationResponse(
-            is_valid=validation_result["is_valid"],
-            can_process=validation_result["can_process"],
-            text_count=len(payload.texts),
-            estimated_tokens=validation_result["estimated_tokens"],
-            model_available=validation_result["model_available"],
-            messages=validation_result.get("messages", []),
-            warnings=validation_result.get("warnings", [])
-        )
-        
-        return response.model_dump()
+        try:
+            # Determinar modelo a usar
+            model = payload.model or self.app_settings.openai_default_model
+            
+            # Generar embeddings
+            result = await self.openai_handler.generate_embeddings(
+                texts=payload.texts,
+                model=model,
+                dimensions=payload.dimensions,
+                tenant_id=action.tenant_id,
+                trace_id=action.trace_id
+            )
+            
+            # Construir respuesta de batch
+            batch_result = EmbeddingBatchResult(
+                chunk_ids=payload.chunk_ids or [f"idx_{i}" for i in range(len(payload.texts))],
+                embeddings=result["embeddings"],
+                model=result["model"],
+                dimensions=result["dimensions"],
+                total_tokens=result.get("total_tokens", 0),
+                processing_time_ms=result.get("processing_time_ms", 0),
+                status="completed",
+                failed_indices=[],
+                metadata=payload.metadata
+            )
+            
+            return batch_result.model_dump()
+            
+        except Exception as e:
+            self._logger.error(f"Error en batch process: {e}", exc_info=True)
+            
+            # En caso de error, devolver resultado fallido
+            batch_result = EmbeddingBatchResult(
+                chunk_ids=payload.chunk_ids or [],
+                embeddings=[],
+                model=payload.model or "unknown",
+                dimensions=0,
+                total_tokens=0,
+                processing_time_ms=0,
+                status="failed",
+                failed_indices=list(range(len(payload.texts))),
+                metadata=payload.metadata
+            )
+            
+            return batch_result.model_dump()
     
     async def _track_metrics(self, action: DomainAction, response: Any):
         """
         Registra métricas del servicio.
-        
-        Args:
-            action: La acción procesada
-            response: La respuesta generada
         """
         if not self.direct_redis_conn or not self.app_settings.enable_embedding_tracking:
             return
@@ -367,9 +250,6 @@ class EmbeddingService(BaseService):
             
             # Incrementar contadores
             await self.direct_redis_conn.hincrby(metrics_key, "total_requests", 1)
-            
-            if hasattr(response, "total_tokens"):
-                await self.direct_redis_conn.hincrby(metrics_key, "total_tokens", response.total_tokens)
             
             # TTL de 7 días
             await self.direct_redis_conn.expire(metrics_key, 86400 * 7)

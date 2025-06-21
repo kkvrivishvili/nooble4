@@ -21,17 +21,19 @@ class ValidationHandler(BaseHandler):
     def __init__(self, app_settings, direct_redis_conn=None):
         """
         Inicializa el handler de validación.
-        
-        Args:
-            app_settings: EmbeddingServiceSettings
-            direct_redis_conn: Conexión Redis opcional
         """
         super().__init__(app_settings, direct_redis_conn)
         
         # Configurar límites básicos
         self.max_text_length = app_settings.default_max_text_length
         self.max_batch_size = app_settings.default_batch_size
-        self.valid_models = list(app_settings.default_models_by_provider.values())
+        
+        # Modelos válidos (valores string, no enums)
+        self.valid_models = [
+            "text-embedding-3-small",
+            "text-embedding-3-large", 
+            "text-embedding-ada-002"
+        ]
         
         self._logger.info("ValidationHandler inicializado")
     
@@ -46,7 +48,7 @@ class ValidationHandler(BaseHandler):
         
         Args:
             texts: Textos a validar
-            model: Modelo a usar
+            model: Modelo a usar (string)
             tenant_id: ID del tenant
             
         Returns:

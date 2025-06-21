@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from common.services import BaseService
 from common.models import DomainAction
 from common.errors.exceptions import InvalidActionError, ExternalServiceError, AppValidationError
-from common.models.chat_models import SimpleChatPayload, SimpleChatResponse
+from common.models.chat_models import ChatRequest, ChatResponse, RAGSearchResult
 
 from ..models import (
     ACTION_QUERY_SIMPLE,
@@ -102,8 +102,8 @@ class QueryService(BaseService):
     
     async def _handle_simple(self, action: DomainAction) -> Dict[str, Any]:
         """Maneja query.simple."""
-        # Validar y parsear payload
-        payload = SimpleChatPayload.model_validate(action.data)
+        # Validar y parsear payload como ChatRequest
+        payload = ChatRequest.model_validate(action.data)
         
         # Procesar con handler
         response = await self.simple_handler.process_simple_query(
@@ -117,3 +117,54 @@ class QueryService(BaseService):
         
         # Retornar respuesta serializada
         return response.model_dump()
+    
+    async def _handle_advance(self, action: DomainAction) -> Dict[str, Any]:
+        """Maneja query.advance."""
+        # Validar y parsear payload como ChatRequest
+        payload = ChatRequest.model_validate(action.data)
+        
+        # Procesar con handler
+        response = await self.advance_handler.process_advance_query(
+            payload=payload,
+            tenant_id=action.tenant_id,
+            session_id=action.session_id,
+            task_id=action.task_id,
+            trace_id=action.trace_id,
+            correlation_id=action.correlation_id
+        )
+        
+        # Retornar respuesta serializada
+        return response.model_dump()
+    
+    async def _handle_rag(self, action: DomainAction) -> Dict[str, Any]:
+        """Maneja query.rag para búsqueda RAG directa."""
+        # El payload para RAG es diferente: contiene query_text y rag_config
+        query_text = action.data.get("query_text")
+        rag_config_data = action.data.get("rag_config")
+        
+        if not query_text or not rag_config_data:
+            raise AppValidationError("query_text y rag_config son requeridos para query.rag")
+        
+        # Parsear RAGConfig
+        from common.models.chat_models import RAGConfig
+        rag_config = RAGConfig.model_validate(rag_config_data)
+        
+        # Permitir override de parámetros
+        top_k = action.data.get("top_k", rag_config.top_k)
+        similarity_threshold = action.data.get("similarity_threshold", rag_config.similarity_threshold)
+        
+        # Procesar con handler
+        result = await self.rag_handler.process_rag_search(
+            query_text=query_text,
+            rag_config=rag_config,
+            tenant_id=action.tenant_id,
+            session_id=action.session_id,
+            task_id=action.task_id,
+            trace_id=action.trace_id,
+            correlation_id=action.correlation_id,
+            top_k=top_k,
+            similarity_threshold=similarity_threshold
+        )
+        
+        # Retornar resultado serializado
+        return result.model_dump()
