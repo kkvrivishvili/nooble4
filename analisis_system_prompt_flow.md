@@ -4,7 +4,7 @@ Este documento describe el flujo de cómo se obtiene y utiliza el `system_prompt
 
 ## Resumen del Flujo
 
-El `system_prompt` es la pieza clave que define la personalidad y las instrucciones de un agente. Su obtención y aplicación es un proceso distribuido, donde la responsabilidad principal recae en el `query_service`.
+El `system_prompt` y el `historial de conversación` son las piezas clave que definen el contexto de un agente. Su obtención y aplicación es un proceso distribuido y orquestado entre el `agent_execution_service` y el `query_service`.
 
 El flujo general es el siguiente:
 
@@ -26,23 +26,31 @@ El flujo general es el siguiente:
     *   Construye el payload final para la API de Groq. Inserta el `system_prompt` como el primer mensaje en el array `messages` con el rol `"system"`.
     *   Envía la solicitud al LLM.
 
-## Diagrama del Flujo
+## Diagrama del Flujo Completo
 
 ```mermaid
 sequenceDiagram
     participant User
     participant AES as Agent Execution Service
+    participant Redis
     participant QS as Query Service
     participant AMS as Agent Management Service
     participant LLM as Groq API
+    participant CS as Conversation Service
 
     User->>+AES: /chat (agent_id, query)
+    AES->>+Redis: GET history (cache_key)
+    Redis-->>-AES: Devuelve historial (o nil)
     AES->>+QS: /query (agent_id, query, history)
     QS->>+AMS: GET /agents/{agent_id}
-    AMS-->>-QS: Devuelve config del agente (incl. system_prompt)
+    AMS-->>-QS: Devuelve config (system_prompt, etc.)
     QS->>+LLM: POST /chat/completions (system_prompt, history, query)
     LLM-->>-QS: Respuesta del modelo
     QS-->>-AES: Respuesta procesada
+    AES->>+Redis: SET history (actualizado)
+    Redis-->>-AES: OK
+    AES->>+CS: POST /conversations (para persistencia)
+    CS-->>-AES: OK
     AES-->>-User: Respuesta final
 ```
 

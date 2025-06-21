@@ -14,10 +14,14 @@ El flujo general es el siguiente:
     *   Intenta cargar el historial de la conversación desde la caché de Redis usando esta clave.
     *   Si existe un historial, se carga en memoria para la solicitud actual.
     *   Si no existe, se determina el `conversation_id`. Si es una conversación existente (pasada en el historial), se usa ese ID. Si es una conversación nueva, se genera un nuevo `conversation_id` (UUIDv4).
-3.  **Preparación de la Consulta:**
-    *   Se construye el prompt que se enviará al LLM. **(Suposición)** Se asume que si se cargó un historial de conversación, este se formatea y se combina con el `system_prompt` del agente y la nueva pregunta del usuario para dar contexto al LLM.
+3.  **Preparación de la Llamada al `query_service`:**
+    *   El `agent_execution_service` **no construye el prompt final**. Su responsabilidad se limita a recopilar los datos necesarios.
+    *   Recupera el historial de conversación de la caché de Redis.
+    *   Identifica el `agent_id` de la solicitud.
+
 4.  **Llamada al `query_service`:**
-    *   El `agent_execution_service` envía la consulta preparada al `query_service` a través de un cliente HTTP (`QueryClient`).
+    *   El `agent_execution_service` envía el `agent_id`, el historial de conversación recuperado (si existe) y la nueva pregunta del usuario al `query_service`. No envía un "prompt preparado", sino los componentes para que el `query_service` lo ensamble.
+    *   Para una visión más detallada de cómo el `query_service` maneja esta información, consulte el documento `analisis_system_prompt_flow.md`.
     *   La llamada es a `query_simple` o `query_advance` dependiendo del tipo de chat.
 5.  **Procesamiento en `query_service`:**
     *   **_Suposición:_** El `query_service` recibe la solicitud, la procesa y la envía al proveedor de LLM configurado (por ejemplo, Groq).
