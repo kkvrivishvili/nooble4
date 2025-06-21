@@ -26,26 +26,47 @@ class ConversationHandler:
         start_time = time.time()
         
         try:
-            save_action = SaveMessageAction.parse_obj(action.dict())
+            # TODOS los IDs vienen del header del DomainAction
+            tenant_id = action.tenant_id
+            session_id = action.session_id
+            agent_id = action.agent_id or "default-agent"  # CORREGIDO: del header, no de metadata
+            user_id = action.user_id
             
-            # Enriquecer con datos de contexto si está disponible
-            tenant_tier = None
-            if context:
-                tenant_tier = context.tenant_tier
-                logger.info(f"Guardando mensaje con contexto. Tier: {tenant_tier}")
-                
+            # Solo el contenido viene del payload
+            conversation_id = action.data.get("conversation_id")
+            message_id = action.data.get("message_id")
+            user_message = action.data.get("user_message")
+            agent_message = action.data.get("agent_message")
+            metadata = action.data.get("metadata", {})
+            
+            # Guardar mensaje del usuario
             result = await self.conversation_service.save_message(
-                tenant_id=save_action.tenant_id,
-                session_id=save_action.session_id,
-                role=save_action.role,
-                content=save_action.content,
-                agent_id=save_action.agent_id,
-                model_name=save_action.model_name,
-                user_id=save_action.user_id,
-                tokens_estimate=save_action.tokens_estimate,
-                metadata=save_action.metadata,
-                tenant_tier=tenant_tier
+                tenant_id=tenant_id,
+                session_id=session_id,
+                role="user",
+                content=user_message,
+                agent_id=agent_id,  # Del header
+                model_name=metadata.get("model", "llama3-8b-8192"),
+                user_id=user_id,  # Del header
+                tokens_estimate=None,
+                metadata=metadata,
+                tenant_tier=context.tenant_tier if context else "free"
             )
+            
+            # Guardar mensaje del asistente también
+            if agent_message:
+                await self.conversation_service.save_message(
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    role="assistant",
+                    content=agent_message,
+                    agent_id=agent_id,  # Del header
+                    model_name=metadata.get("model", "llama3-8b-8192"),
+                    user_id=user_id,  # Del header
+                    tokens_estimate=metadata.get("token_usage", {}).get("completion_tokens"),
+                    metadata=metadata,
+                    tenant_tier=context.tenant_tier if context else "free"
+                )
             
             result["execution_time"] = time.time() - start_time
             return result
@@ -63,18 +84,18 @@ class ConversationHandler:
         start_time = time.time()
         
         try:
-            context_action = GetContextAction.parse_obj(action.dict())
+            # No usar parse_obj, usar los datos directamente del DomainAction
             
             # Usar tenant_tier desde ExecutionContext si está disponible
-            tenant_tier = context_action.tenant_tier
+            tenant_tier = "free"
             if context and context.tenant_tier:
                 tenant_tier = context.tenant_tier
                 logger.info(f"Obteniendo contexto con tier desde ExecutionContext: {tenant_tier}")
             
             conversation_context = await self.conversation_service.get_context_for_query(
-                tenant_id=context_action.tenant_id,
-                session_id=context_action.session_id,
-                model_name=context_action.model_name,
+                tenant_id=action.tenant_id,  # Del header
+                session_id=action.session_id,  # Del header
+                model_name=action.data.get("model_name", "llama3-8b-8192"),  # Del payload
                 tenant_tier=tenant_tier
             )
             
@@ -97,18 +118,23 @@ class ConversationHandler:
         start_time = time.time()
         
         try:
-            close_action = SessionClosedAction.parse_obj(action.dict())
+            # Usar datos del header directamente
+            session_id = action.session_id
+            tenant_id = action.tenant_id
             
             # Usar datos de contexto si está disponible
             if context:
                 logger.info(f"Cerrando sesión con contexto de tier: {context.tenant_tier}")
             
-            # TODO: Implementar lógica de cierre
-            logger.info(f"Cerrando sesión: {close_action.session_id}")
+            # Marcar sesión como cerrada para migración
+            closed = await self.conversation_service.mark_session_closed(
+                session_id=session_id,
+                tenant_id=tenant_id
+            )
             
             return {
-                "success": True,
-                "message": "Sesión cerrada correctamente",
+                "success": closed,
+                "message": "Sesión marcada para migración" if closed else "Sesión no encontrada",
                 "execution_time": time.time() - start_time
             }
             
@@ -136,8 +162,14 @@ class ConversationHandler:
         start_time = time.time()
         
         try:
-            history_action = GetHistoryAction.parse_obj(action.dict())
-            correlation_id = history_action.correlation_id
+            # Usar datos del header y payload directamente
+            tenant_id = action.tenant_id
+            session_id = action.session_id
+            correlation_id = action.correlation_id
+            
+            # Datos del payload
+            limit = action.data.get("limit", 10)
+            include_system = action.data.get("include_system", False)
             
             # Enriquecer con datos de contexto si está disponible
             tenant_tier = None
@@ -147,10 +179,10 @@ class ConversationHandler:
             
             # Obtener historial de conversación
             messages = await self.conversation_service.get_conversation_history(
-                tenant_id=history_action.tenant_id,
-                session_id=history_action.session_id,
-                limit=history_action.limit,
-                include_system=history_action.include_system
+                tenant_id=tenant_id,
+                session_id=session_id,
+                limit=limit,
+                include_system=include_system
             )
             
             result = {
@@ -158,7 +190,7 @@ class ConversationHandler:
                 "data": {
                     "messages": messages
                 },
-                "correlation_id": correlation_id,
+                "correlation_id": str(correlation_id) if correlation_id else None,
                 "execution_time": time.time() - start_time
             }
             
@@ -169,6 +201,6 @@ class ConversationHandler:
             return {
                 "success": False,
                 "error": str(e),
-                "correlation_id": action.correlation_id if hasattr(action, 'correlation_id') else None,
+                "correlation_id": str(action.correlation_id) if action.correlation_id else None,
                 "execution_time": time.time() - start_time
             }

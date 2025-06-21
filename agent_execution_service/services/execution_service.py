@@ -11,7 +11,7 @@ from common.errors.exceptions import InvalidActionError, ExternalServiceError
 from common.clients.base_redis_client import BaseRedisClient
 from common.models.chat_models import ChatRequest, ChatResponse
 
-from ..config.settings import ExecutionServiceSettings
+from common.config.service_settings.agent_execution import ExecutionServiceSettings
 from ..clients.query_client import QueryClient
 from ..clients.conversation_client import ConversationClient
 from ..handlers.simple_chat_handler import SimpleChatHandler
@@ -53,14 +53,16 @@ class ExecutionService(BaseService):
         self.simple_handler = SimpleChatHandler(
             query_client=self.query_client,
             conversation_client=self.conversation_client,
-            settings=app_settings
+            settings=app_settings,
+            redis_conn=direct_redis_conn  
         )
         
         self.advance_handler = AdvanceChatHandler(
             query_client=self.query_client,
             conversation_client=self.conversation_client,
             tool_registry=self.tool_registry,
-            settings=app_settings
+            settings=app_settings,
+            redis_conn=direct_redis_conn  
         )
 
     async def process_action(self, action: DomainAction) -> Optional[Dict[str, Any]]:
@@ -116,7 +118,8 @@ class ExecutionService(BaseService):
                 payload=action.data,  # Pasamos el dict directamente
                 tenant_id=action.tenant_id,
                 session_id=action.session_id,
-                task_id=action.task_id
+                task_id=action.task_id,
+                agent_id=action.agent_id
             )
             
             return response.model_dump()
@@ -136,7 +139,8 @@ class ExecutionService(BaseService):
                 payload=action.data,  # Pasamos el dict directamente
                 tenant_id=action.tenant_id,
                 session_id=action.session_id,
-                task_id=action.task_id
+                task_id=action.task_id,
+                agent_id=action.agent_id
             )
             
             return response.model_dump()

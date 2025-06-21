@@ -9,7 +9,7 @@ from typing import Optional, List, Dict, Any
 from common.models.actions import DomainAction
 from common.errors.exceptions import ExternalServiceError
 from common.clients.base_redis_client import BaseRedisClient
-from ..config.settings import ExecutionServiceSettings
+from common.config.service_settings.agent_execution import ExecutionServiceSettings
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,7 @@ class QueryClient:
         tenant_id: str,
         session_id: str,
         task_id: uuid.UUID,
+        agent_id: Optional[str] = None, 
         timeout: Optional[int] = None
     ) -> Dict[str, Any]:
         """
@@ -61,6 +62,7 @@ class QueryClient:
             tenant_id=tenant_id,
             session_id=session_id,
             task_id=task_id,
+            agent_id=agent_id,
             origin_service=self.redis_client.service_name,
             data=payload  # Ya no necesita transformación
         )
@@ -97,6 +99,7 @@ class QueryClient:
         tenant_id: str,
         session_id: str,
         task_id: uuid.UUID,
+        agent_id: Optional[str] = None, 
         timeout: Optional[int] = None
     ) -> Dict[str, Any]:
         """
@@ -109,6 +112,7 @@ class QueryClient:
             tenant_id=tenant_id,
             session_id=session_id,
             task_id=task_id,
+            agent_id=agent_id,  # NUEVO: incluir en el header
             origin_service=self.redis_client.service_name,
             data=payload
         )

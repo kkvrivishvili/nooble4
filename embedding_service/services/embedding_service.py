@@ -127,6 +127,7 @@ class EmbeddingService(BaseService):
             dimensions=payload.dimensions,
             encoding_format=payload.encoding_format,
             tenant_id=action.tenant_id,
+            agent_id=action.agent_id,
             trace_id=action.trace_id
         )
         
@@ -164,6 +165,7 @@ class EmbeddingService(BaseService):
             dimensions=payload.dimensions,
             encoding_format=payload.encoding_format,
             tenant_id=action.tenant_id,
+            agent_id=action.agent_id,
             trace_id=action.trace_id
         )
         
@@ -198,6 +200,7 @@ class EmbeddingService(BaseService):
                 model=model,
                 dimensions=payload.dimensions,
                 tenant_id=action.tenant_id,
+                agent_id=action.agent_id,
                 trace_id=action.trace_id
             )
             

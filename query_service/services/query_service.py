@@ -112,6 +112,7 @@ class QueryService(BaseService):
             session_id=action.session_id,
             task_id=action.task_id,
             trace_id=action.trace_id,
+            agent_id=action.agent_id,
             correlation_id=action.correlation_id
         )
         
@@ -162,6 +163,7 @@ class QueryService(BaseService):
             task_id=action.task_id,
             trace_id=action.trace_id,
             correlation_id=action.correlation_id,
+            agent_id=action.agent_id,
             top_k=top_k,
             similarity_threshold=similarity_threshold
         )

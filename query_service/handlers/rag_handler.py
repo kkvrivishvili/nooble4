@@ -55,6 +55,7 @@ class RAGHandler(BaseHandler):
         task_id: UUID,
         trace_id: UUID,
         correlation_id: UUID,
+        agent_id: Optional[str] = None,
         top_k: Optional[int] = None,
         similarity_threshold: Optional[float] = None
     ) -> RAGSearchResult:
@@ -88,7 +89,8 @@ class RAGHandler(BaseHandler):
                 tenant_id=tenant_id,
                 session_id=session_id,
                 task_id=task_id,
-                trace_id=trace_id
+                trace_id=trace_id,
+                agent_id=agent_id
             )
             
             # 2. Buscar en vector store
@@ -132,7 +134,8 @@ class RAGHandler(BaseHandler):
         tenant_id: str,
         session_id: str,
         task_id: UUID,
-        trace_id: UUID
+        trace_id: UUID,
+        agent_id: Optional[str] = None,
     ) -> List[float]:
         """Obtiene el embedding usando el Embedding Service."""
         response = await self.embedding_client.request_query_embedding(
@@ -141,6 +144,7 @@ class RAGHandler(BaseHandler):
             session_id=session_id,
             task_id=task_id,
             trace_id=trace_id,
+            agent_id=agent_id,
             model=embedding_request.model.value  # Usar el valor del enum
         )
         

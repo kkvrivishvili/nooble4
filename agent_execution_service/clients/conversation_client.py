@@ -48,10 +48,12 @@ class ConversationClient:
         tenant_id: str,
         session_id: str,
         task_id: uuid.UUID,
+        agent_id: Optional[str] = None,  # NUEVO parámetro
         metadata: Optional[dict] = None
     ) -> None:
         """
         Guarda una conversación en el Conversation Service (fire-and-forget).
+        El agent_id viene en metadata.
         
         Args:
             conversation_id: ID único de la conversación
@@ -61,7 +63,7 @@ class ConversationClient:
             tenant_id: ID del tenant
             session_id: ID de la sesión
             task_id: ID de la tarea
-            metadata: Metadata adicional opcional
+            metadata: Metadata adicional (incluye agent_id)
         """
         payload = {
             "conversation_id": conversation_id,
@@ -79,6 +81,7 @@ class ConversationClient:
             tenant_id=tenant_id,
             session_id=session_id,
             task_id=task_id,
+            agent_id=agent_id,
             origin_service=self.redis_client.service_name,
             data=payload
         )

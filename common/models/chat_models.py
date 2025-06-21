@@ -173,3 +173,38 @@ class EmbeddingResponse(BaseModel):
     usage: TokenUsage = Field(..., description="Uso de tokens")
     
     model_config = {"extra": "forbid"}
+
+# =============================================================================
+# CONVERSATION HISTORY
+# =============================================================================
+
+class ConversationHistory(BaseModel):
+    """
+    Historial de conversación compatible con OpenAI/Groq.
+    Mantiene máximo 5 mensajes para optimizar tokens.
+    """
+    conversation_id: str = Field(..., description="ID único de la conversación")
+    tenant_id: str = Field(..., description="ID del tenant")
+    session_id: str = Field(..., description="ID de la sesión")
+    agent_id: str = Field(..., description="ID del agente")
+    messages: List[ChatMessage] = Field(
+        default_factory=list, 
+        description="Mensajes de la conversación (máximo 5)"
+    )
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    total_messages: int = Field(default=0, description="Contador total de mensajes")
+    
+    def add_message(self, message: ChatMessage) -> None:
+        """Agrega mensaje manteniendo máximo 5."""
+        self.messages.append(message)
+        self.total_messages += 1
+        if len(self.messages) > 5:
+            self.messages.pop(0)  # Eliminar el más antiguo
+        self.updated_at = datetime.now(timezone.utc)
+    
+    def to_chat_messages(self) -> List[ChatMessage]:
+        """Retorna los mensajes en formato listo para ChatRequest."""
+        return self.messages.copy()
+    
+    model_config = {"extra": "forbid"}

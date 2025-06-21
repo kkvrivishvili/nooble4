@@ -29,6 +29,7 @@ class DomainAction(BaseModel):
     session_id: str = Field(..., description="Identificador de la sesión de usuario o conversación. Agrupa varias tareas (task_id) dentro de una interacción continua.")
     task_id: uuid.UUID = Field(..., description="Identificador único universal (UUID) para una tarea de alto nivel iniciada por el usuario o sistema (ej. una petición de chat completa). Agrupa múltiples action_id y correlation_id internos.")
     user_id: Optional[str] = Field(None, description="Identificador del usuario que originó la acción, si aplica (ej. no presente para acciones de sistema).")
+    agent_id: Optional[str] = Field(None, description="Identificador del agente que procesa o está asociado con esta acción.")  # NUEVO
     
     # --- Información de Origen y Seguimiento ---
     origin_service: str = Field(..., description="Nombre del servicio que emite/origina esta acción. Ej: 'orchestrator-service', 'api-gateway'.")

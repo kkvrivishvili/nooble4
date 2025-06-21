@@ -10,7 +10,7 @@ from common.config.base_settings import CommonAppSettings
 import redis.asyncio as redis_async
 
 from ..services.execution_service import ExecutionService
-from ..config.settings import ExecutionServiceSettings
+from common.config.service_settings.agent_execution import ExecutionServiceSettings
 
 logger = logging.getLogger(__name__)
 

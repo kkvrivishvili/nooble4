@@ -50,7 +50,8 @@ class SimpleHandler(BaseHandler):
         session_id: str,
         task_id: UUID,
         trace_id: UUID,
-        correlation_id: UUID
+        correlation_id: UUID,
+        agent_id: Optional[str] = None,
     ) -> ChatResponse:
         """Procesa una consulta simple con RAG automático."""
         start_time = time.time()
@@ -94,7 +95,8 @@ class SimpleHandler(BaseHandler):
                     tenant_id=tenant_id,
                     session_id=session_id,
                     task_id=task_id,
-                    trace_id=trace_id
+                    trace_id=trace_id,
+                    agent_id=agent_id
                 )
                 
                 # 2. Buscar en vector store
@@ -179,7 +181,8 @@ class SimpleHandler(BaseHandler):
         tenant_id: str,
         session_id: str,
         task_id: UUID,
-        trace_id: UUID
+        trace_id: UUID,
+        agent_id: Optional[str] = None,
     ) -> List[float]:
         """Obtiene el embedding de la consulta usando el Embedding Service."""
         # Usar el embedding client para obtener el embedding
@@ -189,6 +192,7 @@ class SimpleHandler(BaseHandler):
             session_id=session_id,
             task_id=task_id,
             trace_id=trace_id,
+            agent_id=agent_id,
             model=embedding_request.model.value  # Usar el valor del enum
         )
         

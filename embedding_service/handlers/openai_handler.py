@@ -54,6 +54,7 @@ class OpenAIHandler(BaseHandler):
         dimensions: Optional[int] = None,
         encoding_format: Optional[str] = None,
         tenant_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
         trace_id: Optional[UUID] = None
     ) -> Dict[str, Any]:
         """
@@ -102,6 +103,7 @@ class OpenAIHandler(BaseHandler):
                 f"Embeddings generados exitosamente en {result.get('processing_time_ms')}ms",
                 extra={
                     "tenant_id": tenant_id,
+                    "agent_id": agent_id,
                     "model": model,
                     "text_count": len(texts),
                     "total_tokens": result.get("total_tokens", 0),
