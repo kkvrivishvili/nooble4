@@ -1,0 +1,4 @@
+/* Default theme label variations */
+@import './default/primary.css';
+@import './default/secondary.css';
+@import './default/ghost.css'; 

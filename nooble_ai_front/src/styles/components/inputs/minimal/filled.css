@@ -1,0 +1,6 @@
+:root[data-theme="minimal"] [data-input-variant="filled"] {
+  --input-bg: hsl(var(--muted));
+  --input-border: transparent;
+  --input-ring: hsl(var(--ring));
+  border: none;
+} 

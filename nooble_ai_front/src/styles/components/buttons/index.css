@@ -1,0 +1,8 @@
+/* Import base styles first */
+@import './_base.css';
+
+/* Import theme files that collect their variations */
+@import './default.css';
+@import './ios.css';
+@import './minimal.css';
+

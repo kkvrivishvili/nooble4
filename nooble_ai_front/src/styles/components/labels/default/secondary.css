@@ -1,0 +1,4 @@
+:root[data-theme="default"] [data-label-variant="secondary"] {
+  color: var(--label-color-secondary);
+  font-weight: var(--label-font-weight);
+}

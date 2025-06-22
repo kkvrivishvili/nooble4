@@ -1,0 +1,4 @@
+/* Minimal theme label variations */
+@import './minimal/primary.css';
+@import './minimal/secondary.css';
+@import './minimal/ghost.css';

@@ -1,0 +1,19 @@
+/* Base Textarea variables */
+:root {
+  --textarea-radius: var(--radius-sm);
+  --textarea-border: hsl(var(--border));
+  --textarea-bg: hsl(var(--background));
+  --textarea-padding: 0.75rem;
+  --textarea-min-height: 5rem;
+}
+
+:root[data-theme="ios"] {
+  --textarea-radius: var(--radius-lg);
+  --textarea-shadow: var(--shadow-md);
+}
+
+:root[data-theme="minimal"] {
+  --textarea-radius: 0;
+  --textarea-shadow: none;
+  --textarea-border-width: 1px;
+} 

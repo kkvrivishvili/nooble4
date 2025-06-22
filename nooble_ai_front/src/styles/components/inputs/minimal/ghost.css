@@ -1,0 +1,6 @@
+:root[data-theme="minimal"] [data-input-variant="ghost"] {
+  --input-bg: transparent;
+  --input-border: transparent;
+  --input-ring: hsl(var(--ring));
+  border: none;
+} 

@@ -1,0 +1,15 @@
+[data-tooltip-variant="primary"] {
+  background-color: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  border: 1px solid hsl(var(--border));
+}
+
+[data-tooltip-variant="destructive"] {
+  background-color: hsl(var(--destructive));
+  color: hsl(var(--destructive-foreground));
+}
+
+[data-tooltip-variant="warning"] {
+  background-color: hsl(var(--warning));
+  color: hsl(var(--warning-foreground));
+} 

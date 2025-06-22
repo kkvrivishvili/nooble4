@@ -1,0 +1,25 @@
+/* Minimal theme primary button */
+:root[data-theme="minimal"] [data-button-variant="primary"] {
+  /* Base styles */
+  --button-radius: 0;
+  --button-border: 1px solid hsl(var(--primary));
+  --button-shadow: none;
+  background: transparent;
+  color: hsl(var(--primary));
+  border: var(--button-border);
+  border-radius: var(--button-radius);
+  box-shadow: var(--button-shadow);
+  transition: all 0.2s;
+  
+  /* Hover state */
+  &:hover:not(:disabled) {
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+  }
+  
+  /* Disabled state */
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+} 

@@ -1,0 +1,23 @@
+:root[data-theme="default"] [data-alertdialog-variant="destructive"] {
+  /* Visual styles only */
+  background: hsl(var(--background));
+  border-radius: 16px;
+  box-shadow: 0 2px 8px hsl(var(--foreground)/0.08);
+  border: 1px solid var(--border);
+
+  /* Title visual styles */
+  [data-alertdialog-title] {
+    font-weight: 600;
+    color: hsl(var(--foreground));
+  }
+  
+  /* Description visual styles */
+  [data-alertdialog-description] {
+    color: hsl(var(--muted-foreground));
+  }
+  
+  /* Footer visual styles */
+  [data-alertdialog-footer] {
+    border-top: 1px solid hsl(var(--border));
+  }
+} 

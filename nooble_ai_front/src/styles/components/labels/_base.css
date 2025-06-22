@@ -1,0 +1,37 @@
+/* Base Label variables */
+:root {
+  /* Core variables */
+  --label-font-size: 0.875rem;
+  --label-line-height: 1;
+  --label-margin-bottom: 0.5rem;
+  
+  /* Font weights */
+  --label-font-weight-light: 300;
+  --label-font-weight-normal: 400;
+  --label-font-weight-medium: 500;
+  --label-font-weight-semibold: 600;
+  
+  /* Colors for variants */
+  --label-color-primary: hsl(var(--foreground));
+  --label-color-secondary: hsl(var(--muted-foreground));
+  --label-color-ghost: hsl(var(--muted-foreground) / 0.8);
+  
+  /* Default theme settings */
+  --label-font-weight: var(--label-font-weight-medium);
+  --label-letter-spacing: 0;
+  --label-text-transform: none;
+}
+
+/* iOS theme overrides */
+:root[data-theme="ios"] {
+  --label-font-weight: var(--label-font-weight-semibold);
+  --label-letter-spacing: -0.01em;
+}
+
+/* Minimal theme overrides */
+:root[data-theme="minimal"] {
+  --label-font-size: 0.75rem;
+  --label-font-weight: var(--label-font-weight-normal);
+  --label-text-transform: uppercase;
+  --label-letter-spacing: 0.05em;
+} 

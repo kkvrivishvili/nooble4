@@ -1,0 +1,18 @@
+/* Base SlugInput variables */
+:root {
+  --sluginput-radius: var(--radius-sm);
+  --sluginput-border: hsl(var(--border));
+  --sluginput-bg: hsl(var(--muted));
+  --sluginput-prefix-color: hsl(var(--muted-foreground));
+  --sluginput-height: 2.5rem;
+}
+
+:root[data-theme="ios"] {
+  --sluginput-radius: var(--radius-lg);
+  --sluginput-shadow: var(--shadow-sm);
+}
+
+:root[data-theme="minimal"] {
+  --sluginput-radius: 0;
+  --sluginput-border-width: 1px;
+} 

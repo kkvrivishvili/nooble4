@@ -1,0 +1,16 @@
+/* Base Divider variables */
+:root {
+  --divider-color: hsl(var(--border));
+  --divider-thickness: 1px;
+  --divider-margin: 1rem;
+}
+
+:root[data-theme="ios"] {
+  --divider-thickness: 0.5px;
+  --divider-opacity: 0.2;
+}
+
+:root[data-theme="minimal"] {
+  --divider-style: dashed;
+  --divider-margin: 2rem;
+} 

@@ -1,0 +1,25 @@
+:root[data-theme="minimal"] [data-checkbox-variant="filled"] {
+  /* Base styles */
+  background: hsl(var(--muted));
+  border: none;
+  border-radius: 0;
+  
+  /* Transitions */
+  transition: all 0.2s ease;
+  
+  /* Hover state */
+  &:hover:not(:disabled) {
+    background: hsl(var(--muted-foreground/0.1));
+  }
+  
+  /* Checked state */
+  &:checked {
+    background: hsl(var(--primary));
+  }
+  
+  /* Focus state */
+  &:focus-visible {
+    outline: 1px solid hsl(var(--ring));
+    outline-offset: 1px;
+  }
+} 

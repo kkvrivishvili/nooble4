@@ -1,0 +1,13 @@
+[data-tooltip-variant] {
+  --tooltip-radius: var(--radius-md);
+  --tooltip-shadow: var(--shadow-sm);
+  --tooltip-padding: 0.5rem 0.75rem;
+}
+
+[data-tooltip-variant] {
+  padding: var(--tooltip-padding);
+  border-radius: var(--tooltip-radius);
+  box-shadow: var(--tooltip-shadow);
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+} 

@@ -1,0 +1,45 @@
+/* Default theme destructive button */
+:root[data-theme="default"] [data-button-variant="destructive"] {
+  /* Base styles */
+  background: #EF4444;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 0.375rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  
+  /* Remove fixed height/padding */
+  font-weight: 500;
+  
+  /* Transitions */
+  transition: all 0.2s ease;
+  
+  /* Hover state */
+  &:hover:not(:disabled) {
+    background: #DC2626;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+  
+  /* Active/Pressed state */
+  &:active {
+    background: #B91C1C;
+    transform: translateY(0);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  }
+
+  /* Disabled state */
+  &:disabled {
+    background: #FCA5A5;
+    color: #FFFFFF;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+    opacity: 0.7;
+  }
+
+  /* Focus state */
+  &:focus-visible {
+    outline: 2px solid #EF4444;
+    outline-offset: 2px;
+  }
+}

@@ -1,0 +1,5 @@
+:root[data-theme="ios"] [data-label-variant="primary"] {
+  color: var(--label-color-primary);
+  font-weight: 600; /* iOS typically uses semibold for primary labels */
+  letter-spacing: -0.01em; /* Slight negative tracking for iOS */
+}

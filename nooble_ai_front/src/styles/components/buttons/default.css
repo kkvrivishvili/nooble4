@@ -1,0 +1,7 @@
+/* Default theme button variations */
+@import './default/primary.css';
+@import './default/secondary.css';
+@import './default/ghost.css';
+@import './default/destructive.css';
+@import './default/outline.css'; 
+@import './default/glass.css';

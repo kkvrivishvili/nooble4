@@ -1,0 +1,34 @@
+:root[data-theme="minimal"].dark {
+  --background: 0 0% 7%;       /* Deep minimal black */
+  --foreground: 0 0% 98%;
+  
+  --card: 0 0% 9%;            /* Slightly elevated surfaces */
+  --card-foreground: 0 0% 98%;
+  
+  --popover: 0 0% 9%;
+  --popover-foreground: 0 0% 98%;
+  
+  --primary: 0 0% 98%;        /* White primary */
+  --primary-foreground: 0 0% 7%;
+  
+  --secondary: 0 0% 60%;      /* Light gray */
+  --secondary-foreground: 0 0% 7%;
+  
+  --muted: 0 0% 15%;
+  --muted-foreground: 0 0% 60%;
+  
+  --accent: 0 0% 80%;        /* Light gray accent */
+  --accent-foreground: 0 0% 7%;
+  
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 98%;
+  
+  --border: 0 0% 15%;        /* Subtle borders */
+  --input: 0 0% 15%;
+  --ring: 0 0% 80%;
+
+  /* Minimal specific overrides */
+  --shadow-sm: 0 1px 1px rgba(0,0,0,0.1);  /* Even subtler shadows for dark */
+  --shadow-md: 0 2px 4px rgba(0,0,0,0.1);
+  --shadow-lg: 0 4px 6px rgba(0,0,0,0.1);
+}

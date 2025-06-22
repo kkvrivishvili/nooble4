@@ -1,0 +1,43 @@
+/* Default theme ghost button */
+:root[data-theme="default"] [data-button-variant="ghost"] {
+  /* Base styles */
+  background: transparent;
+  color: #6B7280;
+  border: none;
+  border-radius: 0.375rem;
+  box-shadow: none;
+  
+  /* Remove fixed height/padding */
+  font-weight: 500;
+  
+  /* Transitions */
+  transition: all 0.2s ease;
+  
+  /* Hover state */
+  &:hover:not(:disabled) {
+    background: rgba(107, 114, 128, 0.1);
+    color: #4B5563;
+    transform: translateY(-1px);
+  }
+  
+  /* Active/Pressed state */
+  &:active {
+    background: rgba(107, 114, 128, 0.2);
+    color: #374151;
+    transform: translateY(0);
+  }
+
+  /* Disabled state */
+  &:disabled {
+    background: transparent;
+    color: #D1D5DB;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  /* Focus state */
+  &:focus-visible {
+    outline: 2px solid #6B7280;
+    outline-offset: 2px;
+  }
+}

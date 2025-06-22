@@ -1,0 +1,4 @@
+/* Default theme input variations */
+@import './default/primary.css';
+@import './default/filled.css';
+@import './default/ghost.css'; 

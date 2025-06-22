@@ -1,0 +1,31 @@
+:root[data-theme="default"].dark {
+  --background: 222 47% 11%;    /* #0F172A - Slate 950 for that blue-black look */
+  --foreground: 0 0% 98%;
+  
+  --card: 222 47% 9%;          /* Slightly darker for cards */
+  --card-foreground: 0 0% 98%;
+  
+  --popover: 222 47% 9%;
+  --popover-foreground: 0 0% 98%;
+  
+  --primary: 217 91% 60%;     /* #3B82F6 Primary Blue */
+  --primary-foreground: 0 0% 100%;
+  
+  --secondary: 220 14% 46%;   /* #6B7280 Neutral Gray */
+  --secondary-foreground: 0 0% 100%;
+  
+  --muted: 215 25% 27%;      /* Darker variant of neutral gray */
+  --muted-foreground: 220 9% 46%;
+  
+  --accent: 43 96% 56%;      /* #FACC15 Yellow Accent */
+  --accent-foreground: 222 47% 11%;
+  
+  --destructive: 0 84% 60%;  /* #EF4444 Red Accent */
+  --destructive-foreground: 0 0% 100%;
+  
+  --success: 158 64% 52%;    /* #10B981 Green Accent */
+  
+  --border: 215 25% 27%;
+  --input: 215 25% 27%;
+  --ring: 217 91% 60%;       /* Same as primary */
+}

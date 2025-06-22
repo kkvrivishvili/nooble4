@@ -1,0 +1,5 @@
+:root[data-theme="default"] [data-input-variant="primary"] {
+  --input-bg: hsl(var(--background));
+  --input-border: hsl(var(--border));
+  --input-ring: hsl(var(--ring));
+} 

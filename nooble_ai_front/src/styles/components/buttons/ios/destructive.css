@@ -1,0 +1,37 @@
+/* iOS theme destructive button */
+:root[data-theme="ios"] [data-button-variant="destructive"] {
+  /* Base styles */
+  --button-destructive-bg: #FF3B30;
+  --button-destructive-text: #FFFFFF;
+  --button-destructive-hover: #FF1F1F;
+  --button-destructive-active: #D63030;
+  --button-destructive-shadow: 0 2px 8px rgba(255, 59, 48, 0.4);
+
+  /* Apply styles */
+  background-color: var(--button-destructive-bg);
+  color: var(--button-destructive-text);
+  box-shadow: var(--button-destructive-shadow);
+  font-weight: 500;
+  transition: all 0.2s ease-in-out;
+  border-radius: 0.75rem;
+
+  /* Hover state */
+  &:hover:not(:disabled) {
+    background-color: var(--button-destructive-hover);
+    box-shadow: 0 4px 12px rgba(255, 59, 48, 0.5);
+  }
+
+  /* Active/Pressed state */
+  &:active:not(:disabled) {
+    background-color: var(--button-destructive-active);
+    transform: scale(0.98);
+    box-shadow: 0 1px 4px rgba(255, 59, 48, 0.4);
+  }
+
+  /* Disabled state */
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    box-shadow: none;
+  }
+}

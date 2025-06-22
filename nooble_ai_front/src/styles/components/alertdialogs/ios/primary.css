@@ -1,0 +1,27 @@
+[data-theme="ios"] [data-alertdialog-variant="primary"] {
+  /* Visual styles only */
+  background: hsl(var(--background)/0.8);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-xl);
+  backdrop-filter: blur(8px);
+  border: none;
+
+  /* Title visual styles */
+  [data-alertdialog-title] {
+    font-weight: 600;
+    color: hsl(var(--foreground));
+    text-align: center;
+  }
+  
+  /* Description visual styles */
+  [data-alertdialog-description] {
+    color: hsl(var(--muted-foreground));
+    text-align: center;
+  }
+  
+  /* Footer visual styles */
+  [data-alertdialog-footer] {
+    border-top: 1px solid hsl(var(--border));
+    justify-content: center;
+  }
+} 

@@ -1,0 +1,25 @@
+/* Minimal theme glass button */
+:root[data-theme="minimal"] [data-button-variant="glass"] {
+  /* Base styles */
+  --button-radius: 0;
+  --button-shadow: none;
+  background: transparent;
+  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--button-radius);
+  box-shadow: var(--button-shadow);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  
+  /* Hover state */
+  &:hover:not(:disabled) {
+    background: hsla(var(--muted) / 0.1);
+    border-color: hsl(var(--border));
+  }
+  
+  /* Disabled state */
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}

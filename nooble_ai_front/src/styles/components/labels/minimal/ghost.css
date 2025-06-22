@@ -1,0 +1,5 @@
+:root[data-theme="minimal"] [data-label-variant="ghost"] {
+  color: var(--label-color-ghost);
+  font-weight: 300; /* Even lighter for ghost variant */
+  letter-spacing: 0.02em;
+}

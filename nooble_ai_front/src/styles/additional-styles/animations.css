@@ -1,0 +1,26 @@
+@media screen {
+  html:not(.no-js) body [data-aos="fade-up"] {
+    transform: translate3d(0, 10px, 0);
+  }
+
+  html:not(.no-js) body [data-aos="fade-down"] {
+    transform: translate3d(0, -10px, 0);
+  }
+
+  html:not(.no-js) body [data-aos="fade-right"] {
+    transform: translate3d(-10px, 0, 0);
+  }
+
+  html:not(.no-js) body [data-aos="fade-left"] {
+    transform: translate3d(10px, 0, 0);
+  }
+
+  /* Add more animations as needed */
+  html:not(.no-js) body [data-aos="zoom-in-up"] {
+    transform: translate3d(0, 10px, 0) scale(0.6);
+  }
+
+  html:not(.no-js) body [data-aos="zoom-out-up"] {
+    transform: translate3d(0, 10px, 0) scale(1.2);
+  }
+} 

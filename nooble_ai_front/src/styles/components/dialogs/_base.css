@@ -1,0 +1,20 @@
+/* Base Dialog variables */
+:root {
+  --dialog-radius: var(--radius-md);
+  --dialog-shadow: var(--shadow-lg);
+  --dialog-width: 32rem;
+  --dialog-bg: hsl(var(--background));
+  --dialog-border: hsl(var(--border));
+  --dialog-overlay: rgba(0, 0, 0, 0.5);
+}
+
+:root[data-theme="ios"] {
+  --dialog-radius: var(--radius-lg);
+  --dialog-shadow: var(--shadow-lg);
+}
+
+:root[data-theme="minimal"] {
+  --dialog-radius: 0;
+  --dialog-shadow: none;
+  --dialog-border-width: 1px;
+} 

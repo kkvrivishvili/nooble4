@@ -1,0 +1,22 @@
+/* Minimal theme ghost button */
+:root[data-theme="minimal"] [data-button-variant="ghost"] {
+  /* Base styles */
+  --button-radius: 0;
+  --button-shadow: none;
+  background: transparent;
+  color: hsl(var(--foreground));
+  border-radius: var(--button-radius);
+  box-shadow: var(--button-shadow);
+  
+  /* Hover state */
+  &:hover:not(:disabled) {
+    background: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
+  }
+  
+  /* Disabled state */
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+} 

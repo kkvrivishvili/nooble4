@@ -1,0 +1,29 @@
+:root[data-theme="ios"].dark {
+  --background: 240 2% 12%;    /* #1C1C1E */
+  --foreground: 0 0% 100%;
+  
+  --card: 240 2% 12%;
+  --card-foreground: 0 0% 100%;
+  
+  --popover: 240 2% 12%;
+  --popover-foreground: 0 0% 100%;
+  
+  --primary: 211 100% 50%;     /* #007AFF */
+  --primary-foreground: 0 0% 100%;
+  
+  --secondary: 232 99% 58%;    /* #AF52DE */
+  --secondary-foreground: 0 0% 100%;
+  
+  --muted: 240 2% 12%;
+  --muted-foreground: 0 0% 58%; /* #8E8E93 */
+  
+  --accent: 262 83% 58%;       /* #AF52DE */
+  --accent-foreground: 0 0% 100%;
+  
+  --destructive: 0 72% 51%;    /* #FF3B30 */
+  --destructive-foreground: 0 0% 100%;
+  
+  --border: 240 2% 18%;
+  --input: 240 2% 18%;
+  --ring: 211 100% 50%;        /* #007AFF */
+}

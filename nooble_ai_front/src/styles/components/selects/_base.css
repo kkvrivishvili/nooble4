@@ -1,0 +1,20 @@
+/* Base Select variables */
+:root {
+  --select-radius: var(--radius-sm);
+  --select-border: hsl(var(--border));
+  --select-bg: hsl(var(--background));
+  --select-shadow: var(--shadow-sm);
+  --select-trigger-height: 2.5rem;
+  --select-content-padding: 0.5rem;
+}
+
+:root[data-theme="ios"] {
+  --select-radius: var(--radius-lg);
+  --select-shadow: var(--shadow-md);
+}
+
+:root[data-theme="minimal"] {
+  --select-radius: 0;
+  --select-shadow: none;
+  --select-border-width: 1px;
+} 

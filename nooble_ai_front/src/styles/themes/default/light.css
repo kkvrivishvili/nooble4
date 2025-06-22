@@ -1,0 +1,31 @@
+:root[data-theme="default"] {
+  --background: 0 0% 98%;      /* #F9FAFB */
+  --foreground: 222 47% 11%;   /* #111827 */
+  
+  --card: 0 0% 100%;          /* #FFFFFF */
+  --card-foreground: 222 47% 11%;
+  
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  
+  --primary: 217 91% 60%;      /* #3B82F6 Primary Blue */
+  --primary-foreground: 0 0% 100%;
+  
+  --secondary: 220 14% 46%;    /* #6B7280 Neutral Gray */
+  --secondary-foreground: 0 0% 100%;
+  
+  --muted: 220 13% 91%;       /* #D1D5DB */
+  --muted-foreground: 215 25% 27%;  /* Updated to #364152 for better contrast */
+  
+  --accent: 43 96% 56%;       /* #FACC15 Yellow Accent */
+  --accent-foreground: 222 47% 11%;
+  
+  --destructive: 0 84% 60%;   /* #EF4444 Red Accent */
+  --destructive-foreground: 0 0% 100%;
+  
+  --success: 158 64% 52%;     /* #10B981 Green Accent */
+  
+  --border: 220 13% 91%;      /* #E5E7EB */
+  --input: 220 13% 91%;
+  --ring: 217 91% 60%;        /* Same as primary */
+}

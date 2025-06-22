@@ -1,0 +1,38 @@
+:root[data-theme="ios"] {
+  --radius-sm: 0.75rem;
+  --radius-md: 1rem;
+  --radius-lg: 1.25rem;
+  
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
+  --shadow-md: 0 8px 16px rgba(0,0,0,0.08);
+  --shadow-lg: 0 20px 32px rgba(0,0,0,0.12);
+
+  /* iOS Light Colors from theme doc */
+  --background: 0 0% 96%;      /* #F5F5F7 */
+  --foreground: 0 0% 12%;      /* #1D1D1F */
+  
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 12%;
+  
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 12%;
+  
+  --primary: 211 100% 50%;     /* #007AFF iOS Blue */
+  --primary-foreground: 0 0% 100%;
+  
+  --secondary: 232 99% 58%;    /* #AF52DE iOS Purple */
+  --secondary-foreground: 0 0% 100%;
+  
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 58%; /* #8E8E93 */
+  
+  --accent: 262 83% 58%;       /* #AF52DE */
+  --accent-foreground: 0 0% 100%;
+  
+  --destructive: 0 72% 51%;    /* #FF3B30 iOS Red */
+  --destructive-foreground: 0 0% 100%;
+  
+  --border: 0 0% 92%;
+  --input: 0 0% 92%;
+  --ring: 211 100% 50%;        /* #007AFF */
+}

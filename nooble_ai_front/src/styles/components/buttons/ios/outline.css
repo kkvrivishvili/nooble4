@@ -1,0 +1,35 @@
+/* iOS theme outline button */
+:root[data-theme="ios"] [data-button-variant="outline"] {
+  /* Base styles */
+  --button-outline-border: #007AFF;
+  --button-outline-text: #007AFF;
+  --button-outline-hover-bg: rgba(0, 122, 255, 0.1);
+  --button-outline-active-border: #0055B3;
+  --button-outline-active-bg: rgba(0, 122, 255, 0.15);
+
+  /* Apply styles */
+  background-color: transparent;
+  color: var(--button-outline-text);
+  border: 2px solid var(--button-outline-border);
+  font-weight: 500;
+  transition: all 0.2s ease-in-out;
+  border-radius: 0.75rem;
+
+  /* Hover state */
+  &:hover:not(:disabled) {
+    background-color: var(--button-outline-hover-bg);
+  }
+
+  /* Active/Pressed state */
+  &:active:not(:disabled) {
+    border-color: var(--button-outline-active-border);
+    background-color: var(--button-outline-active-bg);
+    transform: scale(0.98);
+  }
+
+  /* Disabled state */
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}

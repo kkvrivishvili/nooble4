@@ -1,0 +1,8 @@
+:root[data-theme="ios"] [data-input-variant="ghost"] {
+  --input-bg: transparent;
+  --input-border: transparent;
+  --input-ring: hsl(var(--ring));
+  padding: var(--input-padding);
+  appearance: none;
+  -webkit-appearance: none;
+} 

@@ -1,0 +1,21 @@
+/* Base Switch variables */
+:root {
+  --switch-width: 2.75rem;
+  --switch-height: 1.5rem;
+  --switch-radius: 9999px;
+  --switch-thumb-size: 1.25rem;
+  --switch-bg: hsl(var(--input));
+  --switch-thumb-bg: hsl(var(--background));
+}
+
+:root[data-theme="ios"] {
+  --switch-width: 3rem;
+  --switch-height: 1.75rem;
+  --switch-thumb-size: 1.5rem;
+}
+
+:root[data-theme="minimal"] {
+  --switch-width: 2.5rem;
+  --switch-height: 1.25rem;
+  --switch-thumb-size: 1rem;
+} 

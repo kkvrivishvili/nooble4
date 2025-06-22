@@ -1,0 +1,17 @@
+/* Base Progress variables */
+:root {
+  --progress-height: 0.75rem;
+  --progress-radius: var(--radius-full);
+  --progress-bg: hsl(var(--secondary));
+  --progress-bar-bg: hsl(var(--primary));
+}
+
+:root[data-theme="ios"] {
+  --progress-height: 0.5rem;
+  --progress-shadow: var(--shadow-sm);
+}
+
+:root[data-theme="minimal"] {
+  --progress-radius: 0;
+  --progress-height: 0.25rem;
+} 

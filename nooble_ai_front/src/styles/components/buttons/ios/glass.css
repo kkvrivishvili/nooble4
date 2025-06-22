@@ -1,0 +1,112 @@
+/* iOS Glass Button Styles */
+:root[data-theme="ios"] {
+  /* Light mode glass effect */
+  --button-glass-bg: rgba(255, 255, 255, 0.1);
+  --button-glass-border: rgba(255, 255, 255, 0.2);
+  --button-glass-hover: rgba(255, 255, 255, 0.15);
+  --button-glass-active: rgba(255, 255, 255, 0.08);
+  
+  /* Enhanced blur and glow */
+  --button-glass-blur: 12px;
+  --button-glass-shadow: 
+    0 4px 12px rgba(0, 122, 255, 0.1),    /* iOS Blue glow */
+    0 2px 4px rgba(0, 0, 0, 0.1),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.2);
+  
+  /* Hover state enhancement */
+  --button-glass-hover-shadow:
+    0 8px 24px rgba(0, 122, 255, 0.15),   /* Enhanced blue glow */
+    0 4px 8px rgba(0, 0, 0, 0.1),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.3);
+  
+  /* Active state */
+  --button-glass-active-shadow:
+    0 2px 8px rgba(0, 122, 255, 0.1),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+
+  /* Dark mode overrides */
+  &.dark {
+    --button-glass-bg: rgba(28, 28, 30, 0.7);    /* iOS Dark background */
+    --button-glass-border: rgba(255, 255, 255, 0.1);
+    --button-glass-hover: rgba(28, 28, 30, 0.8);
+    --button-glass-active: rgba(28, 28, 30, 0.9);
+    
+    --button-glass-shadow: 
+      0 4px 12px rgba(0, 122, 255, 0.2),
+      0 2px 4px rgba(0, 0, 0, 0.3),
+      inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+    
+    --button-glass-hover-shadow:
+      0 8px 24px rgba(0, 122, 255, 0.25),
+      0 4px 8px rgba(0, 0, 0, 0.4),
+      inset 0 0 0 0.5px rgba(255, 255, 255, 0.15);
+    
+    --button-glass-active-shadow:
+      0 2px 8px rgba(0, 122, 255, 0.2),
+      inset 0 0 0 0.5px rgba(255, 255, 255, 0.05);
+  }
+}
+
+/* iOS theme glass button */
+:root[data-theme="ios"] [data-button-variant="glass"] {
+  /* Base styles */
+  --button-glass-bg: rgba(255, 255, 255, 0.1);
+  --button-glass-text: #FFFFFF;
+  --button-glass-border: rgba(255, 255, 255, 0.2);
+  --button-glass-shadow: 
+    0 4px 12px rgba(0, 122, 255, 0.1),
+    0 2px 4px rgba(0, 0, 0, 0.1),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.2);
+  --button-glass-hover: rgba(255, 255, 255, 0.15);
+  --button-glass-active: rgba(28, 28, 30, 0.9);
+
+  /* Apply styles */
+  background-color: var(--button-glass-bg);
+  color: var(--button-glass-text);
+  border: 1px solid var(--button-glass-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--button-glass-shadow);
+  font-weight: 500;
+  transition: all 0.2s ease-in-out;
+  border-radius: 0.75rem;
+
+  /* Hover state */
+  &:hover:not(:disabled) {
+    background-color: var(--button-glass-hover);
+    box-shadow: 
+      0 8px 24px rgba(0, 122, 255, 0.15),
+      0 4px 8px rgba(0, 0, 0, 0.1),
+      inset 0 0 0 0.5px rgba(255, 255, 255, 0.3);
+  }
+
+  /* Active/Pressed state */
+  &:active:not(:disabled) {
+    background-color: var(--button-glass-active);
+    transform: scale(0.98);
+    box-shadow: 
+      0 2px 8px rgba(0, 122, 255, 0.1),
+      inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+  }
+
+  /* Disabled state */
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Dark mode overrides */
+  .dark & {
+    --button-glass-bg: rgba(28, 28, 30, 0.7);
+    --button-glass-border: rgba(255, 255, 255, 0.1);
+    --button-glass-shadow: 
+      0 4px 12px rgba(0, 122, 255, 0.2),
+      0 2px 4px rgba(0, 0, 0, 0.3),
+      inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+
+    &:hover:not(:disabled) {
+      background-color: rgba(28, 28, 30, 0.8);
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+  }
+}

@@ -1,0 +1,25 @@
+/* Minimal theme outline button */
+:root[data-theme="minimal"] [data-button-variant="outline"] {
+  /* Base styles */
+  --button-radius: 0;
+  --button-border: 1px solid hsl(var(--border));
+  --button-shadow: none;
+  background: transparent;
+  color: hsl(var(--foreground));
+  border: var(--button-border);
+  border-radius: var(--button-radius);
+  box-shadow: var(--button-shadow);
+  
+  /* Hover state */
+  &:hover:not(:disabled) {
+    background: hsl(var(--accent));
+    color: hsl(var(--accent-foreground));
+    border-color: transparent;
+  }
+  
+  /* Disabled state */
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+} 

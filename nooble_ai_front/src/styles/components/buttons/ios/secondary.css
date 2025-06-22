@@ -1,0 +1,33 @@
+/* iOS theme secondary button */
+:root[data-theme="ios"] [data-button-variant="secondary"] {
+  /* Base styles */
+  --button-secondary-bg: #8E8E93;
+  --button-secondary-text: #FFFFFF;
+  --button-secondary-hover: #A5A5AB;
+  --button-secondary-active: #7A7A80;
+
+  /* Apply styles */
+  background-color: var(--button-secondary-bg);
+  color: var(--button-secondary-text);
+  font-weight: 500;
+  transition: all 0.2s ease-in-out;
+  border-radius: 0.75rem;
+  box-shadow: none;
+
+  /* Hover state */
+  &:hover:not(:disabled) {
+    background-color: var(--button-secondary-hover);
+  }
+
+  /* Active/Pressed state */
+  &:active:not(:disabled) {
+    background-color: var(--button-secondary-active);
+    transform: scale(0.98);
+  }
+
+  /* Disabled state */
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}

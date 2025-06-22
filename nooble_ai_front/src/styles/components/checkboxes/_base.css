@@ -1,0 +1,27 @@
+/* Base Checkbox variables */
+:root {
+  /* Sizes */
+  --checkbox-size-sm: 1rem;
+  --checkbox-size: 1.25rem;
+  --checkbox-size-lg: 1.5rem;
+  
+  /* Appearance */
+  --checkbox-radius: var(--radius-sm);
+  --checkbox-border: hsl(var(--border));
+  --checkbox-bg: hsl(var(--background));
+  --checkbox-ring: hsl(var(--ring));
+  --checkbox-shadow: var(--shadow-sm);
+}
+
+/* Theme variations */
+:root[data-theme="ios"] {
+  --checkbox-radius: var(--radius-md);
+  --checkbox-shadow: none;
+}
+
+:root[data-theme="minimal"] {
+  --checkbox-radius: 0;
+  --checkbox-shadow: none;
+  --checkbox-border-width: 1px;
+} 
+

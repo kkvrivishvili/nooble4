@@ -1,0 +1,38 @@
+:root[data-theme="minimal"] {
+  --background: 0 0% 100%;
+  --foreground: 0 0% 7%;
+  
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 7%;
+  
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 7%;
+  
+  --primary: 0 0% 7%;          /* Almost black */
+  --primary-foreground: 0 0% 100%;
+  
+  --secondary: 0 0% 40%;       /* Gray */
+  --secondary-foreground: 0 0% 100%;
+  
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 40%;
+  
+  --accent: 0 0% 20%;         /* Dark gray accent */
+  --accent-foreground: 0 0% 100%;
+  
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  
+  --border: 0 0% 92%;
+  --input: 0 0% 92%;
+  --ring: 0 0% 7%;
+
+  /* Minimal specific overrides */
+  --radius-sm: 0.125rem;      /* Smaller radius */
+  --radius-md: 0.25rem;
+  --radius-lg: 0.375rem;
+  
+  --shadow-sm: 0 1px 1px rgba(0,0,0,0.05);  /* Subtler shadows */
+  --shadow-md: 0 2px 4px rgba(0,0,0,0.05);
+  --shadow-lg: 0 4px 6px rgba(0,0,0,0.05);
+}

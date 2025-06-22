@@ -1,0 +1,20 @@
+/* Base DropdownMenu variables */
+:root {
+  --dropdown-radius: var(--radius-sm);
+  --dropdown-border: hsl(var(--border));
+  --dropdown-bg: hsl(var(--background));
+  --dropdown-shadow: var(--shadow-md);
+  --dropdown-item-height: 2.5rem;
+  --dropdown-content-padding: 0.5rem;
+}
+
+:root[data-theme="ios"] {
+  --dropdown-radius: var(--radius-lg);
+  --dropdown-shadow: var(--shadow-lg);
+}
+
+:root[data-theme="minimal"] {
+  --dropdown-radius: 0;
+  --dropdown-shadow: none;
+  --dropdown-border-width: 1px;
+} 

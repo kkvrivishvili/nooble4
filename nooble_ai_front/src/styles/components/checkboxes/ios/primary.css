@@ -1,0 +1,26 @@
+:root[data-theme="ios"] [data-checkbox-variant="primary"] {
+  /* Base styles */
+  background: hsl(var(--background));
+  border: 2px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  
+  /* Transitions */
+  transition: all 0.2s ease;
+  
+  /* Hover state */
+  &:hover:not(:disabled) {
+    border-color: hsl(var(--primary));
+  }
+  
+  /* Checked state */
+  &:checked {
+    background: hsl(var(--primary));
+    border-color: hsl(var(--primary));
+  }
+  
+  /* Focus state */
+  &:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+} 

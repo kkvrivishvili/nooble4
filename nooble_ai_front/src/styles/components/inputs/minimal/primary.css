@@ -1,0 +1,9 @@
+:root[data-theme="minimal"] [data-input-variant="primary"] {
+  --input-bg: hsl(var(--background));
+  --input-border: hsl(var(--border));
+  --input-ring: hsl(var(--ring));
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  border-radius: 0;
+} 

@@ -1,0 +1,26 @@
+:root[data-theme="default"] [data-checkbox-variant="ghost"] {
+  /* Base styles */
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  
+  /* Transitions */
+  transition: all 0.2s ease;
+  
+  /* Hover state */
+  &:hover:not(:disabled) {
+    background: hsl(var(--muted)/0.1);
+  }
+  
+  /* Checked state */
+  &:checked {
+    background: hsl(var(--primary)/0.1);
+    border-color: transparent;
+  }
+  
+  /* Focus state */
+  &:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+} 

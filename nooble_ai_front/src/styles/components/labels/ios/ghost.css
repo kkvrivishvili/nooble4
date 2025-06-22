@@ -1,0 +1,5 @@
+:root[data-theme="ios"] [data-label-variant="ghost"] {
+  color: var(--label-color-ghost);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}

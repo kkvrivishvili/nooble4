@@ -1,0 +1,5 @@
+:root[data-theme="minimal"] [data-label-variant="primary"] {
+  color: var(--label-color-primary);
+  font-weight: 400; /* Lighter weight for minimal theme */
+  letter-spacing: 0.02em; /* Slight positive tracking */
+}

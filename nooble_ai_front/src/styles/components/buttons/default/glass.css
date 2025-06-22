@@ -1,0 +1,75 @@
+/* Default theme glass button */
+:root[data-theme="default"] [data-button-variant="glass"] {
+  /* Base styles */
+  background: rgba(255, 255, 255, 0.08);
+  color: #FFFFFF;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0.5rem;
+  backdrop-filter: blur(8px);
+  box-shadow: 
+    0 2px 8px rgba(0, 0, 0, 0.1),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.15);
+  
+  /* Remove fixed height/padding */
+  font-weight: 500;
+  
+  /* Transitions */
+  transition: all 0.2s ease;
+  
+  /* Hover state */
+  &:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-1px);
+    box-shadow: 
+      0 4px 12px rgba(0, 0, 0, 0.15),
+      inset 0 0 0 0.5px rgba(255, 255, 255, 0.2);
+  }
+  
+  /* Active/Pressed state */
+  &:active {
+    background: rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(12px);
+    transform: translateY(0);
+    box-shadow: 
+      0 2px 4px rgba(0, 0, 0, 0.1),
+      inset 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+  }
+
+  /* Disabled state */
+  &:disabled {
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.4);
+    border-color: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(4px);
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+
+  /* Focus state */
+  &:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.3);
+    outline-offset: 2px;
+  }
+}
+
+/* Dark mode adjustments */
+.dark :root[data-theme="default"] [data-button-variant="glass"] {
+  background: rgba(0, 0, 0, 0.2);
+  border-color: rgba(255, 255, 255, 0.1);
+  
+  &:hover:not(:disabled) {
+    background: rgba(0, 0, 0, 0.25);
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+  
+  &:active {
+    background: rgba(0, 0, 0, 0.3);
+  }
+  
+  &:disabled {
+    background: rgba(0, 0, 0, 0.15);
+    border-color: rgba(255, 255, 255, 0.05);
+  }
+}

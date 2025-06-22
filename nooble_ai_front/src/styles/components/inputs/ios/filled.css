@@ -1,0 +1,9 @@
+:root[data-theme="ios"] [data-input-variant="filled"] {
+  --input-bg: hsl(var(--muted));
+  --input-border: transparent;
+  --input-ring: hsl(var(--ring));
+  --input-padding-x: var(--input-padding-x);
+  --input-padding-y: var(--input-padding-y);
+  appearance: none;
+  -webkit-appearance: none;
+} 

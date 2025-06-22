@@ -1,0 +1,32 @@
+/* iOS theme ghost button */
+:root[data-theme="ios"] [data-button-variant="ghost"] {
+  /* Base styles */
+  --button-ghost-text: #007AFF;
+  --button-ghost-hover: rgba(0, 122, 255, 0.08);
+  --button-ghost-active: rgba(0, 122, 255, 0.12);
+
+  /* Apply styles */
+  background-color: transparent;
+  color: var(--button-ghost-text);
+  border: none;
+  font-weight: 500;
+  transition: all 0.2s ease-in-out;
+  border-radius: 0.75rem;
+
+  /* Hover state */
+  &:hover:not(:disabled) {
+    background-color: var(--button-ghost-hover);
+  }
+
+  /* Active/Pressed state */
+  &:active:not(:disabled) {
+    background-color: var(--button-ghost-active);
+    transform: scale(0.98);
+  }
+
+  /* Disabled state */
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}

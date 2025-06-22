@@ -1,0 +1,43 @@
+/* iOS theme primary button */
+:root[data-theme="ios"] [data-button-variant="primary"] {
+  /* Base styles */
+  --button-primary-bg: #007AFF;
+  --button-primary-text: #FFFFFF;
+  --button-primary-shadow: 0 2px 8px rgba(0, 122, 255, 0.4);
+  --button-primary-hover: #0066D6;
+  --button-primary-active: #0055B3;
+
+  /* Apply styles */
+  background-color: var(--button-primary-bg);
+  color: var(--button-primary-text);
+  box-shadow: var(--button-primary-shadow);
+  font-weight: 500;
+  transition: all 0.2s ease-in-out;
+  border-radius: 0.75rem;
+  
+  /* Hover state */
+  &:hover:not(:disabled) {
+    background-color: var(--button-primary-hover);
+    box-shadow: 0 4px 12px rgba(0, 122, 255, 0.5);
+  }
+
+  /* Active/Pressed state */
+  &:active:not(:disabled) {
+    background-color: var(--button-primary-active);
+    transform: scale(0.98);
+    box-shadow: 0 1px 4px rgba(0, 122, 255, 0.4);
+  }
+
+  /* Disabled state */
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    box-shadow: none;
+  }
+
+  /* Loading state */
+  &[data-loading="true"] {
+    cursor: wait;
+    opacity: 0.8;
+  }
+}

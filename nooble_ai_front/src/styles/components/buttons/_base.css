@@ -1,0 +1,28 @@
+/* Base button variables */
+:root {
+  /* Size variables */
+  --button-height-sm: 2.25rem;  /* h-9 */
+  --button-height-md: 2.5rem;   /* h-10 */
+  --button-height-lg: 2.75rem;  /* h-11 */
+  
+  /* Default theme variables */
+  --button-radius: var(--radius-sm);
+  --button-shadow: var(--shadow-sm);
+  --button-font: var(--font-geist-sans);
+  --button-border-width: 1px;
+}
+
+/* iOS theme overrides */
+:root[data-theme="ios"] {
+  --button-radius: var(--radius-lg);
+  --button-shadow: var(--shadow-lg);
+  --button-blur: 8px;
+  --button-border-width: 1px;
+}
+
+/* Minimal theme overrides */
+:root[data-theme="minimal"] {
+  --button-radius: 0;
+  --button-shadow: none;
+  --button-border-width: 1px;
+}

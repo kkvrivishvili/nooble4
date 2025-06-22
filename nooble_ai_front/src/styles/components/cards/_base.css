@@ -1,0 +1,19 @@
+/* Base Card variables */
+:root {
+  --card-radius: var(--radius-md);
+  --card-shadow: var(--shadow-sm);
+  --card-padding: 1.5rem;
+  --card-bg: hsl(var(--card));
+  --card-border: hsl(var(--border));
+}
+
+:root[data-theme="ios"] {
+  --card-radius: var(--radius-lg);
+  --card-shadow: var(--shadow-lg);
+}
+
+:root[data-theme="minimal"] {
+  --card-radius: 0;
+  --card-shadow: none;
+  --card-border-width: 1px;
+} 

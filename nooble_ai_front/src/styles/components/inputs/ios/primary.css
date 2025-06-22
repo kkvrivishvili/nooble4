@@ -1,0 +1,8 @@
+:root[data-theme="ios"] [data-input-variant="primary"] {
+  --input-bg: hsl(var(--background));
+  --input-border: hsl(var(--border));
+  --input-ring: hsl(var(--ring));
+  padding: var(--input-padding);
+  appearance: none;
+  -webkit-appearance: none; /* iOS styling reset */
+} 

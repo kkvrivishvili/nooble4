@@ -1,0 +1,19 @@
+/* Base Tabs variables */
+:root {
+  --tabs-radius: var(--radius-sm);
+  --tabs-border: hsl(var(--border));
+  --tabs-bg: hsl(var(--background));
+  --tabs-trigger-height: 2.5rem;
+  --tabs-trigger-padding: 1rem;
+  --tabs-content-padding: 1.5rem;
+}
+
+:root[data-theme="ios"] {
+  --tabs-radius: var(--radius-lg);
+  --tabs-trigger-height: 2.75rem;
+}
+
+:root[data-theme="minimal"] {
+  --tabs-radius: 0;
+  --tabs-border-width: 1px;
+} 

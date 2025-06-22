@@ -1,0 +1,178 @@
+/* First: Import all component and theme styles */
+@import './components/alertdialogs/index.css';
+@import './components/buttons/index.css';
+@import './components/cards/index.css';
+@import './components/checkboxes/index.css';
+@import './components/dialogs/index.css';
+@import './components/dividers/index.css';
+@import './components/dropdownmenus/index.css';
+@import './components/inputs/index.css';
+@import './components/labels/index.css';
+@import './components/progress/index.css';
+@import './components/selects/index.css';
+@import './components/sluginputs/index.css';
+@import './components/switches/index.css';
+@import './components/tabs/index.css';
+@import './components/textareas/index.css';
+@import './components/tooltip/index.css';
+
+/* Theme imports */
+@import './themes/base/tokens.css';
+@import './themes/default/light.css';
+@import './themes/default/dark.css';
+@import './themes/ios/light.css';
+@import './themes/ios/dark.css';
+@import './themes/minimal/light.css';
+@import './themes/minimal/dark.css';
+@import './additional-styles/animations.css';  /* Add this line */
+
+/* Second: Tailwind directives */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Third: Our base design tokens and component variables */
+@layer base {
+  :root {
+    /* Core Design Tokens */
+    --radius-sm: 0.375rem;
+    --radius-md: 0.5rem;
+    --radius-lg: 0.75rem;
+    
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.1);
+    --shadow-md: 0 4px 6px rgba(0,0,0,0.1);
+    --shadow-lg: 0 10px 15px rgba(0,0,0,0.1);
+    
+    /* Base theme colors - these will be overridden by theme files */
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --warning: 38 92% 50%;  /* Amber/Orange color */
+    --warning-foreground: 0 0% 100%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5.9% 10%;
+    
+    /* Component-specific variables */
+    --button-radius: var(--radius-sm);
+    --button-shadow: var(--shadow-sm);
+    --dialog-radius: var(--radius-md);
+    --card-radius: var(--radius-md);
+    --select-radius: var(--radius-sm);
+    --input-radius: var(--radius-sm);
+    --switch-radius: 9999px;
+    --tabs-radius: var(--radius-sm);
+    --textarea-radius: var(--radius-sm);
+    
+    /* Add animation tokens */
+    --animate-gradient: gradient 6s linear infinite;
+    --animate-shine: shine 5s ease-in-out 500ms infinite;
+  }
+
+  body {
+    color: hsl(var(--foreground));
+    background: hsl(var(--background));
+    font-family: var(--font-sans), system-ui, sans-serif;
+  }
+
+  /* Add keyframes for landing page animations */
+  @keyframes gradient {
+    0% { background-position: 0% center; }
+    100% { background-position: 200% center; }
+  }
+
+  @keyframes shine {
+    0% {
+      top: 0;
+      transform: scaleY(5);
+      opacity: 0;
+    }
+    10% { opacity: 0.8; }
+    20% {
+      top: 100%;
+      transform: scaleY(10);
+      opacity: 0;
+    }
+    100% {
+      top: 100%;
+      transform: scaleY(1);
+      opacity: 0;
+    }
+  }
+}
+
+@plugin "@tailwindcss/forms" {
+  strategy: base;
+}
+
+@theme {
+  /* Keep existing font definitions */
+  --font-inter: var(--font-inter), sans-serif;
+  --font-nacelle: var(--font-nacelle), sans-serif;
+
+  /* Keep existing text styles */
+  --text-xs: 0.8125rem;
+  /* ... rest of your text styles ... */
+
+  /* Update/add color theme variables */
+  --background: 222 47% 11%;    /* Rich blue-black */
+  --foreground: 210 40% 98%;
+  --primary: 217 91% 60%;      /* Bright blue accent */
+  --secondary: 215 20.2% 65.1%;
+  --accent: 217 91% 60%;
+
+  /* Keep your existing animation variables */
+  --animate-shine: shine 5s ease-in-out 500ms infinite;
+  --animate-gradient: gradient 6s linear infinite;
+
+  /* Keep your existing keyframes */
+  @keyframes shine {
+    0% {
+      top: 0;
+      transform: scaleY(5);
+      opacity: 0;
+    }
+    10% {
+      opacity: 0.8;
+    }
+    20% {
+      top: 100%;
+      transform: scaleY(10);
+      opacity: 0;
+    }
+    100% {
+      top: 100%;
+      transform: scaleY(1);
+      opacity: 0;
+    }
+  }
+  @keyframes gradient {
+    to {
+      background-position: 200% center;
+    }
+  }
+}
+
+/* Keep your existing base layer */
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentColor);
+  }
+}

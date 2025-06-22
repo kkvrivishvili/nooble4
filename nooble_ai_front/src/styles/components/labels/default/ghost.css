@@ -1,0 +1,4 @@
+:root[data-theme="default"] [data-label-variant="ghost"] {
+  color: var(--label-color-ghost);
+  font-weight: var(--label-font-weight);
+}
