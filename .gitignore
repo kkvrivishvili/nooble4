@@ -41,7 +41,7 @@ pytestdebug.log
 # Environments
 .env
 .venv
-env/
+env/F
 venv/
 ENV/
 env.bak/
@@ -116,14 +116,6 @@ next-env.d.ts
 !.vscode/settings.json
 !.vscode/extensions.json
 
-# OS
-Thumbs.db
-
-# Database
-*.sqlite
-*.sqlite3
-*.db
-
 # Logs
 logs/
 *.log
@@ -137,11 +129,6 @@ logs/
 .nyc_output
 coverage/
 
-# Supabase
-**/supabase/.branches
-**/supabase/.temp
-**/supabase/.env
-
 # Stripe
 .stripe/
 
@@ -154,11 +141,6 @@ coverage/
 *.tmp
 *.temp
 .history/
-
-# SQL
-*.sql
-*.projectSQL(local dev)
-.sqlforcursor/
 
 # Informational - Custom
 .projectoverview
