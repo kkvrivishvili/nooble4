@@ -1,20 +1,44 @@
 -- ----------------------------------------------------
 -- Script de Inicialización de Supabase para Nooble AI
--- Versión Completa - Generado a partir del análisis del Frontend
+-- Versión Corregida y Unificada con RESET COMPLETO
 -- ----------------------------------------------------
 
--- ========= SECCIÓN 1: TIPOS PERSONALIZADOS (ENUMS) =========
+-- ========= SECCIÓN 0: RESET COMPLETO DEL SCHEMA 'public' =========
+-- ADVERTENCIA: Este bloque borrará TODAS las tablas, tipos, funciones y
+-- políticas RLS en el schema 'public' para asegurar un estado limpio.
+-- Los datos en 'auth.users' y otros schemas de Supabase NO serán afectados.
 
--- Eliminar tipos si existen para permitir la re-ejecución del script
-DROP TYPE IF EXISTS public.org_role CASCADE;
-DROP TYPE IF EXISTS public.user_role CASCADE;
-DROP TYPE IF EXISTS public.event_type CASCADE;
+DO $$
+DECLARE
+    r RECORD;
+BEGIN
+    -- Eliminar todas las tablas en el schema 'public'
+    FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') LOOP
+        EXECUTE 'DROP TABLE IF EXISTS public.' || quote_ident(r.tablename) || ' CASCADE';
+    END LOOP;
+    -- Eliminar todos los tipos (ENUMs) en el schema 'public'
+    FOR r IN (SELECT t.typname FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = 'public' AND t.typtype = 'e') LOOP
+        EXECUTE 'DROP TYPE IF EXISTS public.' || quote_ident(r.typname) || ' CASCADE';
+    END LOOP;
+    -- Eliminar todas las funciones en el schema 'public'
+    FOR r IN (SELECT p.proname, oidvectortypes(p.proargtypes) as argt ypes FROM pg_proc p INNER JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = 'public') LOOP
+        EXECUTE 'DROP FUNCTION IF EXISTS public.' || quote_ident(r.proname) || '(' || r.argtypes || ') CASCADE';
+    END LOOP;
+END $$;
+
+-- Limpiar el bucket de storage 'avatars'
+-- Borra todos los objetos dentro del bucket y luego el bucket mismo.
+DELETE FROM storage.objects WHERE bucket_id = 'avatars';
+DELETE FROM storage.buckets WHERE id = 'avatars';
+
+
+-- ========= SECCIÓN 1: TIPOS PERSONALIZADOS (ENUMS) =========
 
 -- Rol para miembros dentro de una organización
 CREATE TYPE public.org_role AS ENUM ('owner', 'admin', 'member');
 
 -- Rol para usuarios a nivel de sistema
-CREATE TYPE public.user_role AS ENUM ('user', 'admin', 'super_admin');
+CREATE TYPE public.system_role AS ENUM ('super_admin', 'admin', 'user');
 
 -- Tipo de evento para la tabla de auditoría
 CREATE TYPE public.event_type AS ENUM (
@@ -36,18 +60,17 @@ CREATE TYPE public.event_type AS ENUM (
 -- ========= SECCIÓN 2: TABLAS PRINCIPALES =========
 
 -- Tabla de perfiles de usuario, extiende auth.users
-CREATE TABLE IF NOT EXISTS public.profiles (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id uuid NOT NULL UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
+CREATE TABLE public.profiles (
+    id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     full_name text,
     avatar_url text,
     updated_at timestamptz DEFAULT now()
 );
-COMMENT ON TABLE public.profiles IS 'Stores public profile information for each user.';
+COMMENT ON TABLE public.profiles IS 'Stores public profile information for each user, linked directly to auth.users.';
 
 -- Tabla de organizaciones (inquilinos)
-CREATE TABLE IF NOT EXISTS public.organizations (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+CREATE TABLE public.organizations (
+    id uuid PRIMARY KEY DEFAULT extensions.uuid_generate_v4(),
     name text NOT NULL,
     slug text NOT NULL UNIQUE,
     avatar_url text,
@@ -57,7 +80,7 @@ CREATE TABLE IF NOT EXISTS public.organizations (
 COMMENT ON TABLE public.organizations IS 'Represents a multi-tenant organization or workspace.';
 
 -- Tabla de miembros de la organización (une usuarios y organizaciones)
-CREATE TABLE IF NOT EXISTS public.organization_members (
+CREATE TABLE public.organization_members (
     org_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
     user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     role public.org_role NOT NULL DEFAULT 'member',
@@ -67,34 +90,31 @@ CREATE TABLE IF NOT EXISTS public.organization_members (
 COMMENT ON TABLE public.organization_members IS 'Junction table linking users to organizations with specific roles.';
 
 -- Tabla de invitaciones a organizaciones
-CREATE TABLE IF NOT EXISTS public.organization_invites (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+CREATE TABLE public.invites (
+    id uuid PRIMARY KEY DEFAULT extensions.uuid_generate_v4(),
     org_id uuid NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-    invited_by uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    invited_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
     email text NOT NULL,
-    role public.org_role NOT NULL DEFAULT 'member',
-    token text NOT NULL UNIQUE,
-    expires_at timestamptz NOT NULL DEFAULT (now() + interval '7 days'),
-    accepted_at timestamptz,
-    created_at timestamptz DEFAULT now()
+    role public.org_role NOT NULL, -- ROL DE ORGANIZACIÓN, NO DE SISTEMA
+    token text NOT NULL UNIQUE DEFAULT extensions.uuid_generate_v4()::text,
+    status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'declined', 'expired')),
+    created_at timestamptz DEFAULT now(),
+    updated_at timestamptz,
+    CONSTRAINT unique_pending_invite UNIQUE (org_id, email, status)
 );
-COMMENT ON TABLE public.organization_invites IS 'Stores pending invitations for users to join organizations.';
-
-
--- ========= SECCIÓN 3: TABLAS DE SOPORTE Y AUDITORÍA =========
+COMMENT ON TABLE public.invites IS 'Stores user invitations to join organizations.';
 
 -- Tabla de roles a nivel de sistema
-CREATE TABLE IF NOT EXISTS public.roles (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id uuid NOT NULL UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
-    system_role public.user_role NOT NULL DEFAULT 'user',
+CREATE TABLE public.roles (
+    user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    system_role public.system_role NOT NULL DEFAULT 'user',
     created_at timestamptz DEFAULT now(),
     updated_at timestamptz DEFAULT now()
 );
 COMMENT ON TABLE public.roles IS 'Assigns system-level roles to users (e.g., for an admin panel).';
 
 -- Tabla de actividad de usuario
-CREATE TABLE IF NOT EXISTS public.user_activity (
+CREATE TABLE public.user_activity (
     id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     action_type text NOT NULL,
@@ -105,30 +125,10 @@ CREATE TABLE IF NOT EXISTS public.user_activity (
 );
 COMMENT ON TABLE public.user_activity IS 'Logs significant user actions for auditing and analytics.';
 
--- Tabla para límites de velocidad (Rate Limiting)
-CREATE TABLE IF NOT EXISTS public.rate_limits (
-    id text PRIMARY KEY, -- Formato: user_id:action_type
-    user_id uuid NOT NULL,
-    action_type text NOT NULL,
-    window_start timestamptz NOT NULL DEFAULT now(),
-    request_count integer NOT NULL DEFAULT 1
-);
-COMMENT ON TABLE public.rate_limits IS 'Tracks requests for rate limiting purposes.';
-
--- Tabla para caché de estadísticas de miembros
-CREATE TABLE IF NOT EXISTS public.organization_member_stats_cache (
-    org_id uuid PRIMARY KEY REFERENCES public.organizations(id) ON DELETE CASCADE,
-    stats jsonb,
-    role_distribution_history jsonb,
-    cache_version integer DEFAULT 1,
-    last_updated timestamptz DEFAULT now()
-);
-COMMENT ON TABLE public.organization_member_stats_cache IS 'Caches computed statistics for organization dashboards.';
-
 -- Tabla de eventos para auditoría detallada
-CREATE TABLE IF NOT EXISTS public.events (
+CREATE TABLE public.events (
     id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-    user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL, -- El usuario puede ser eliminado, pero el evento permanece
+    user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
     org_id uuid REFERENCES public.organizations(id) ON DELETE SET NULL,
     event_type public.event_type NOT NULL,
     metadata jsonb,
@@ -137,7 +137,7 @@ CREATE TABLE IF NOT EXISTS public.events (
 COMMENT ON TABLE public.events IS 'Logs detailed audit trail events across the system.';
 
 
--- ========= SECCIÓN 3.5: FUNCIONES AUXILIARES PARA RLS =========
+-- ========= SECCIÓN 3: FUNCIONES AUXILIARES PARA RLS =========
 
 -- Función auxiliar para políticas RLS: verificar si un usuario es miembro de una organización
 CREATE OR REPLACE FUNCTION public.is_org_member(p_org_id uuid, p_user_id uuid)
@@ -157,8 +157,10 @@ RETURNS boolean AS $$
 BEGIN
     RETURN EXISTS (
         SELECT 1
-        FROM public.organization_members
-        WHERE org_id = p_org_id AND user_id = p_user_id AND role = ANY(p_roles)
+        FROM public.organization_members om
+        WHERE om.org_id = p_org_id
+          AND om.user_id = p_user_id
+          AND om.role = ANY(p_roles)
     );
 END;
 $$ LANGUAGE plpgsql SECURITY INVOKER STABLE;
@@ -170,78 +172,57 @@ $$ LANGUAGE plpgsql SECURITY INVOKER STABLE;
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.organization_members ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.organization_invites ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.invites ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.roles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_activity ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.events ENABLE ROW LEVEL SECURITY;
 
 -- Políticas para perfiles
-DROP POLICY IF EXISTS "Users can view their own profile." ON public.profiles;
-CREATE POLICY "Users can view their own profile." ON public.profiles FOR SELECT USING (auth.uid() = user_id);
-DROP POLICY IF EXISTS "Users can update their own profile." ON public.profiles;
-CREATE POLICY "Users can update their own profile." ON public.profiles FOR UPDATE USING (auth.uid() = user_id);
-DROP POLICY IF EXISTS "Users can insert their own profile." ON public.profiles;
-CREATE POLICY "Users can insert their own profile." ON public.profiles FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can view their own profile." ON public.profiles FOR SELECT USING (auth.uid() = id);
+CREATE POLICY "Users can update their own profile." ON public.profiles FOR UPDATE USING (auth.uid() = id);
+CREATE POLICY "Users can insert their own profile." ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
 
 -- Políticas para organizaciones
-DROP POLICY IF EXISTS "Members can view their own organizations." ON public.organizations;
-CREATE POLICY "Members can view their own organizations." ON public.organizations FOR SELECT USING (
-    public.is_org_member(id, auth.uid())
-);
-DROP POLICY IF EXISTS "Owners can update their organizations." ON public.organizations;
-CREATE POLICY "Owners can update their organizations." ON public.organizations FOR UPDATE USING (
-    public.is_org_member_with_roles(id, auth.uid(), ARRAY['owner']::public.org_role[])
-);
+CREATE POLICY "Members can view their own organizations." ON public.organizations FOR SELECT USING (public.is_org_member(id, auth.uid()));
+CREATE POLICY "Owners can update their organizations." ON public.organizations FOR UPDATE USING (public.is_org_member_with_roles(id, auth.uid(), ARRAY['owner']::public.org_role[]));
+CREATE POLICY "Owners can delete their organizations." ON public.organizations FOR DELETE USING (public.is_org_member_with_roles(id, auth.uid(), ARRAY['owner']::public.org_role[]));
 
 -- Políticas para miembros de la organización
-DROP POLICY IF EXISTS "Members can view other members of their own organizations." ON public.organization_members;
-CREATE POLICY "Members can view other members of their own organizations." ON public.organization_members FOR SELECT USING (
-    public.is_org_member(org_id, auth.uid())
-);
+CREATE POLICY "Members can view other members of their own organizations." ON public.organization_members FOR SELECT USING (public.is_org_member(org_id, auth.uid()));
+CREATE POLICY "Admins and owners can manage members." ON public.organization_members FOR ALL USING (public.is_org_member_with_roles(org_id, auth.uid(), ARRAY['admin', 'owner']::public.org_role[]));
 
 -- Políticas para roles del sistema
-DROP POLICY IF EXISTS "Users can view their own system role." ON public.roles;
 CREATE POLICY "Users can view their own system role." ON public.roles FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Super admins can manage all roles." ON public.roles FOR ALL USING ((SELECT system_role FROM public.roles WHERE user_id = auth.uid()) = 'super_admin');
 
 -- Políticas para eventos
-DROP POLICY IF EXISTS "Admins can view all events in their organizations." ON public.events;
-CREATE POLICY "Admins can view all events in their organizations." ON public.events FOR SELECT USING (
-    public.is_org_member_with_roles(org_id, auth.uid(), ARRAY['admin', 'owner']::public.org_role[])
-);
+CREATE POLICY "Admins can view all events in their organizations." ON public.events FOR SELECT USING (public.is_org_member_with_roles(org_id, auth.uid(), ARRAY['admin', 'owner']::public.org_role[]));
+
+-- Políticas para invitaciones
+CREATE POLICY "Admins can manage invites for their own organization." ON public.invites FOR ALL USING (public.is_org_member_with_roles(org_id, auth.uid(), ARRAY['admin', 'owner']::public.org_role[]));
 
 
 -- ========= SECCIÓN 5: ALMACENAMIENTO (STORAGE) =========
 
--- Crear el bucket para avatares si no existe
--- Nota: La creación de buckets se realiza a través de la API o la UI de Supabase,
--- pero se incluye aquí como documentación.
+-- Eliminar políticas de storage si existen para asegurar la idempotencia
+DROP POLICY IF EXISTS "Avatar images are publicly accessible." ON storage.objects;
+DROP POLICY IF EXISTS "Anyone can upload an avatar." ON storage.objects;
+DROP POLICY IF EXISTS "Users can update their own avatars." ON storage.objects;
 
+-- Insertar el bucket (no falla si ya existe)
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('avatars', 'avatars', true)
 ON CONFLICT (id) DO NOTHING;
 
--- Políticas de acceso para el bucket de avatares
-DROP POLICY IF EXISTS "Avatar images are publicly accessible." ON storage.objects;
-CREATE POLICY "Avatar images are publicly accessible."
-ON storage.objects FOR SELECT
-USING ( bucket_id = 'avatars' );
-
-DROP POLICY IF EXISTS "Anyone can upload an avatar." ON storage.objects;
-CREATE POLICY "Anyone can upload an avatar."
-ON storage.objects FOR INSERT
-WITH CHECK ( bucket_id = 'avatars' );
-
-DROP POLICY IF EXISTS "Users can update their own avatars." ON storage.objects;
-CREATE POLICY "Users can update their own avatars."
-ON storage.objects FOR UPDATE
-USING ( auth.uid() = owner )
-WITH CHECK ( bucket_id = 'avatars' );
+-- Crear las políticas de nuevo
+CREATE POLICY "Avatar images are publicly accessible." ON storage.objects FOR SELECT USING ( bucket_id = 'avatars' );
+CREATE POLICY "Anyone can upload an avatar." ON storage.objects FOR INSERT WITH CHECK ( bucket_id = 'avatars' );
+CREATE POLICY "Users can update their own avatars." ON storage.objects FOR UPDATE USING ( auth.uid() = owner ) WITH CHECK ( bucket_id = 'avatars' );
 
 
 -- ========= SECCIÓN 6: FUNCIONES DE BASE DE DATOS =========
 
 -- Función para crear una organización y asignar al propietario
-DROP FUNCTION IF EXISTS public.create_organization_with_owner(text, text, text, uuid);
 CREATE OR REPLACE FUNCTION public.create_organization_with_owner(
     p_name text,
     p_slug text,
@@ -252,114 +233,74 @@ RETURNS public.organizations AS $$
 DECLARE
     new_org public.organizations;
 BEGIN
-    -- Insertar la nueva organización y devolver la fila completa
     INSERT INTO public.organizations (name, slug, avatar_url)
     VALUES (p_name, p_slug, p_avatar_url)
     RETURNING * INTO new_org;
 
-    -- Asignar al usuario como propietario de la nueva organización
     INSERT INTO public.organization_members (org_id, user_id, role)
     VALUES (new_org.id, p_user_id, 'owner');
 
-    -- Devolver la organización recién creada
     RETURN new_org;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
-
 COMMENT ON FUNCTION public.create_organization_with_owner(text, text, text, uuid) IS 'Atomically creates an organization and assigns the creator as the owner.';
-
 
 -- Función para aceptar una invitación y unirse a una organización
 CREATE OR REPLACE FUNCTION public.accept_invite(
-    p_invite_id uuid,
+    p_invite_token text,
     p_user_id uuid
 )
 RETURNS void AS $$
 DECLARE
-    v_org_id uuid;
-    v_role public.org_role;
+    v_invite public.invites;
 BEGIN
-    -- Obtener los detalles de la invitación
-    SELECT org_id, role INTO v_org_id, v_role
-    FROM public.organization_invites
-    WHERE id = p_invite_id;
+    SELECT * INTO v_invite
+    FROM public.invites
+    WHERE token = p_invite_token AND status = 'pending';
 
-    -- Si no se encuentra la invitación, lanzar un error
     IF NOT FOUND THEN
-        RAISE EXCEPTION 'Invite not found';
+        RAISE EXCEPTION 'Invite not found or has expired';
     END IF;
 
-    -- Añadir al usuario a la tabla de miembros
-    -- Si ya es miembro, ON CONFLICT DO NOTHING lo ignora silenciosamente
     INSERT INTO public.organization_members (org_id, user_id, role)
-    VALUES (v_org_id, p_user_id, v_role)
-    ON CONFLICT (org_id, user_id) DO NOTHING;
+    VALUES (v_invite.org_id, p_user_id, v_invite.role)
+    ON CONFLICT (org_id, user_id) DO UPDATE SET role = v_invite.role; -- Si ya es miembro, actualiza su rol
 
-    -- Marcar la invitación como aceptada (el frontend la borra después)
-    UPDATE public.organization_invites
-    SET accepted_at = now()
-    WHERE id = p_invite_id;
+    UPDATE public.invites
+    SET status = 'accepted', updated_at = now()
+    WHERE id = v_invite.id;
 
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
-
-COMMENT ON FUNCTION public.accept_invite(uuid, uuid) IS 'Adds a user to an organization based on an invite and marks it as accepted.';
-
+COMMENT ON FUNCTION public.accept_invite(text, uuid) IS 'Adds a user to an organization based on an invite token and marks it as accepted.';
 
 -- Función para transferir la propiedad de una organización
 CREATE OR REPLACE FUNCTION public.transfer_org_ownership(
-    p_org_slug text,
-    p_current_owner_id uuid,
+    p_org_id uuid,
     p_new_owner_id uuid
 )
 RETURNS void AS $$
 DECLARE
-    v_org_id uuid;
-    is_current_owner boolean;
-    is_new_owner_member boolean;
+    v_current_owner_id uuid;
 BEGIN
-    -- Obtener el ID de la organización a partir del slug
-    SELECT id INTO v_org_id FROM public.organizations WHERE slug = p_org_slug;
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'Organization not found';
-    END IF;
-
-    -- Verificar que el usuario actual es el propietario
-    SELECT EXISTS (
-        SELECT 1 FROM public.organization_members
-        WHERE org_id = v_org_id AND user_id = p_current_owner_id AND role = 'owner'
-    ) INTO is_current_owner;
-
-    IF NOT is_current_owner THEN
+    -- Verificar que el que llama es el propietario actual
+    SELECT user_id INTO v_current_owner_id FROM public.organization_members WHERE org_id = p_org_id AND role = 'owner';
+    
+    IF v_current_owner_id IS NULL OR v_current_owner_id != auth.uid() THEN
         RAISE EXCEPTION 'Only the current owner can transfer ownership.';
     END IF;
 
     -- Verificar que el nuevo propietario es un miembro de la organización
-    SELECT EXISTS (
-        SELECT 1 FROM public.organization_members
-        WHERE org_id = v_org_id AND user_id = p_new_owner_id
-    ) INTO is_new_owner_member;
-
-    IF NOT is_new_owner_member THEN
+    IF NOT public.is_org_member(p_org_id, p_new_owner_id) THEN
         RAISE EXCEPTION 'New owner must be a member of the organization.';
     END IF;
 
     -- Iniciar transacción
-    -- Degradar al propietario actual a 'admin'
-    UPDATE public.organization_members
-    SET role = 'admin'
-    WHERE org_id = v_org_id AND user_id = p_current_owner_id;
-
-    -- Ascender al nuevo propietario a 'owner'
-    UPDATE public.organization_members
-    SET role = 'owner'
-    WHERE org_id = v_org_id AND user_id = p_new_owner_id;
-
+    UPDATE public.organization_members SET role = 'admin' WHERE org_id = p_org_id AND user_id = v_current_owner_id;
+    UPDATE public.organization_members SET role = 'owner' WHERE org_id = p_org_id AND user_id = p_new_owner_id;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
-
-COMMENT ON FUNCTION public.transfer_org_ownership(text, uuid, uuid) IS 'Atomically transfers ownership of an organization from one member to another.';
-
+COMMENT ON FUNCTION public.transfer_org_ownership(uuid, uuid) IS 'Transfers ownership of an organization from the current owner to a new owner.';
 
 -- Función para obtener métricas de análisis para el panel de administración
 CREATE OR REPLACE FUNCTION public.get_analytics_metrics()
@@ -375,11 +316,9 @@ BEGIN
         (SELECT count(*) FROM auth.users) AS total_users,
         (SELECT count(*) FROM public.organizations) AS total_organizations,
         (SELECT count(*) FROM public.organization_members) AS total_memberships,
-        (SELECT count(*) FROM public.organization_invites WHERE accepted_at IS NULL) AS pending_invites;
+        (SELECT count(*) FROM public.invites WHERE status = 'pending') AS pending_invites;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
-
 COMMENT ON FUNCTION public.get_analytics_metrics() IS 'Retrieves key metrics for the admin analytics dashboard.';
-
 
 -- ========= FIN DEL SCRIPT =========
