@@ -116,6 +116,7 @@ export async function POST(request: NextRequest) {
         p_avatar_url: body.avatar_url || null,
         p_user_id: user.id
       })
+      .select('*')
       .single()
 
     if (orgError) {

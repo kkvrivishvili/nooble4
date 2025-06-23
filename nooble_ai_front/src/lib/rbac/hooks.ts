@@ -26,7 +26,7 @@ export function useRole() {
         
         const { data, error } = await supabase
           .from('roles')
-          .select('role')
+          .select('*') // Cambiado de 'role' a '*' para depuración
           .eq('user_id', session.user.id)
           .maybeSingle()
         
@@ -38,7 +38,7 @@ export function useRole() {
         }
 
         if (isMounted) {
-          setRole(data?.role || 'user')
+          setRole(data?.system_role || 'user')
           setError(null)
         }
       } catch (error) {

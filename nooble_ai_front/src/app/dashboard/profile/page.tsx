@@ -52,6 +52,7 @@ export default async function ProfilePage() {
       .insert([
         {
           id: user.id,
+          user_id: user.id,
           updated_at: new Date().toISOString(),
         },
       ])
