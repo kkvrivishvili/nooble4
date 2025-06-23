@@ -1,28 +1,87 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
+### Python ###
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+dist/
+develop-eggs/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+.pytest_cache/
+pytestdebug.log
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# Celery
+celerybeat-schedule
+
+# SageMath parsed files
+*.sage.py
+
+### Node / Next.js / Shadcn ###
 # dependencies
-/node_modules
-/.pnp
+node_modules/
+.pnp/
 .pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
 
 # testing
-/coverage
+coverage/
 
 # next.js
-/.next/
-/out/
+.next/
+out/
 
 # production
-/build
+build/
 
 # misc
 .DS_Store
-*.pem
 
 # debug
 npm-debug.log*
@@ -30,8 +89,11 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# local env files
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
 # vercel
 .vercel
@@ -40,26 +102,19 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Informational
-.projectoverview
-.profilessprint
-.organizationssprint
-.cookiehandle
-.prompts
-.magiclinksprint
-sprints/
+# Turbo
+.turbo
 
-# Environment
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# IDE
+### General ###
+# IDE-specific
 .idea/
 *.swp
 *.swo
+
+# VSCode - Ignores the entire folder except for shared settings and extensions
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 
 # OS
 Thumbs.db
@@ -70,7 +125,7 @@ Thumbs.db
 *.db
 
 # Logs
-logs
+logs/
 *.log
 
 # Cache
@@ -81,13 +136,6 @@ logs
 # Coverage
 .nyc_output
 coverage/
-
-# Turbo
-.turbo
-
-# Build
-dist/
-build/
 
 # Supabase
 **/supabase/.branches
@@ -107,15 +155,17 @@ build/
 *.temp
 .history/
 
-
 # SQL
 *.sql
 *.projectSQL(local dev)
 .sqlforcursor/
 
-
-# VSCode
-.vscode/*
-!.vscode/settings.json
-!.vscode/extensions.json
+# Informational - Custom
+.projectoverview
+.profilessprint
+.organizationssprint
+.cookiehandle
+.prompts
+.magiclinksprint
+sprints/
 
