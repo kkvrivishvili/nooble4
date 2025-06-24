@@ -111,7 +111,7 @@ class QueryService(BaseService):
         
         # Procesar con handler
         response = await self.simple_handler.process_simple_query(
-            payload=payload,
+            data=action.data,
             tenant_id=action.tenant_id,
             session_id=action.session_id,
             task_id=action.task_id,
@@ -134,7 +134,7 @@ class QueryService(BaseService):
         
         # Procesar con handler
         response = await self.advance_handler.process_advance_query(
-            payload=payload,
+            data=action.data,
             tenant_id=action.tenant_id,
             session_id=action.session_id,
             task_id=action.task_id,

@@ -127,7 +127,8 @@ class AdvanceHandler(BaseHandler):
             # Crear cliente Groq con timeout dinámico
             groq_client = GroqClient(
                 api_key=self.app_settings.groq_api_key,
-                timeout=max(60, query_config.max_tokens // 100)  # Timeout dinámico basado en max_tokens
+                timeout=max(60, query_config.max_tokens // 100),  # Timeout dinámico basado en max_tokens
+                max_retries=self.app_settings.groq_max_retries
             )
             
             # Llamar al cliente de Groq
@@ -135,20 +136,26 @@ class AdvanceHandler(BaseHandler):
             
             # Construir respuesta
             end_time = time.time()
+            
+            # Crear mensaje de respuesta
+            response_message = ChatMessage(
+                role="assistant",
+                content=response_text
+            )
+            
             response = ChatResponse(
                 conversation_id=UUID(query_id),
-                content=response_text,
-                model=query_config.model,
+                message=response_message,
                 usage=token_usage,
                 sources=[],  # En advance mode no hay sources directos de RAG
-                processing_time=end_time - start_time
+                execution_time_ms=int((end_time - start_time) * 1000)
             )
             
             self._logger.info(
                 f"Chat avanzado procesado exitosamente. Tokens: {token_usage.total_tokens}",
                 extra={
                     "query_id": query_id,
-                    "processing_time": response.processing_time,
+                    "processing_time": response.execution_time_ms,
                     "tools_used": len(tools)
                 }
             )

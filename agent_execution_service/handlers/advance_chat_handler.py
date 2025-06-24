@@ -253,11 +253,11 @@ class AdvanceChatHandler(BaseHandler):
                 history.add_message(user_message)
                 history.add_message(final_message)
                 
-                # Guardar en cache usando history_ttl de execution_config
+                # Guardar en cache usando conversation_cache_ttl de execution_config
                 await self.history_manager.save_state(
                     cache_key,
                     history,
-                    expiration_seconds=execution_config.history_ttl
+                    expiration_seconds=execution_config.conversation_cache_ttl
                 )
                 
                 # Guardar conversación en Conversation Service (fire-and-forget)
@@ -339,7 +339,7 @@ class AdvanceChatHandler(BaseHandler):
         if not tool:
             return {
                 "error": f"Tool '{tool_name}' not found",
-                "available_tools": list(self.tool_registry.list_tools())
+                "available_tools": list(self.tool_registry.get_all().keys())
             }
         
         try:

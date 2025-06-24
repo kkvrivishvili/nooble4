@@ -17,7 +17,7 @@ class QueryServiceSettings(CommonAppSettings):
     domain_name: str = Field(default="query", description="Dominio del servicio para colas y logging")
     
     # Groq API Settings
-    groq_api_key: str = Field(default="", description="API Key para Groq (usar variable de entorno QUERY_GROQ_API_KEY)")
+    groq_api_key: str = Field(..., description="API Key para Groq (usar variable de entorno QUERY_GROQ_API_KEY)")
     groq_api_base_url: str = Field(default="https://api.groq.com/openai/v1", description="URL base de la API de Groq")
     
     # LLM Operational Settings

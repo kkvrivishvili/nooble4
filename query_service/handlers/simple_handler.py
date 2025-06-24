@@ -210,20 +210,26 @@ class SimpleHandler(BaseHandler):
             
             # Construir respuesta
             end_time = time.time()
+            
+            # Crear mensaje de respuesta
+            response_message = ChatMessage(
+                role="assistant",
+                content=response_text
+            )
+            
             response = ChatResponse(
                 conversation_id=UUID(conversation_id),
-                content=response_text,
-                model=query_config.model,
+                message=response_message,
                 usage=token_usage,
                 sources=sources,
-                processing_time=end_time - start_time
+                execution_time_ms=int((end_time - start_time) * 1000)
             )
             
             self.logger.info(
                 f"Simple query procesada exitosamente. Tokens: {token_usage.total_tokens}",
                 extra={
                     "query_id": conversation_id,
-                    "processing_time": response.processing_time,
+                    "processing_time": response.execution_time_ms,
                     "context_chunks": len(sources)
                 }
             )

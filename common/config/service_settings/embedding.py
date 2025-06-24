@@ -1,8 +1,7 @@
 """
 Definición de la configuración específica para Embedding Service.
 """
-from typing import List, Optional
-
+from typing import List, Optional, Dict
 from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 
@@ -29,6 +28,19 @@ class EmbeddingServiceSettings(CommonAppSettings):
     # --- Configuración de Proveedores de Embeddings (Secretos y URLs) ---
     openai_api_key: Optional[str] = Field(None, description="API Key para OpenAI. Requerida si se usa el proveedor OpenAI.")
     openai_base_url: Optional[str] = Field(None, description="URL base para la API de OpenAI (opcional, útil para proxies o APIs compatibles).")
+    
+    # --- Configuraciones específicas de OpenAI ---
+    openai_default_model: str = Field("text-embedding-3-small", description="Modelo por defecto para embeddings de OpenAI.")
+    openai_timeout_seconds: int = Field(30, description="Timeout para llamadas a la API de OpenAI en segundos.")
+    openai_max_retries: int = Field(3, description="Número máximo de reintentos para llamadas a OpenAI.")
+    default_dimensions_by_model: Dict[str, int] = Field(
+        default_factory=lambda: {
+            "text-embedding-3-small": 1536,
+            "text-embedding-3-large": 3072,
+            "text-embedding-ada-002": 1536
+        },
+        description="Dimensiones por defecto para cada modelo de OpenAI."
+    )
     
     # --- Configuración de Colas y Workers ---
     worker_count: int = Field(default=2, description="Número de workers para procesar embeddings.")

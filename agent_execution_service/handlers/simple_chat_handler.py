@@ -135,11 +135,11 @@ class SimpleChatHandler(BaseHandler):
                 history.add_message(user_message)
                 history.add_message(response.message)
                 
-                # Guardar en cache usando history_ttl de execution_config
+                # Guardar en cache usando conversation_cache_ttl de execution_config
                 await self.history_manager.save_state(
                     cache_key,
                     history,
-                    expiration_seconds=execution_config.history_ttl
+                    expiration_seconds=execution_config.conversation_cache_ttl
                 )
                 
                 # Enviar a Conversation Service para persistencia (fire-and-forget)
