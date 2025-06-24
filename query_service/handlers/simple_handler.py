@@ -41,6 +41,13 @@ class SimpleHandler(BaseHandler):
             timeout=app_settings.search_timeout_seconds
         )
         
+        # Inicializar Groq client
+        self.groq_client = GroqClient(
+            api_key=app_settings.groq_api_key,
+            timeout=app_settings.groq_timeout_seconds,
+            max_retries=app_settings.groq_max_retries
+        )
+        
         self.logger.info("SimpleHandler inicializado")
     
     async def process_simple_query(
@@ -199,7 +206,7 @@ class SimpleHandler(BaseHandler):
             }
             
             # Llamar al cliente de Groq
-            response_text, token_usage = await self.groq_client.create_completion(**groq_payload)
+            response_text, token_usage = await self.groq_client.generate(**groq_payload)
             
             # Construir respuesta
             end_time = time.time()

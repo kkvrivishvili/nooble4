@@ -8,7 +8,7 @@ from pydantic_settings import SettingsConfigDict
 
 from ..base_settings import CommonAppSettings # Ajustado para la nueva ubicación
 
-class ExecutionSettings(CommonAppSettings):
+class ExecutionServiceSettings(CommonAppSettings):
     """Configuración específica para Agent Execution Service."""
 
     model_config = SettingsConfigDict(
@@ -33,7 +33,6 @@ class ExecutionSettings(CommonAppSettings):
 
     # Límites y comportamiento de ejecución
     max_iterations: int = Field(10, description="Máximo de iteraciones para agentes")
-    max_execution_time: int = Field(120, description="Tiempo máximo de ejecución (segundos)")
     max_tools: int = Field(10, description="Número máximo de herramientas que un agente puede usar")
 
     # Configuración de colas
@@ -50,10 +49,5 @@ class ExecutionSettings(CommonAppSettings):
     # Worker configuración
     worker_sleep_seconds: float = Field(1.0, description="Tiempo de espera entre polls para los workers de ejecución")
 
-    # Performance tracking
-    enable_execution_tracking: bool = Field(True, description="Habilitar tracking de métricas de ejecución")
-
     # Tool and Streaming settings
     tool_timeout_seconds: int = Field(30, description="Timeout for individual tool executions in seconds.")
-    stream_chunk_size: int = Field(10, description="Chunk size in tokens for streaming LLM responses.")
-    

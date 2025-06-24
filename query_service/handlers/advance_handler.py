@@ -131,7 +131,7 @@ class AdvanceHandler(BaseHandler):
             )
             
             # Llamar al cliente de Groq
-            response_text, token_usage = await groq_client.create_completion(**groq_payload)
+            response_text, token_usage = await groq_client.generate(**groq_payload)
             
             # Construir respuesta
             end_time = time.time()

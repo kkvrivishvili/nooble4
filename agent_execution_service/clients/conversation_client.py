@@ -8,7 +8,7 @@ from typing import Optional
 
 from common.models.actions import DomainAction
 from common.clients.base_redis_client import BaseRedisClient
-from ..config.settings import ExecutionServiceSettings
+from common.config import ExecutionServiceSettings
 
 logger = logging.getLogger(__name__)
 

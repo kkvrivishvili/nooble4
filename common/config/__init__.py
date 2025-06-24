@@ -12,7 +12,7 @@ from .base_settings import CommonAppSettings
 from .service_settings import (
     AgentManagementSettings,
     OrchestratorSettings,       # Corrected name based on its definition
-    ExecutionSettings,         # Corrected name based on its definition
+    ExecutionServiceSettings,         # Corrected name based on its definition
     ConversationSettings,
     EmbeddingServiceSettings,
     IngestionServiceSettings,
@@ -24,7 +24,7 @@ __all__ = [
     
     "AgentManagementSettings",
     "OrchestratorSettings",
-    "ExecutionSettings",
+    "ExecutionServiceSettings",
     "ConversationSettings",
     "EmbeddingServiceSettings",
     "IngestionServiceSettings",

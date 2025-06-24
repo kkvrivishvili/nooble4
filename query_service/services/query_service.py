@@ -102,6 +102,10 @@ class QueryService(BaseService):
     
     async def _handle_simple(self, action: DomainAction) -> Dict[str, Any]:
         """Maneja query.simple."""
+        # Validar que agent_id esté presente
+        if not action.agent_id:
+            raise AppValidationError("agent_id es requerido para query.simple")
+        
         # Validar y parsear payload como ChatRequest
         payload = ChatRequest.model_validate(action.data)
         
@@ -121,6 +125,10 @@ class QueryService(BaseService):
     
     async def _handle_advance(self, action: DomainAction) -> Dict[str, Any]:
         """Maneja query.advance."""
+        # Validar que agent_id esté presente
+        if not action.agent_id:
+            raise AppValidationError("agent_id es requerido para query.advance")
+        
         # Validar y parsear payload como ChatRequest
         payload = ChatRequest.model_validate(action.data)
         
@@ -131,7 +139,8 @@ class QueryService(BaseService):
             session_id=action.session_id,
             task_id=action.task_id,
             trace_id=action.trace_id,
-            correlation_id=action.correlation_id
+            correlation_id=action.correlation_id,
+            agent_id=action.agent_id
         )
         
         # Retornar respuesta serializada
