@@ -6,6 +6,7 @@ import time
 import uuid
 import json
 from typing import Dict, Any, List, Optional
+import asyncio
 
 from common.handlers.base_handler import BaseHandler
 from common.errors.exceptions import ExternalServiceError
@@ -14,10 +15,9 @@ from common.models.chat_models import (
     ChatResponse,
     ChatMessage,
     TokenUsage,
-    RAGConfig,
-    RAGSearchResult,
     ConversationHistory
 )
+from common.models.config_models import ExecutionConfig
 from common.clients.redis.redis_state_manager import RedisStateManager
 
 from ..config.settings import ExecutionServiceSettings
@@ -58,10 +58,10 @@ class AdvanceChatHandler(BaseHandler):
     async def handle_advance_chat(
         self,
         payload: Dict[str, Any],
-        tenant_id: str,
-        session_id: str,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
         task_id: uuid.UUID,
-        agent_id: Optional[str] = None  # NUEVO parámetro
+        agent_id: uuid.UUID
     ) -> ChatResponse:
         """
         Ejecuta chat avanzado con loop ReAct.
@@ -73,8 +73,8 @@ class AdvanceChatHandler(BaseHandler):
             # Parsear ChatRequest
             chat_request = ChatRequest.model_validate(payload)
             
-            # Necesitamos agent_id
-            agent_id = chat_request.model_dump().get("metadata", {}).get("agent_id", "default-agent")
+            # Extraer execution_config para uso local
+            execution_config = chat_request.execution_config
             
             # Construir key para cache
             cache_key = self._build_cache_key(tenant_id, session_id)
@@ -144,9 +144,9 @@ class AdvanceChatHandler(BaseHandler):
                 if not any(t.get("function", {}).get("name") == "knowledge" for t in chat_request.tools):
                     chat_request.tools.append(knowledge_tool_def)
 
-            # Loop ReAct
+            # Loop ReAct usando execution_config
             iteration = 0
-            max_iterations = self.app_settings.max_react_iterations
+            max_iterations = execution_config.max_iterations
             messages = base_messages.copy()
             final_message = None
             tools_used = []
@@ -154,26 +154,22 @@ class AdvanceChatHandler(BaseHandler):
             while iteration < max_iterations and final_message is None:
                 iteration += 1
                 
-                # Crear request para Query Service
-                current_request = ChatRequest(
-                    messages=messages,
-                    model=chat_request.model,
-                    temperature=chat_request.temperature,
-                    max_tokens=chat_request.max_tokens,
-                    top_p=chat_request.top_p,
-                    frequency_penalty=chat_request.frequency_penalty,
-                    presence_penalty=chat_request.presence_penalty,
-                    stop=chat_request.stop,
-                    tools=chat_request.tools,
-                    tool_choice=chat_request.tool_choice
-                )
+                # Preparar payload limpio para query_service (sin execution_config ni conversation_id)
+                query_payload = {
+                    "messages": messages,
+                    "query_config": chat_request.query_config,
+                    "rag_config": chat_request.rag_config,
+                    "tools": chat_request.tools,
+                    "tool_choice": chat_request.tool_choice
+                }
                 
                 # Llamar a Query Service
                 query_response = await self.query_client.query_advance(
-                    payload=current_request.model_dump(),
+                    payload=query_payload,
                     tenant_id=tenant_id,
                     session_id=session_id,
-                    task_id=task_id
+                    task_id=task_id,
+                    agent_id=agent_id
                 )
                 
                 # Parsear respuesta
@@ -181,20 +177,47 @@ class AdvanceChatHandler(BaseHandler):
                 assistant_message = response.message
                 messages.append(assistant_message)
                 
-                # Si hay tool calls, ejecutarlas
+                # Si hay tool calls, ejecutarlas con timeout de execution_config
                 if assistant_message.tool_calls:
                     for tool_call in assistant_message.tool_calls:
                         tool_name = tool_call["function"]["name"]
                         tools_used.append(tool_name)
                         
-                        # Ejecutar tool
-                        tool_result = await self._execute_tool(
-                            tool_name=tool_name,
-                            arguments=json.loads(tool_call["function"]["arguments"]),
-                            tenant_id=tenant_id,
-                            session_id=session_id,
-                            task_id=task_id
-                        )
+                        # Ejecutar tool con timeout configurado
+                        try:
+                            tool_result = await asyncio.wait_for(
+                                self._execute_tool(
+                                    tool_name=tool_name,
+                                    arguments=json.loads(tool_call["function"]["arguments"]),
+                                    tenant_id=tenant_id,
+                                    session_id=session_id,
+                                    task_id=task_id
+                                ),
+                                timeout=execution_config.tool_timeout
+                            )
+                        except asyncio.TimeoutError:
+                            error_msg = f"Tool '{tool_name}' execution timed out after {execution_config.tool_timeout} seconds"
+                            self._logger.error(
+                                f"Tool execution timeout",
+                                extra={
+                                    "tool_name": tool_name,
+                                    "timeout_seconds": execution_config.tool_timeout,
+                                    "conversation_id": conversation_id,
+                                    "iteration": iteration
+                                }
+                            )
+                            tool_result = {"error": error_msg}
+                        except Exception as e:
+                            self._logger.error(
+                                f"Tool execution failed",
+                                extra={
+                                    "tool_name": tool_name,
+                                    "error": str(e),
+                                    "conversation_id": conversation_id,
+                                    "iteration": iteration
+                                }
+                            )
+                            tool_result = {"error": f"Tool execution failed: {str(e)}"}
                         
                         # Agregar resultado como mensaje
                         tool_message = ChatMessage(
@@ -229,11 +252,11 @@ class AdvanceChatHandler(BaseHandler):
                 history.add_message(user_message)
                 history.add_message(final_message)
                 
-                # Guardar en cache con TTL de 30 minutos
+                # Guardar en cache usando history_ttl de execution_config
                 await self.history_manager.save_state(
                     cache_key,
                     history,
-                    expiration_seconds=1800  # 30 minutos
+                    expiration_seconds=execution_config.history_ttl
                 )
                 
                 # Guardar conversación en Conversation Service (fire-and-forget)
@@ -245,9 +268,9 @@ class AdvanceChatHandler(BaseHandler):
                     tenant_id=tenant_id,
                     session_id=session_id,
                     task_id=task_id,
+                    agent_id=agent_id,
                     metadata={
                         "mode": "advance",
-                        "agent_id": agent_id,
                         "collections": chat_request.rag_config.collection_ids if chat_request.rag_config else [],
                         "tools_used": tools_used,
                         "iterations": iteration
@@ -274,7 +297,7 @@ class AdvanceChatHandler(BaseHandler):
             self._logger.error(f"Error en advance chat handler: {e}", exc_info=True)
             raise ExternalServiceError(f"Error procesando chat avanzado: {str(e)}")
 
-    def _build_cache_key(self, tenant_id: str, session_id: str) -> str:
+    def _build_cache_key(self, tenant_id: uuid.UUID, session_id: uuid.UUID) -> str:
         """Construye la key de cache siguiendo el patrón estándar."""
         prefix = "nooble4"
         environment = self.app_settings.environment
@@ -283,8 +306,8 @@ class AdvanceChatHandler(BaseHandler):
     async def _register_knowledge_tool(
         self, 
         rag_config: RAGConfig,
-        tenant_id: str,
-        session_id: str,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
         task_id: uuid.UUID
     ) -> None:
         """Registra la herramienta de conocimiento si hay configuración RAG."""
@@ -303,8 +326,8 @@ class AdvanceChatHandler(BaseHandler):
         self,
         tool_name: str,
         arguments: Dict[str, Any],
-        tenant_id: str,
-        session_id: str,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
         task_id: uuid.UUID
     ) -> Dict[str, Any]:
         """Ejecuta una herramienta y retorna el resultado."""
@@ -313,7 +336,7 @@ class AdvanceChatHandler(BaseHandler):
         if not tool:
             return {
                 "error": f"Tool '{tool_name}' not found",
-                "summary": "Tool not available"
+                "available_tools": list(self.tool_registry.list_tools())
             }
         
         try:
@@ -321,8 +344,8 @@ class AdvanceChatHandler(BaseHandler):
             return result
                 
         except Exception as e:
-            self._logger.error(f"Error executing tool '{tool_name}': {e}")
+            self._logger.error(f"Error ejecutando tool {tool_name}: {e}", exc_info=True)
             return {
-                "error": str(e),
-                "summary": f"Tool '{tool_name}' failed"
+                "error": f"Tool execution failed: {str(e)}",
+                "tool_name": tool_name
             }

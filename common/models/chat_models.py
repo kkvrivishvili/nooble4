@@ -2,29 +2,14 @@
 Modelos unificados para chat y embeddings compatibles con OpenAI y Groq SDKs.
 Simplificados para uso directo sin transformaciones.
 """
+import uuid
 from typing import Optional, List, Dict, Any, Union, Literal
 from pydantic import BaseModel, Field
 from enum import Enum
+from datetime import datetime, timezone
 
-
-# =============================================================================
-# ENUMS
-# =============================================================================
-
-class ChatModel(str, Enum):
-    """Modelos de chat soportados en Groq."""
-    LLAMA3_70B = "llama-3.3-70b-versatile"
-    LLAMA3_8B = "llama-3.3-8b-instruct"
-    MIXTRAL_8X7B = "mixtral-8x7b-32768"
-    GEMMA_7B = "gemma-7b-it"
-
-
-class EmbeddingModel(str, Enum):
-    """Modelos de embedding soportados."""
-    TEXT_EMBEDDING_3_SMALL = "text-embedding-3-small"
-    TEXT_EMBEDDING_3_LARGE = "text-embedding-3-large"
-    TEXT_EMBEDDING_ADA_002 = "text-embedding-ada-002"
-
+# Importar las configuraciones centralizadas
+from .config_models import ExecutionConfig, QueryConfig, RAGConfig, EmbeddingModel, ChatModel
 
 # =============================================================================
 # CORE MODELS (Compatible con SDKs)
@@ -64,29 +49,22 @@ class TokenUsage(BaseModel):
 class ChatRequest(BaseModel):
     """
     Request unificado para chat (simple y avanzado).
-    Compatible directamente con Groq API.
+    Los parámetros del modelo ahora van en query_config.
     """
-    # Mensajes de la conversación
+    # Datos principales
     messages: List[ChatMessage] = Field(..., min_items=1, description="Mensajes de la conversación")
     
-    # Configuración del modelo
-    model: ChatModel = Field(default=ChatModel.LLAMA3_70B, description="Modelo a usar")
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    max_tokens: int = Field(default=2048, gt=0)
-    top_p: float = Field(default=1.0, ge=0.0, le=1.0)
-    frequency_penalty: float = Field(default=0.0, ge=-2.0, le=2.0)
-    presence_penalty: float = Field(default=0.0, ge=-2.0, le=2.0)
-    stop: Optional[Union[str, List[str]]] = Field(None, description="Secuencias de parada")
-    
-    # Para chat avanzado (tools)
+    # Herramientas (para chat avanzado)
     tools: Optional[List[Dict[str, Any]]] = Field(None, description="Herramientas disponibles (formato Groq)")
     tool_choice: Optional[Union[Literal["none", "auto"], Dict[str, Any]]] = Field(None)
     
-    # Para RAG (cuando aplique)
-    rag_config: Optional["RAGConfig"] = Field(None, description="Configuración RAG si se necesita búsqueda")
+    # Configuraciones obligatorias (validadas antes en el borde)
+    execution_config: ExecutionConfig = Field(..., description="Configuración de ejecución del agente")
+    query_config: QueryConfig = Field(..., description="Configuración para el modelo LLM")
+    rag_config: RAGConfig = Field(..., description="Configuración RAG para búsqueda")
     
-    # Metadata
-    conversation_id: Optional[str] = Field(None, description="ID de conversación para tracking")
+    # Conversación opcional (no existe en primera iteración)
+    conversation_id: Optional[uuid.UUID] = Field(None, description="ID de conversación para tracking")
     
     model_config = {"extra": "forbid"}
 
@@ -100,11 +78,11 @@ class ChatResponse(BaseModel):
     usage: TokenUsage = Field(..., description="Uso de tokens")
     
     # Metadata
-    conversation_id: str = Field(..., description="ID de la conversación")
+    conversation_id: uuid.UUID = Field(..., description="ID de la conversación")
     execution_time_ms: int = Field(..., description="Tiempo de ejecución")
     
     # Para RAG
-    sources: List[str] = Field(default_factory=list, description="IDs de documentos usados")
+    sources: List[uuid.UUID] = Field(default_factory=list, description="IDs de documentos usados")
     
     # Para ReAct
     iterations: Optional[int] = Field(None, description="Número de iteraciones ReAct (solo avanzado)")
@@ -116,26 +94,12 @@ class ChatResponse(BaseModel):
 # RAG SPECIFIC
 # =============================================================================
 
-class RAGConfig(BaseModel):
-    """Configuración para búsqueda RAG."""
-    collection_ids: List[str] = Field(..., min_items=1, description="IDs de colecciones")
-    document_ids: Optional[List[str]] = Field(None, description="IDs de documentos específicos")
-    top_k: int = Field(default=5, gt=0, le=20)
-    similarity_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
-    
-    # Configuración de embeddings
-    embedding_model: EmbeddingModel = Field(default=EmbeddingModel.TEXT_EMBEDDING_3_SMALL)
-    embedding_dimensions: Optional[int] = Field(None)
-    
-    model_config = {"extra": "forbid"}
-
-
 class RAGChunk(BaseModel):
     """Chunk encontrado en búsqueda RAG."""
-    chunk_id: str
+    chunk_id: uuid.UUID
     content: str
-    document_id: str
-    collection_id: str
+    document_id: uuid.UUID
+    collection_id: uuid.UUID
     similarity_score: float = Field(ge=0.0, le=1.0)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     
@@ -183,10 +147,10 @@ class ConversationHistory(BaseModel):
     Historial de conversación compatible con OpenAI/Groq.
     Mantiene máximo 5 mensajes para optimizar tokens.
     """
-    conversation_id: str = Field(..., description="ID único de la conversación")
-    tenant_id: str = Field(..., description="ID del tenant")
-    session_id: str = Field(..., description="ID de la sesión")
-    agent_id: str = Field(..., description="ID del agente")
+    conversation_id: uuid.UUID = Field(..., description="ID único de la conversación")
+    tenant_id: uuid.UUID = Field(..., description="ID del tenant")
+    session_id: uuid.UUID = Field(..., description="ID de la sesión")
+    agent_id: uuid.UUID = Field(..., description="ID del agente")
     messages: List[ChatMessage] = Field(
         default_factory=list, 
         description="Mensajes de la conversación (máximo 5)"

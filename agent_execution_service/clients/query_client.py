@@ -46,10 +46,10 @@ class QueryClient:
     async def query_simple(
         self,
         payload: Dict[str, Any],  # Ya es ChatRequest serializado
-        tenant_id: str,
-        session_id: str,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
         task_id: uuid.UUID,
-        agent_id: Optional[str] = None, 
+        agent_id: uuid.UUID,
         timeout: Optional[int] = None
     ) -> Dict[str, Any]:
         """
@@ -96,10 +96,10 @@ class QueryClient:
     async def query_advance(
         self,
         payload: Dict[str, Any],  # Ya es ChatRequest serializado
-        tenant_id: str,
-        session_id: str,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
         task_id: uuid.UUID,
-        agent_id: Optional[str] = None, 
+        agent_id: uuid.UUID,
         timeout: Optional[int] = None
     ) -> Dict[str, Any]:
         """
@@ -147,8 +147,8 @@ class QueryClient:
         self,
         query_text: str,
         rag_config: Dict[str, Any],  # RAGConfig serializado
-        tenant_id: str,
-        session_id: str,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
         task_id: uuid.UUID,
         top_k: Optional[int] = None,
         similarity_threshold: Optional[float] = None,

@@ -4,11 +4,12 @@ Handler para chat simple con RAG integrado.
 import logging
 import time
 import uuid
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from common.handlers.base_handler import BaseHandler
 from common.errors.exceptions import ExternalServiceError
-from common.models.chat_models import ChatRequest, ChatResponse, ChatMessage, RAGConfig, ConversationHistory
+from common.models.chat_models import ChatRequest, ChatResponse, ChatMessage, ConversationHistory
+from common.models.config_models import ExecutionConfig
 from common.clients.redis.redis_state_manager import RedisStateManager
 
 from ..config.settings import ExecutionServiceSettings
@@ -41,10 +42,10 @@ class SimpleChatHandler(BaseHandler):
     async def handle_simple_chat(
         self,
         payload: Dict[str, Any],
-        tenant_id: str,
-        session_id: str,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
         task_id: uuid.UUID,
-        agent_id: Optional[str] = None  # NUEVO: recibir agent_id como parámetro
+        agent_id: uuid.UUID
     ) -> ChatResponse:
         """
         Ejecuta chat simple delegando al Query Service.
@@ -56,10 +57,8 @@ class SimpleChatHandler(BaseHandler):
             # Parsear el ChatRequest
             chat_request = ChatRequest.model_validate(payload)
             
-            # Usar agent_id del header o default
-            if not agent_id:
-                agent_id = "default-agent"
-                self.logger.warning("No se proporcionó agent_id, usando default")
+            # Extraer execution_config para uso local
+            execution_config = chat_request.execution_config
             
             # Construir key para cache
             cache_key = self._build_cache_key(tenant_id, session_id)
@@ -105,13 +104,20 @@ class SimpleChatHandler(BaseHandler):
                 )
                 self.logger.info(f"Nueva conversación iniciada: {conversation_id} para agent: {agent_id}")
 
+            # Preparar payload limpio para query_service (sin execution_config ni conversation_id)
+            query_payload = {
+                "messages": chat_request.messages,  # Con historial integrado
+                "query_config": chat_request.query_config,
+                "rag_config": chat_request.rag_config
+            }
+
             # Delegar al Query Service - pasando agent_id en el header
             query_response = await self.query_client.query_simple(
-                payload=chat_request.model_dump(),
+                payload=query_payload,
                 tenant_id=tenant_id,
                 session_id=session_id,
                 task_id=task_id,
-                agent_id=agent_id  # NUEVO: pasar agent_id
+                agent_id=agent_id
             )
 
             # Parsear respuesta
@@ -129,11 +135,11 @@ class SimpleChatHandler(BaseHandler):
                 history.add_message(user_message)
                 history.add_message(response.message)
                 
-                # Guardar en cache con TTL de 30 minutos
+                # Guardar en cache usando history_ttl de execution_config
                 await self.history_manager.save_state(
                     cache_key,
                     history,
-                    expiration_seconds=1800  # 30 minutos
+                    expiration_seconds=execution_config.history_ttl
                 )
                 
                 # Enviar a Conversation Service para persistencia (fire-and-forget)
@@ -146,7 +152,7 @@ class SimpleChatHandler(BaseHandler):
                     tenant_id=tenant_id,
                     session_id=session_id,
                     task_id=task_id,
-                    agent_id=agent_id,  # Ahora va en el header
+                    agent_id=agent_id,
                     metadata={
                         "mode": "simple",
                         "collections": chat_request.rag_config.collection_ids if chat_request.rag_config else [],
@@ -163,7 +169,7 @@ class SimpleChatHandler(BaseHandler):
             self.logger.error(f"Error en simple chat handler: {e}", exc_info=True)
             raise ExternalServiceError(f"Error procesando chat simple: {str(e)}")
     
-    def _build_cache_key(self, tenant_id: str, session_id: str) -> str:
+    def _build_cache_key(self, tenant_id: uuid.UUID, session_id: uuid.UUID) -> str:
         """Construye la key de cache siguiendo el patrón estándar."""
         prefix = "nooble4"
         environment = self.app_settings.environment
