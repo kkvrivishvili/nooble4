@@ -17,7 +17,7 @@ class EmbeddingBatchPayload(BaseModel):
     """Payload para embedding.batch_process - Procesamiento por lotes."""
     
     texts: List[str] = Field(..., description="Lista de textos del lote")
-    model: Optional[str] = Field(None, description="Modelo de embedding")
+    model: str = Field(..., description="Modelo de embedding a utilizar. Este campo es obligatorio.")
     dimensions: Optional[int] = Field(None, description="Dimensiones del vector")
     
     # Campos para propagar desde ingestion_service

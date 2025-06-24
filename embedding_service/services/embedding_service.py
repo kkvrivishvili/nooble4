@@ -191,8 +191,8 @@ class EmbeddingService(BaseService):
         payload = EmbeddingBatchPayload.model_validate(action.data)
         
         try:
-            # Determinar modelo a usar
-            model = payload.model or self.app_settings.openai_default_model
+            # El modelo ahora es un campo obligatorio en el payload
+            model = payload.model
             
             # Generar embeddings
             result = await self.openai_handler.generate_embeddings(
