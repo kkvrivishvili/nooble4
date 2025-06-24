@@ -125,7 +125,7 @@ class AdvanceHandler(BaseHandler):
                 "top_p": query_config.top_p,
                 "frequency_penalty": query_config.frequency_penalty,
                 "presence_penalty": query_config.presence_penalty,
-                "stop": query_config.stop_sequences if query_config.stop_sequences else None,
+                "stop": query_config.stop if query_config.stop else None,
                 "tools": tools,  # Parámetro de nivel superior según especificaciones de Groq
                 "tool_choice": tool_choice  # Parámetro de nivel superior según especificaciones de Groq
             }

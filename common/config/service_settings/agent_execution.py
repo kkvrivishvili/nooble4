@@ -25,12 +25,6 @@ class ExecutionServiceSettings(CommonAppSettings):
     # Campos específicos del Execution Service
     domain_name: str = Field("execution", description="Dominio específico para colas y lógica del servicio de ejecución.")
 
-    # URLs de servicios externos
-    embedding_service_url: str = Field("http://localhost:8001", description="URL del Embedding Service")
-    query_service_url: str = Field("http://localhost:8002", description="URL del Query Service")
-    conversation_service_url: str = Field("http://localhost:8004", description="URL del Conversation Service")
-    agent_management_service_url: str = Field("http://localhost:8003", description="URL del Agent Management Service")
-
     # Límites y comportamiento de ejecución
     max_iterations: int = Field(10, description="Máximo de iteraciones para agentes")
     max_tools: int = Field(10, description="Número máximo de herramientas que un agente puede usar")

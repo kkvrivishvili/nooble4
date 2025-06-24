@@ -200,7 +200,7 @@ class SimpleHandler(BaseHandler):
                 "top_p": query_config.top_p,
                 "frequency_penalty": query_config.frequency_penalty,
                 "presence_penalty": query_config.presence_penalty,
-                "stop": query_config.stop_sequences if query_config.stop_sequences else None
+                "stop": query_config.stop if query_config.stop else None,
             }
             
             # Aplicar configuración dinámica si está especificada en query_config

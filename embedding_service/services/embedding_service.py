@@ -11,6 +11,8 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
+from ..config.service_settings import EmbeddingServiceSettings
+from ..clients.openai_client import OpenAIClient
 from common.services import BaseService
 from common.models import DomainAction
 from common.errors.exceptions import InvalidActionError, ExternalServiceError
