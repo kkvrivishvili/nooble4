@@ -53,6 +53,8 @@ class SimpleHandler(BaseHandler):
     async def process_simple_query(
         self,
         data: Dict[str, Any],
+        query_config: "QueryConfig",  # Config explícita desde DomainAction
+        rag_config: "RAGConfig",      # Config explícita desde DomainAction
         tenant_id: UUID,
         session_id: UUID,
         task_id: UUID,
@@ -65,21 +67,14 @@ class SimpleHandler(BaseHandler):
         conversation_id = str(correlation_id) if correlation_id else str(uuid4())
         
         try:
-            # Extraer configuraciones del payload preparado por agent_execution_service
+            # Extraer datos limpios del payload (sin configuraciones)
             raw_messages = data.get("messages", [])
-            query_config_data = data.get("query_config")
-            rag_config_data = data.get("rag_config")
             
             # Validar datos requeridos
             if not raw_messages:
                 raise AppValidationError("messages es requerido")
-            if not query_config_data:
+            if not query_config:
                 raise AppValidationError("query_config es requerido")
-            
-            # Parsear configuraciones
-            from common.models.config_models import QueryConfig, RAGConfig
-            query_config = QueryConfig.model_validate(query_config_data)
-            rag_config = RAGConfig.model_validate(rag_config_data) if rag_config_data else None
             
             # Validaciones específicas de Query Service para query_config
             self._validate_query_config(query_config)
@@ -291,7 +286,7 @@ class SimpleHandler(BaseHandler):
         
         return "\n\n".join(context_parts)
     
-    def _validate_query_config(self, query_config: QueryConfig):
+    def _validate_query_config(self, query_config: "QueryConfig"):
         # Validar campos requeridos
         if not query_config.model:
             raise AppValidationError("Modelo de lenguaje es requerido")
@@ -320,7 +315,7 @@ class SimpleHandler(BaseHandler):
         if query_config.presence_penalty < 0 or query_config.presence_penalty > 1:
             raise AppValidationError("Penalización de presencia debe estar entre 0 y 1")
     
-    def _validate_rag_config(self, rag_config: RAGConfig):
+    def _validate_rag_config(self, rag_config: "RAGConfig"):
         # Validar campos requeridos
         if not rag_config.collection_ids:
             raise AppValidationError("IDs de colección son requeridos")

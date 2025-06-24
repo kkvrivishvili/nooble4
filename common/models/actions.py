@@ -3,6 +3,9 @@ from pydantic import BaseModel, Field, model_validator, ConfigDict
 import uuid
 from datetime import datetime, timezone
 
+# Import de configuraciones específicas
+from .config_models import ExecutionConfig, QueryConfig, RAGConfig
+
 # Modelo de Error, alineado con standart_payload.md
 class ErrorDetail(BaseModel):
     """
@@ -39,6 +42,11 @@ class DomainAction(BaseModel):
     # --- Para Callbacks (Comunicación Asíncrona con Respuesta Diferida) ---
     callback_queue_name: Optional[str] = Field(None, description="Nombre de la cola Redis donde se espera la respuesta/callback (para patrones pseudo-síncronos o async con callback).")
     callback_action_type: Optional[str] = Field(None, description="El action_type que tendrá el mensaje de callback/respuesta.")
+
+    # --- Configuraciones por Servicio ---
+    execution_config: Optional[ExecutionConfig] = Field(None, description="Configuración específica para Agent Execution Service")
+    query_config: Optional[QueryConfig] = Field(None, description="Configuración específica para Query Service") 
+    rag_config: Optional[RAGConfig] = Field(None, description="Configuración específica para RAG en Query Service")
 
     # --- Payload y Metadatos ---
     data: Dict[str, Any] = Field(..., description="Payload específico de la acción, serializado como un diccionario. El servicio receptor es responsable de deserializar y validar este diccionario en un modelo Pydantic específico basado en el 'action_type'. Este campo contiene los datos primarios necesarios para ejecutar la acción.")

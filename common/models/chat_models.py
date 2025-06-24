@@ -49,7 +49,8 @@ class TokenUsage(BaseModel):
 class ChatRequest(BaseModel):
     """
     Request unificado para chat (simple y avanzado).
-    Los parámetros del modelo ahora van en query_config.
+    Contiene únicamente datos de chat. Las configuraciones se obtienen 
+    del DomainAction (action.execution_config, action.query_config, action.rag_config).
     """
     # Datos principales
     messages: List[ChatMessage] = Field(..., min_items=1, description="Mensajes de la conversación")
@@ -57,11 +58,6 @@ class ChatRequest(BaseModel):
     # Herramientas (para chat avanzado)
     tools: Optional[List[Dict[str, Any]]] = Field(None, description="Herramientas disponibles (formato Groq)")
     tool_choice: Optional[Union[Literal["none", "auto"], Dict[str, Any]]] = Field(None)
-    
-    # Configuraciones obligatorias (validadas antes en el borde)
-    execution_config: ExecutionConfig = Field(..., description="Configuración de ejecución del agente")
-    query_config: QueryConfig = Field(..., description="Configuración para el modelo LLM")
-    rag_config: RAGConfig = Field(..., description="Configuración RAG para búsqueda")
     
     # Conversación opcional (no existe en primera iteración)
     conversation_id: Optional[uuid.UUID] = Field(None, description="ID de conversación para tracking")

@@ -9,7 +9,7 @@ from typing import Dict, Any
 from common.handlers.base_handler import BaseHandler
 from common.errors.exceptions import ExternalServiceError
 from common.models.chat_models import ChatRequest, ChatResponse, ChatMessage, ConversationHistory
-from common.models.config_models import ExecutionConfig
+from common.models.config_models import ExecutionConfig, QueryConfig, RAGConfig
 from common.clients.redis.redis_state_manager import RedisStateManager
 
 from ..config.settings import ExecutionServiceSettings
@@ -42,6 +42,9 @@ class SimpleChatHandler(BaseHandler):
     async def handle_simple_chat(
         self,
         payload: Dict[str, Any],
+        execution_config: ExecutionConfig,
+        query_config: QueryConfig,
+        rag_config: RAGConfig,
         tenant_id: uuid.UUID,
         session_id: uuid.UUID,
         task_id: uuid.UUID,
@@ -56,9 +59,6 @@ class SimpleChatHandler(BaseHandler):
         try:
             # Parsear el ChatRequest
             chat_request = ChatRequest.model_validate(payload)
-            
-            # Extraer execution_config para uso local
-            execution_config = chat_request.execution_config
             
             # Construir key para cache
             cache_key = self._build_cache_key(tenant_id, session_id)
@@ -104,16 +104,16 @@ class SimpleChatHandler(BaseHandler):
                 )
                 self.logger.info(f"Nueva conversación iniciada: {conversation_id} para agent: {agent_id}")
 
-            # Preparar payload limpio para query_service (sin execution_config ni conversation_id)
+            # Preparar payload limpio para query_service (solo datos de chat)
             query_payload = {
-                "messages": chat_request.messages,  # Con historial integrado
-                "query_config": chat_request.query_config,
-                "rag_config": chat_request.rag_config
+                "messages": chat_request.messages  # Con historial integrado
             }
 
-            # Delegar al Query Service - pasando agent_id en el header
+            # Delegar al Query Service con configuraciones explícitas
             query_response = await self.query_client.query_simple(
                 payload=query_payload,
+                query_config=query_config,  # Config explícita
+                rag_config=rag_config,      # Config explícita
                 tenant_id=tenant_id,
                 session_id=session_id,
                 task_id=task_id,
@@ -155,7 +155,7 @@ class SimpleChatHandler(BaseHandler):
                     agent_id=agent_id,
                     metadata={
                         "mode": "simple",
-                        "collections": chat_request.rag_config.collection_ids if chat_request.rag_config else [],
+                        "collections": rag_config.collection_ids if rag_config else [],
                         "sources": response.sources,
                         "token_usage": response.usage.model_dump()
                     }

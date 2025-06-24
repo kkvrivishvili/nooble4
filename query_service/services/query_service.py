@@ -106,12 +106,24 @@ class QueryService(BaseService):
         if not action.agent_id:
             raise AppValidationError("agent_id es requerido para query.simple")
         
-        # Validar y parsear payload como ChatRequest
+        # Extraer configuraciones del DomainAction (ahora están en la raíz)
+        query_config = action.query_config
+        rag_config = action.rag_config
+        
+        # Validar que las configuraciones estén presente
+        if not query_config:
+            raise AppValidationError("query_config es requerido para query.simple")
+        if not rag_config:
+            raise AppValidationError("rag_config es requerido para query.simple")
+        
+        # Validar y parsear payload como ChatRequest (sin configuraciones)
         payload = ChatRequest.model_validate(action.data)
         
-        # Procesar con handler
+        # Procesar con handler pasando configuraciones explícitas
         response = await self.simple_handler.process_simple_query(
             data=action.data,
+            query_config=query_config,  # Config explícita
+            rag_config=rag_config,      # Config explícita
             tenant_id=action.tenant_id,
             session_id=action.session_id,
             task_id=action.task_id,
@@ -129,12 +141,24 @@ class QueryService(BaseService):
         if not action.agent_id:
             raise AppValidationError("agent_id es requerido para query.advance")
         
-        # Validar y parsear payload como ChatRequest
+        # Extraer configuraciones del DomainAction (ahora están en la raíz)
+        query_config = action.query_config
+        rag_config = action.rag_config
+        
+        # Validar que las configuraciones estén presente
+        if not query_config:
+            raise AppValidationError("query_config es requerido para query.advance")
+        if not rag_config:
+            raise AppValidationError("rag_config es requerido para query.advance")
+        
+        # Validar y parsear payload como ChatRequest (sin configuraciones)
         payload = ChatRequest.model_validate(action.data)
         
-        # Procesar con handler
+        # Procesar con handler pasando configuraciones explícitas
         response = await self.advance_handler.process_advance_query(
             data=action.data,
+            query_config=query_config,  # Config explícita
+            rag_config=rag_config,      # Config explícita
             tenant_id=action.tenant_id,
             session_id=action.session_id,
             task_id=action.task_id,
@@ -148,25 +172,27 @@ class QueryService(BaseService):
     
     async def _handle_rag(self, action: DomainAction) -> Dict[str, Any]:
         """Maneja query.rag para búsqueda RAG directa."""
-        # El payload para RAG es diferente: contiene query_text y rag_config
+        # Extraer rag_config del DomainAction (ahora está en la raíz)
+        rag_config = action.rag_config
+        
+        # Validar que rag_config esté presente
+        if not rag_config:
+            raise AppValidationError("rag_config es requerido para query.rag")
+        
+        # Extraer query_text del payload limpio
         query_text = action.data.get("query_text")
-        rag_config_data = action.data.get("rag_config")
         
-        if not query_text or not rag_config_data:
-            raise AppValidationError("query_text y rag_config son requeridos para query.rag")
-        
-        # Parsear RAGConfig
-        from common.models.chat_models import RAGConfig
-        rag_config = RAGConfig.model_validate(rag_config_data)
+        if not query_text:
+            raise AppValidationError("query_text es requerido para query.rag")
         
         # Validar que agent_id esté presente
         if not action.agent_id:
             raise AppValidationError("agent_id es requerido para query.rag")
         
-        # Procesar con handler usando solo la configuración RAG centralizada
+        # Procesar con handler usando la configuración RAG del DomainAction
         result = await self.rag_handler.process_rag_search(
             query_text=query_text,
-            rag_config=rag_config,
+            rag_config=rag_config,  # Config explícita desde DomainAction
             tenant_id=action.tenant_id,
             session_id=action.session_id,
             task_id=action.task_id,

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
 from common.models.actions import DomainAction
+from common.models.config_models import QueryConfig, RAGConfig
 from common.errors.exceptions import ExternalServiceError
 from common.clients.base_redis_client import BaseRedisClient
 from common.config.service_settings.agent_execution import ExecutionServiceSettings
@@ -46,6 +47,8 @@ class QueryClient:
     async def query_simple(
         self,
         payload: Dict[str, Any],  # Ya es ChatRequest serializado
+        query_config: QueryConfig,
+        rag_config: RAGConfig,
         tenant_id: uuid.UUID,
         session_id: uuid.UUID,
         task_id: uuid.UUID,
@@ -64,7 +67,9 @@ class QueryClient:
             task_id=task_id,
             agent_id=agent_id,
             origin_service=self.redis_client.service_name,
-            data=payload  # Ya no necesita transformación
+            query_config=query_config,  # Config explícita para Query Service
+            rag_config=rag_config,      # Config explícita para RAG
+            data=payload  # Solo datos de chat, sin configuraciones
         )
 
         actual_timeout = timeout if timeout is not None else self.default_timeout
@@ -96,6 +101,8 @@ class QueryClient:
     async def query_advance(
         self,
         payload: Dict[str, Any],  # Ya es ChatRequest serializado
+        query_config: QueryConfig,
+        rag_config: RAGConfig,
         tenant_id: uuid.UUID,
         session_id: uuid.UUID,
         task_id: uuid.UUID,
@@ -112,9 +119,11 @@ class QueryClient:
             tenant_id=tenant_id,
             session_id=session_id,
             task_id=task_id,
-            agent_id=agent_id,  # NUEVO: incluir en el header
+            agent_id=agent_id,
             origin_service=self.redis_client.service_name,
-            data=payload
+            query_config=query_config,  # Config explícita para Query Service
+            rag_config=rag_config,      # Config explícita para RAG
+            data=payload  # Solo datos de chat, sin configuraciones
         )
 
         actual_timeout = timeout if timeout is not None else self.default_timeout

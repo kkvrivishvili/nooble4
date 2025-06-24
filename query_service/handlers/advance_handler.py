@@ -35,6 +35,8 @@ class AdvanceHandler(BaseHandler):
     async def process_advance_query(
         self,
         data: Dict[str, Any],
+        query_config: "QueryConfig",  # Config explícita desde DomainAction
+        rag_config: "RAGConfig",      # Config explícita desde DomainAction
         tenant_id: UUID,
         session_id: UUID,
         task_id: UUID,
@@ -47,9 +49,8 @@ class AdvanceHandler(BaseHandler):
         query_id = str(correlation_id) if correlation_id else str(uuid4())
         
         try:
-            # Extraer configuraciones del payload preparado por agent_execution_service
+            # Extraer datos limpios del payload (sin configuraciones)
             raw_messages = data.get("messages", [])
-            query_config_data = data.get("query_config")
             tools = data.get("tools", [])
             tool_choice = data.get("tool_choice", "auto")
             
@@ -58,14 +59,10 @@ class AdvanceHandler(BaseHandler):
             # Validar datos requeridos
             if not raw_messages:
                 raise AppValidationError("messages es requerido")
-            if not query_config_data:
+            if not query_config:
                 raise AppValidationError("query_config es requerido")
             if not tools:
                 raise AppValidationError("Al menos una tool es requerida para chat avanzado")
-            
-            # Parsear configuraciones
-            from common.models.config_models import QueryConfig
-            query_config = QueryConfig.model_validate(query_config_data)
             
             # Validaciones específicas de Query Service para query_config
             self._validate_query_config(query_config)
