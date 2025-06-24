@@ -4,14 +4,20 @@ FROM python:3.9-slim
 # Set the working directory in the container
 WORKDIR /app
 
-# Copy the dependencies file to the working directory
-COPY requirements.txt .
+# Copy the dependencies file from its service-specific directory
+COPY agent_execution_service/requirements.txt .
 
 # Install any needed packages specified in requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application's code to the working directory
-COPY . .
+# Copy the service-specific code into the container
+COPY agent_execution_service/ .
+
+# Copy the shared common module
+COPY common/ /app/common
+
+# Add the app directory to the Python path to ensure modules are found
+ENV PYTHONPATH=/app
 
 # Expose the port the app runs on
 EXPOSE 8005

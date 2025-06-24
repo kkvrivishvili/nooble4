@@ -8,16 +8,16 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copiar archivos de requirements
-COPY requirements.txt .
+COPY query_service/requirements.txt .
 
 # Instalar dependencias de Python
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copiar código de la aplicación
-COPY . .
+COPY query_service/ .
 
 # Copiar módulo common (asumiendo estructura de monorepo)
-COPY ../common /app/common
+COPY common/ /app/common
 
 # Variables de entorno por defecto
 ENV PYTHONPATH=/app

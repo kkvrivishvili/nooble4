@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   redis:
@@ -18,7 +17,8 @@ services:
 
   query_service:
     build:
-      context: ./query_service
+      context: .
+      dockerfile: ./query_service/Dockerfile
     ports:
       - "8000:8000"
     depends_on:
@@ -80,7 +80,8 @@ services:
 
   agent_execution_service:
     build:
-      context: ./agent_execution_service
+      context: .
+      dockerfile: ./agent_execution_service/Dockerfile
     ports:
       - "8005:8005"
     depends_on:
@@ -92,7 +93,8 @@ services:
 
   embedding_service:
     build:
-      context: ./embedding_service
+      context: .
+      dockerfile: ./embedding_service/Dockerfile
     ports:
       - "8006:8006"
     depends_on:
