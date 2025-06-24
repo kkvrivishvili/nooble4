@@ -53,15 +53,8 @@ class CommonAppSettings(BaseSettings):
     openai_base_url: Optional[str] = Field(None, description="URL base para API de OpenAI (si se usa un endpoint alternativo).")
     openai_timeout_seconds: int = Field(60, description="Timeout en segundos para peticiones a la API de OpenAI.")
     openai_max_retries: int = Field(2, description="Número máximo de reintentos para peticiones a OpenAI.")
-    
-    # Groq (para Query Service)
-    groq_api_key: Optional[str] = Field(None, description="API key para Groq.")
-    groq_timeout_seconds: int = Field(60, description="Timeout en segundos para peticiones a la API de Groq.")
-    groq_max_retries: int = Field(2, description="Número máximo de reintentos para peticiones a Groq.")
-    
-    # Qdrant (para búsqueda vectorial)
-    search_timeout_seconds: int = Field(30, description="Timeout en segundos para búsquedas vectoriales.")
 
+    
     # CORS
     cors_origins: List[str] = Field(default=["*"], description="Orígenes permitidos para CORS.")
 

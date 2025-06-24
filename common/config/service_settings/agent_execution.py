@@ -27,23 +27,11 @@ class ExecutionServiceSettings(CommonAppSettings):
     # Campos específicos del Execution Service
     domain_name: str = Field("execution", description="Dominio específico para colas y lógica del servicio de ejecución.")
 
-    # Límites y comportamiento de ejecución
-    max_iterations: int = Field(10, description="Máximo de iteraciones para agentes")
-    max_tools: int = Field(10, description="Número máximo de herramientas que un agente puede usar")
-
     # Configuración de colas
     callback_queue_prefix: str = Field("orchestrator", description="Prefijo para colas de callback hacia el orquestador")
 
     # Cache de configuraciones
     agent_config_cache_ttl: int = Field(600, description="TTL del cache de configuraciones de agente (segundos)")
 
-    # Cache de conversaciones
-    conversation_cache_ttl: int = Field(1200, description="TTL del cache de historiales de conversación (segundos)")
-    default_conversation_cache_limit: int = Field(40, description="Número máximo de mensajes para mantener en caché local de conversación")
-    wait_for_persistence: bool = Field(False, description="Indica si se debe esperar la confirmación de persistencia al guardar mensajes")
-
     # Worker configuración
     worker_sleep_seconds: float = Field(1.0, description="Tiempo de espera entre polls para los workers de ejecución")
-
-    # Tool and Streaming settings
-    tool_timeout_seconds: int = Field(30, description="Timeout for individual tool executions in seconds.")
