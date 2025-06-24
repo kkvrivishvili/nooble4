@@ -12,7 +12,7 @@ from typing import List, Optional, Dict, Any
 from common.clients.base_http_client import BaseHTTPClient
 from common.errors.http_errors import NotFoundError, ServiceUnavailableError
 
-from ..models.payloads import SearchResult
+from ..models.vector_search_result import SearchResult
 
 
 class VectorClient(BaseHTTPClient):
