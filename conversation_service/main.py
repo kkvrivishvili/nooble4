@@ -16,9 +16,9 @@ from common.clients.redis_client import RedisManager
 from conversation_service.workers.conversation_worker import ConversationWorker
 from conversation_service.workers.migration_worker import MigrationWorker
 from conversation_service.routes.crm_routes import router as crm_router
-from conversation_service.config.settings import get_settings
+from common.config import ConversationSettings
 
-settings = get_settings()
+settings = ConversationSettings()
 logger = logging.getLogger(__name__)
 
 # Lista global de workers y gestor de Redis

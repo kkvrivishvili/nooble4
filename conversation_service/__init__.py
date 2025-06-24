@@ -8,7 +8,7 @@ y la interacción con otros servicios como el Query Service.
 __version__ = "1.0.0"
 
 # Importaciones desde los submódulos
-from .config import ConversationSettings, get_settings
+
 from .handlers import ConversationHandler
 from .models import Action, Conversation
 from .routes import crm_router, health_router
