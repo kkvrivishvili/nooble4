@@ -20,33 +20,12 @@ class QueryServiceSettings(CommonAppSettings):
     groq_api_key: str = Field(default="", description="API Key para Groq (usar variable de entorno QUERY_GROQ_API_KEY)")
     groq_api_base_url: str = Field(default="https://api.groq.com/openai/v1", description="URL base de la API de Groq")
     
-    # LLM Settings por defecto
-    default_llm_model: str = Field(default="llama-3.3-70b-versatile", description="Modelo LLM por defecto para las consultas")
-    llm_temperature: float = Field(default=0.3, description="Temperatura para la generación del LLM")
-    llm_max_tokens: int = Field(default=1024, description="Máximo número de tokens a generar por el LLM")
+    # LLM Operational Settings
     llm_timeout_seconds: int = Field(default=60, description="Timeout para las llamadas al LLM en segundos")
     groq_max_retries: int = Field(default=3, description="Número de reintentos del cliente Groq")
-    llm_top_p: float = Field(default=1.0, description="Parámetro Top P para el LLM")
-    llm_frequency_penalty: float = Field(default=0.0, description="Penalización de frecuencia para el LLM")
-    llm_presence_penalty: float = Field(default=0.0, description="Penalización de presencia para el LLM")
-    llm_default_stop_sequences: Optional[List[str]] = Field(default=None, description="Default stop sequences for LLM generation")
-    
-    # Modelos disponibles
-    available_llm_models: List[str] = Field(
-        default_factory=lambda: [
-            "llama-3.3-70b-versatile",
-            "llama3-70b-8192", 
-            "llama3-8b-8192",
-            "llama-3.1-8b-instant",
-            "gemma2-9b-it",
-            "llama-guard-3-8b"
-        ],
-        description="Modelos LLM disponibles en Groq"
-    )
-    
-    # Vector Store Configuration
-    similarity_threshold: float = Field(default=0.7, description="Umbral de similitud mínimo para considerar un resultado relevante")
-    default_top_k: int = Field(default=5, description="Número de resultados (chunks) a recuperar por defecto de la base de datos vectorial")
+
+
+
     
     # Embedding Service Configuration
     embedding_service_timeout: int = Field(default=30, description="Timeout para comunicación con Embedding Service")
