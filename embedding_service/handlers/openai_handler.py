@@ -75,9 +75,8 @@ class OpenAIHandler(BaseHandler):
         model = model or self.default_model
         encoding_format = encoding_format or "float"
         
-        # Para modelos v3, usar dimensiones configuradas o default
-        if dimensions is None and "text-embedding-3" in model:
-            dimensions = self.app_settings.preferred_dimensions or self.default_dimensions
+        # Las dimensiones siempre deben venir del EmbeddingRequest (RAGConfig centralizado)
+        # No usar fallbacks locales para mantener la centralización
         
         self._logger.info(
             f"Generando embeddings para {len(texts)} textos con modelo {model}",

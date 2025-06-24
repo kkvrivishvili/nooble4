@@ -21,8 +21,8 @@ class OpenAIClient:
         self, 
         api_key: str,
         base_url: Optional[str] = None, 
-        timeout: int = 30,
-        max_retries: int = 3
+        timeout: int,
+        max_retries: int
     ):
         """
         Inicializa el cliente con la API key y otras configuraciones.
@@ -30,8 +30,8 @@ class OpenAIClient:
         Args:
             api_key: API key de OpenAI
             base_url: URL base de la API (opcional)
-            timeout: Timeout en segundos para las peticiones
-            max_retries: Número máximo de reintentos automáticos por el SDK
+            timeout: Timeout en segundos para las peticiones (desde EmbeddingServiceSettings)
+            max_retries: Número máximo de reintentos automáticos por el SDK (desde EmbeddingServiceSettings)
         """
         if not api_key:
             raise ValueError("API key de OpenAI es requerida")

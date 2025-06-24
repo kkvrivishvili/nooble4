@@ -23,13 +23,13 @@ class VectorClient(BaseHTTPClient):
     para búsquedas de similitud y recuperación de documentos.
     """
     
-    def __init__(self, base_url: str, timeout: int = 30):
+    def __init__(self, base_url: str, timeout: int):
         """
         Inicializa el cliente del vector store.
         
         Args:
             base_url: URL base del vector store
-            timeout: Timeout para las peticiones
+            timeout: Timeout para las peticiones (desde QueryServiceSettings)
         """
         super().__init__(base_url=base_url)
         self.timeout = timeout
@@ -39,8 +39,8 @@ class VectorClient(BaseHTTPClient):
         self,
         query_embedding: List[float],
         collection_ids: List[str],
-        top_k: int = 5,
-        similarity_threshold: float = 0.7,
+        top_k: int,
+        similarity_threshold: float,
         tenant_id: str = None,
         filters: Optional[Dict[str, Any]] = None
     ) -> List[SearchResult]:
@@ -50,8 +50,8 @@ class VectorClient(BaseHTTPClient):
         Args:
             query_embedding: Vector de embedding de la consulta
             collection_ids: IDs de las colecciones donde buscar
-            top_k: Número máximo de resultados por colección
-            similarity_threshold: Umbral mínimo de similitud
+            top_k: Número máximo de resultados por colección (desde RAGConfig)
+            similarity_threshold: Umbral mínimo de similitud (desde RAGConfig)
             tenant_id: ID del tenant para filtrado
             filters: Filtros adicionales específicos del vector store
             

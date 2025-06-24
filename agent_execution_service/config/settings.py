@@ -23,18 +23,6 @@ class ExecutionServiceSettings(CommonAppSettings):
         default=30, 
         description="Timeout para operaciones con Query Service"
     )
-    tool_execution_timeout: int = Field(
-        default=30,
-        description="Timeout para ejecución de herramientas"
-    )
-    
-    # ReAct configuration
-    max_react_iterations: int = Field(
-        default=10,
-        gt=0,
-        le=20,
-        description="Máximo de iteraciones para el loop ReAct"
-    )
     
     # Worker configuration
     worker_count: int = Field(

@@ -24,34 +24,38 @@ class ChatModel(str, Enum):
 
 class ExecutionConfig(BaseModel):
     """
-    Configuración para el Agent Execution Service.
-    Controla el comportamiento del loop de ejecución del agente.
+    Configuración para el comportamiento del Agent Execution Service.
+    
+    Controla aspectos como cache, timeouts, iteraciones del loop ReAct, etc.
     """
-    max_iterations: int = Field(
-        default=10,
-        ge=1,
-        le=50,
-        description="Número máximo de iteraciones del loop ReAct"
-    )
-    enable_history: bool = Field(
-        default=True,
-        description="Si mantener historial de conversación en cache"
-    )
+    # Cache y historial
     history_ttl: int = Field(
-        default=1800,
-        ge=60,
-        le=86400,
-        description="TTL del historial en segundos (1-24 horas)"
+        default=3600,
+        gt=0,
+        description="TTL en segundos para el historial de conversación"
     )
+    enable_history_cache: bool = Field(
+        default=True,
+        description="Habilitar caché de historial de conversación"
+    )
+    max_history_length: int = Field(
+        default=50,
+        gt=0,
+        le=200,
+        description="Número máximo de mensajes en historial de conversación"
+    )
+    
+    # Timeouts y límites operacionales
     tool_timeout: int = Field(
         default=30,
-        ge=5,
-        le=300,
-        description="Timeout para ejecución de herramientas en segundos"
+        gt=0,
+        description="Timeout en segundos para ejecución de herramientas"
     )
-    stream_response: bool = Field(
-        default=False,
-        description="Si hacer streaming de respuestas"
+    max_iterations: int = Field(
+        default=10,
+        gt=0,
+        le=20,
+        description="Máximo de iteraciones para el loop ReAct"
     )
     
     model_config = {"extra": "forbid"}
@@ -120,9 +124,11 @@ class QueryConfig(BaseModel):
 
 class RAGConfig(BaseModel):
     """
-    Configuración para búsqueda RAG.
-    Define parámetros para la recuperación de información.
+    Configuración para operaciones RAG (Retrieval-Augmented Generation).
+    
+    Define parámetros para búsqueda vectorial y generación de embeddings.
     """
+    # Configuración de colecciones y documentos
     collection_ids: List[str] = Field(
         ...,
         min_items=1,
@@ -132,25 +138,34 @@ class RAGConfig(BaseModel):
         default=None,
         description="IDs de documentos específicos (opcional)"
     )
+    
+    # Configuración de embeddings
+    embedding_model: EmbeddingModel = Field(
+        default=EmbeddingModel.TEXT_EMBEDDING_3_SMALL,
+        description="Modelo para generar embeddings"
+    )
+    embedding_dimensions: int = Field(
+        default=1536,
+        gt=0,
+        description="Dimensiones del vector de embedding"
+    )
+    encoding_format: str = Field(
+        default="float",
+        description="Formato de codificación para embeddings (float, base64)"
+    )
+    
+    # Configuración de búsqueda
     top_k: int = Field(
         default=5,
         gt=0,
         le=20,
-        description="Número de resultados más relevantes"
+        description="Número de documentos más relevantes a recuperar"
     )
     similarity_threshold: float = Field(
         default=0.7,
         ge=0.0,
         le=1.0,
-        description="Umbral mínimo de similitud"
-    )
-    embedding_model: EmbeddingModel = Field(
-        default=EmbeddingModel.TEXT_EMBEDDING_3_SMALL,
-        description="Modelo de embeddings a utilizar"
-    )
-    embedding_dimensions: Optional[int] = Field(
-        default=None,
-        description="Dimensiones del vector (auto si None)"
+        description="Umbral mínimo de similitud para considerar un documento relevante"
     )
     
     model_config = {"extra": "forbid"}

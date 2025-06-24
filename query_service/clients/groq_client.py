@@ -12,14 +12,14 @@ from common.errors.http_errors import ServiceUnavailableError
 class GroqClient:
     """Cliente asíncrono para la API de Groq."""
     
-    def __init__(self, api_key: str, timeout: int = 60, max_retries: int = 3):
+    def __init__(self, api_key: str, timeout: int, max_retries: int):
         """
         Inicializa el cliente con la API key.
         
         Args:
             api_key: API key de Groq
-            timeout: Timeout en segundos
-            max_retries: Número máximo de reintentos
+            timeout: Timeout en segundos (desde QueryServiceSettings)
+            max_retries: Número máximo de reintentos (desde QueryServiceSettings)
         """
         if not api_key:
             raise ValueError("API key de Groq es requerida")

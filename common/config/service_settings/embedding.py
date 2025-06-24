@@ -67,15 +67,6 @@ class EmbeddingServiceSettings(CommonAppSettings):
         description="Dimensiones por defecto para modelos conocidos. Usado como fallback."
     )
     
-    preferred_dimensions: Optional[int] = Field(
-        None,  # None indica usar dimensiones default del modelo
-        description="Dimensiones preferidas para embeddings (None = usar default del modelo). Algunos modelos permiten especificar dimensiones."
-    )
-    encoding_format: EncodingFormats = Field(
-        EncodingFormats.FLOAT,
-        description="Formato de codificación de embeddings (float o base64)."
-    )
-
     # --- Configuración de Colas y Workers ---
     worker_count: int = Field(default=2, description="Número de workers para procesar embeddings.")
     callback_queue_prefix: str = Field("embedding", description="Prefijo para colas de callback.")

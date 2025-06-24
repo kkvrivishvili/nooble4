@@ -143,7 +143,7 @@ class SimpleHandler(BaseHandler):
                 
                 # 3. FORMATO GROQ: Inyectar contexto como ChatMessage con role="system" antes del último user message
                 if search_results:
-                    context = self._build_context(search_results)
+                    context = self._build_context(search_results, max_results=rag_config.top_k)
                     
                     # Crear mensaje de contexto siguiendo las mejores prácticas del SDK de Groq
                     context_msg = ChatMessage(

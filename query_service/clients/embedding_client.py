@@ -63,7 +63,8 @@ class EmbeddingClient:
         embedding_request = EmbeddingRequest(
             texts=texts,
             model=rag_config.embedding_model.model_name,
-            dimensions=rag_config.embedding_dimensions
+            dimensions=rag_config.embedding_dimensions,
+            encoding_format=rag_config.encoding_format
         )
         
         # Crear DomainAction con correlation_id para pseudo-sync
