@@ -25,17 +25,20 @@ async def lifespan(app: FastAPI):
     """Gestor del ciclo de vida de la aplicación."""
     global redis_manager, workers, settings, worker_tasks
     
+    # Inicializar logging primero con valores por defecto o desde una config básica
+    # para asegurar que el logger esté disponible incluso si la carga de settings falla.
+    init_logging() # Llama con valores por defecto
+    logger = logging.getLogger(__name__)
+
     try:
         # Cargar configuración
         settings = ExecutionServiceSettings()
         
-        # Inicializar logging
+        # Re-inicializar logging con la configuración cargada
         init_logging(
             log_level=settings.log_level,
             service_name=settings.service_name
         )
-        
-        logger = logging.getLogger(__name__)
         logger.info(f"Iniciando {settings.service_name} v{settings.service_version}")
         
         # Validar configuración crítica

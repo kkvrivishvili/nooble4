@@ -13,11 +13,7 @@ from .handlers import SimpleHandler, AdvanceHandler, RAGHandler
 from .models import (
     ACTION_QUERY_SIMPLE,
     ACTION_QUERY_ADVANCE,
-    ACTION_QUERY_RAG,
-    QueryAdvancePayload,
-    QueryAdvanceResponseData,
-    QueryRAGPayload,
-    QueryRAGResponseData,
+    ACTION_QUERY_RAG
 )
 from .services import QueryService
 from .workers import QueryWorker
@@ -27,17 +23,12 @@ __all__ = [
     "VectorClient",
     "EmbeddingClient",
     "QueryServiceSettings",
-    "get_settings",
     "SimpleHandler",
     "AdvanceHandler",
     "RAGHandler",
     "ACTION_QUERY_SIMPLE",
     "ACTION_QUERY_ADVANCE",
     "ACTION_QUERY_RAG",
-    "QueryAdvancePayload",
-    "QueryAdvanceResponseData",
-    "QueryRAGPayload",
-    "QueryRAGResponseData",
     "QueryService",
     "QueryWorker",
 ]

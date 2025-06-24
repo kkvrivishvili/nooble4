@@ -16,6 +16,11 @@ class CommonAppSettings(BaseSettings):
     redis_url: str = Field("redis://localhost:6379", description="URL de conexión a Redis.")
     redis_password: Optional[str] = Field(None, description="Contraseña para Redis (si aplica).")
     redis_decode_responses: bool = Field(True, description="Decodificar respuestas de Redis a UTF-8.")
+    redis_socket_connect_timeout: int = Field(5, description="Timeout en segundos para la conexión del socket de Redis.")
+    redis_socket_keepalive: bool = Field(True, description="Habilitar keepalive para el socket de Redis.")
+    redis_socket_keepalive_options: Optional[Dict[str, int]] = Field(None, description="Opciones de keepalive para el socket de Redis.")
+    redis_max_connections: int = Field(10, description="Número máximo de conexiones en el pool de Redis.")
+    redis_health_check_interval: int = Field(30, description="Intervalo en segundos para el health check de Redis.")
     
     # Puertos de servicios (configurables desde .env)
     agent_orchestrator_port: int = Field(8001, description="Puerto para Agent Orchestrator Service.")

@@ -39,7 +39,6 @@ nosetests.xml
 pytestdebug.log
 
 # Environments
-.env
 .venv
 env/F
 venv/

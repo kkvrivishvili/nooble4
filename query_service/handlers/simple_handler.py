@@ -15,6 +15,7 @@ from common.models.chat_models import (
     EmbeddingRequest,
     TokenUsage
 )
+from common.models.config_models import RAGConfig
 
 from ..clients.groq_client import GroqClient
 from ..clients.vector_client import VectorClient
