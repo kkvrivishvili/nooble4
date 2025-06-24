@@ -1,0 +1,1 @@
+En esta carpeta deberia ir la imagen de docker con postgress. y los archivos de configuracion

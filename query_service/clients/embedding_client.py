@@ -11,10 +11,8 @@ from uuid import UUID, uuid4
 
 from common.models import DomainAction, DomainActionResponse
 from common.models.config_models import RAGConfig
+from common.models.chat_models import EmbeddingRequest
 from common.clients import BaseRedisClient
-
-from ..models.payloads import EmbeddingRequest
-
 
 class EmbeddingClient:
     """
