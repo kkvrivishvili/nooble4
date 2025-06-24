@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copiar archivos de requirements
+COPY .env .
 COPY query_service/requirements.txt .
 
 # Instalar dependencias de Python

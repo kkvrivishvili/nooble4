@@ -5,6 +5,7 @@ FROM python:3.9-slim
 WORKDIR /app
 
 # Copy the dependencies file from its service-specific directory
+COPY .env .
 COPY agent_execution_service/requirements.txt .
 
 # Install any needed packages specified in requirements.txt

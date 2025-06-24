@@ -5,6 +5,7 @@ FROM python:3.9-slim
 WORKDIR /app
 
 # Copy the dependencies file to the working directory
+COPY .env .
 COPY ingestion_service/requirements.txt .
 
 # Install any needed packages specified in requirements.txt

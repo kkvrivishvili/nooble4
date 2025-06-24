@@ -31,7 +31,8 @@ services:
 
   agent_orchestrator_service:
     build:
-      context: ./agent_orchestrator_service
+      context: .
+      dockerfile: ./agent_orchestrator_service/Dockerfile
     ports:
       - "8001:8001"
     depends_on:
@@ -58,7 +59,8 @@ services:
 
   conversation_service:
     build:
-      context: ./conversation_service
+      context: .
+      dockerfile: ./conversation_service/Dockerfile
     ports:
       - "8004:8004"
     depends_on:
