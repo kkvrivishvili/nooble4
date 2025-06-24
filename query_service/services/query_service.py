@@ -150,11 +150,11 @@ class QueryService(BaseService):
         from common.models.chat_models import RAGConfig
         rag_config = RAGConfig.model_validate(rag_config_data)
         
-        # Permitir override de parámetros
-        top_k = action.data.get("top_k", rag_config.top_k)
-        similarity_threshold = action.data.get("similarity_threshold", rag_config.similarity_threshold)
+        # Validar que agent_id esté presente
+        if not action.agent_id:
+            raise AppValidationError("agent_id es requerido para query.rag")
         
-        # Procesar con handler
+        # Procesar con handler usando solo la configuración RAG centralizada
         result = await self.rag_handler.process_rag_search(
             query_text=query_text,
             rag_config=rag_config,
@@ -163,9 +163,7 @@ class QueryService(BaseService):
             task_id=action.task_id,
             trace_id=action.trace_id,
             correlation_id=action.correlation_id,
-            agent_id=action.agent_id,
-            top_k=top_k,
-            similarity_threshold=similarity_threshold
+            agent_id=action.agent_id
         )
         
         # Retornar resultado serializado

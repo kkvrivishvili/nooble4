@@ -116,7 +116,8 @@ class AdvanceChatHandler(BaseHandler):
                     rag_config=chat_request.rag_config,
                     tenant_id=tenant_id,
                     session_id=session_id,
-                    task_id=task_id
+                    task_id=task_id,
+                    agent_id=agent_id
                 )
                 
                 # Agregar knowledge tool a las herramientas disponibles
@@ -308,7 +309,8 @@ class AdvanceChatHandler(BaseHandler):
         rag_config: RAGConfig,
         tenant_id: uuid.UUID,
         session_id: uuid.UUID,
-        task_id: uuid.UUID
+        task_id: uuid.UUID,
+        agent_id: uuid.UUID
     ) -> None:
         """Registra la herramienta de conocimiento si hay configuración RAG."""
         self.tool_registry.clear()
@@ -318,7 +320,8 @@ class AdvanceChatHandler(BaseHandler):
             rag_config=rag_config,
             tenant_id=tenant_id,
             session_id=session_id,
-            task_id=task_id
+            task_id=task_id,
+            agent_id=agent_id
         )
         self.tool_registry.register(knowledge_tool)
 

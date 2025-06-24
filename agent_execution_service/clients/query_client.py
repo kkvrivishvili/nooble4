@@ -150,8 +150,7 @@ class QueryClient:
         tenant_id: uuid.UUID,
         session_id: uuid.UUID,
         task_id: uuid.UUID,
-        top_k: Optional[int] = None,
-        similarity_threshold: Optional[float] = None,
+        agent_id: uuid.UUID,
         timeout: Optional[int] = None
     ) -> Dict[str, Any]:
         """
@@ -159,10 +158,7 @@ class QueryClient:
         """
         payload = {
             "query_text": query_text,
-            "rag_config": rag_config,
-            # Permitir override de algunos parámetros
-            "top_k": top_k,
-            "similarity_threshold": similarity_threshold
+            "rag_config": rag_config
         }
 
         action = DomainAction(
@@ -172,6 +168,7 @@ class QueryClient:
             tenant_id=tenant_id,
             session_id=session_id,
             task_id=task_id,
+            agent_id=agent_id,
             origin_service=self.redis_client.service_name,
             data=payload
         )

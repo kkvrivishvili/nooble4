@@ -21,9 +21,10 @@ class KnowledgeTool(BaseTool):
         self,
         query_client: QueryClient,
         rag_config: RAGConfig,
-        tenant_id: str,
-        session_id: str,
-        task_id: uuid.UUID
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
+        task_id: uuid.UUID,
+        agent_id: uuid.UUID
     ):
         super().__init__(
             name="knowledge",
@@ -34,6 +35,7 @@ class KnowledgeTool(BaseTool):
         self.tenant_id = tenant_id
         self.session_id = session_id
         self.task_id = task_id
+        self.agent_id = agent_id
         self._logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     async def execute(self, query: str, **kwargs) -> Dict[str, Any]:
@@ -49,20 +51,14 @@ class KnowledgeTool(BaseTool):
         try:
             self._logger.info(f"Ejecutando búsqueda RAG: {query[:100]}...")
             
-            # Usar la configuración RAG del constructor, permitiendo override de algunos params
-            top_k = kwargs.get("top_k", self.rag_config.top_k)
-            similarity_threshold = kwargs.get("similarity_threshold", self.rag_config.similarity_threshold)
-            
-            # Llamar a query_rag con configuración simplificada
+            # Usar solo la configuración RAG centralizada, sin override de parámetros
             result = await self.query_client.query_rag(
                 query_text=query,
                 rag_config=self.rag_config.model_dump(),  # Serializar a dict
                 tenant_id=self.tenant_id,
                 session_id=self.session_id,
                 task_id=self.task_id,
-                # Permitir override de algunos parámetros
-                top_k=top_k,
-                similarity_threshold=similarity_threshold
+                agent_id=self.agent_id
             )
             
             # El resultado ya viene como RAGSearchResult

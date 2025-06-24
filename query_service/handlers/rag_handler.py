@@ -50,42 +50,39 @@ class RAGHandler(BaseHandler):
         self,
         query_text: str,
         rag_config: RAGConfig,
-        tenant_id: str,
-        session_id: str,
+        tenant_id: UUID,
+        session_id: UUID,
         task_id: UUID,
         trace_id: UUID,
         correlation_id: UUID,
-        agent_id: Optional[str] = None,
-        top_k: Optional[int] = None,
-        similarity_threshold: Optional[float] = None
+        agent_id: UUID
     ) -> RAGSearchResult:
         """Procesa una búsqueda RAG (knowledge tool)."""
         start_time = time.time()
         query_id = str(correlation_id) if correlation_id else str(uuid4())
         
+        self._logger.info(
+            f"Iniciando búsqueda RAG para query: {query_text[:100]}...",
+            extra={
+                "query_id": query_id,
+                "tenant_id": str(tenant_id),
+                "session_id": str(session_id),
+                "agent_id": str(agent_id)
+            }
+        )
+        
         try:
-            self._logger.info(
-                f"Procesando búsqueda RAG: '{query_text[:50]}...'",
-                extra={
-                    "query_id": query_id,
-                    "collections": rag_config.collection_ids,
-                    "top_k": top_k or rag_config.top_k
-                }
-            )
-            
-            # Usar valores override si se proporcionan
-            actual_top_k = top_k if top_k is not None else rag_config.top_k
-            actual_threshold = similarity_threshold if similarity_threshold is not None else rag_config.similarity_threshold
-            
-            # 1. Obtener embedding de la consulta
+            # Usar configuración RAG centralizada
             embedding_request = EmbeddingRequest(
                 input=query_text,
                 model=rag_config.embedding_model,
                 dimensions=rag_config.embedding_dimensions
             )
             
+            # Obtener embedding de la consulta
             query_embedding = await self._get_query_embedding(
                 embedding_request=embedding_request,
+                rag_config=rag_config,
                 tenant_id=tenant_id,
                 session_id=session_id,
                 task_id=task_id,
@@ -97,8 +94,8 @@ class RAGHandler(BaseHandler):
             search_results = await self.vector_client.search(
                 query_embedding=query_embedding,
                 collection_ids=rag_config.collection_ids,
-                top_k=actual_top_k,
-                similarity_threshold=actual_threshold,
+                top_k=rag_config.top_k,
+                similarity_threshold=rag_config.similarity_threshold,
                 tenant_id=tenant_id,
                 filters={"document_ids": rag_config.document_ids} if rag_config.document_ids else None
             )
@@ -131,24 +128,31 @@ class RAGHandler(BaseHandler):
     async def _get_query_embedding(
         self,
         embedding_request: EmbeddingRequest,
-        tenant_id: str,
-        session_id: str,
+        rag_config: RAGConfig,
+        tenant_id: UUID,
+        session_id: UUID,
         task_id: UUID,
         trace_id: UUID,
-        agent_id: Optional[str] = None,
+        agent_id: UUID,
     ) -> List[float]:
-        """Obtiene el embedding usando el Embedding Service."""
-        response = await self.embedding_client.request_query_embedding(
-            query_text=embedding_request.input,
+        """Obtiene el embedding usando el Embedding Service con configuración RAG."""
+        response = await self.embedding_client.get_embeddings(
+            texts=[embedding_request.input],
+            rag_config=rag_config,
             tenant_id=tenant_id,
             session_id=session_id,
             task_id=task_id,
-            trace_id=trace_id,
             agent_id=agent_id,
-            model=embedding_request.model.value  # Usar el valor del enum
+            trace_id=trace_id
         )
         
         if not response.success or not response.data:
             raise ExternalServiceError("Error obteniendo embedding del Embedding Service")
+        
+        # El response.data debería contener una lista de embeddings para los textos
+        embeddings = response.data.get("embeddings", [])
+        if not embeddings or len(embeddings) == 0:
+            raise ExternalServiceError("No se recibió embedding del Embedding Service")
             
-        return response.data.get("embedding", [])
+        # Retornamos el primer embedding (corresponde a la consulta)
+        return embeddings[0]

@@ -34,117 +34,200 @@ class AdvanceHandler(BaseHandler):
     
     async def process_advance_query(
         self,
-        payload: ChatRequest,
-        tenant_id: str,
-        session_id: str,
+        data: Dict[str, Any],
+        tenant_id: UUID,
+        session_id: UUID,
         task_id: UUID,
         trace_id: UUID,
-        correlation_id: UUID
+        correlation_id: UUID,
+        agent_id: UUID,
     ) -> ChatResponse:
         """Procesa una consulta avanzada con soporte de tools."""
         start_time = time.time()
         query_id = str(correlation_id) if correlation_id else str(uuid4())
         
         try:
-            # Validar que tenga tools (requerido para advance)
-            if not payload.tools:
+            # Extraer configuraciones del payload preparado por agent_execution_service
+            raw_messages = data.get("messages", [])
+            query_config_data = data.get("query_config")
+            tools = data.get("tools", [])
+            tool_choice = data.get("tool_choice", "auto")
+            
+            # rag_config es ignorado en advance mode - el RAG se maneja a través de herramientas específicas
+            
+            # Validar datos requeridos
+            if not raw_messages:
+                raise AppValidationError("messages es requerido")
+            if not query_config_data:
+                raise AppValidationError("query_config es requerido")
+            if not tools:
                 raise AppValidationError("Al menos una tool es requerida para chat avanzado")
+            
+            # Parsear configuraciones
+            from common.models.config_models import QueryConfig
+            query_config = QueryConfig.model_validate(query_config_data)
+            
+            # Validaciones específicas de Query Service para query_config
+            self._validate_query_config(query_config)
+            
+            # Validaciones específicas de Query Service para tools
+            self._validate_tools(tools)
+            
+            # Convertir raw messages a ChatMessage objects
+            messages = []
+            for msg_data in raw_messages:
+                if isinstance(msg_data, dict):
+                    messages.append(ChatMessage.model_validate(msg_data))
+                else:
+                    messages.append(msg_data)  # Ya es ChatMessage
             
             self._logger.info(
                 f"Procesando chat avanzado",
                 extra={
-                    "tenant_id": tenant_id,
-                    "session_id": session_id,
+                    "tenant_id": str(tenant_id),
+                    "session_id": str(session_id),
                     "query_id": query_id,
-                    "tools_count": len(payload.tools)
+                    "tools_count": len(tools),
+                    "agent_id": str(agent_id)
                 }
             )
             
-            # Crear cliente Groq
+            # CONSTRUCCIÓN DEL SYSTEM PROMPT desde query_config
+            # Si ya hay un system message, lo actualizamos. Si no, lo creamos
+            system_prompt = query_config.system_prompt_template
+            
+            # Verificar si ya existe un system message
+            has_system_msg = any(msg.role == "system" for msg in messages)
+            if not has_system_msg:
+                # Agregar system prompt al inicio
+                system_msg = ChatMessage(role="system", content=system_prompt)
+                messages.insert(0, system_msg)
+            else:
+                # Actualizar el primer system message encontrado
+                for msg in messages:
+                    if msg.role == "system":
+                        msg.content = system_prompt
+                        break
+            
+            # LLAMADA A GROQ: Formatear payload según especificaciones oficiales del SDK
+            # En modo avanzado: tools y tool_choice son parámetros de nivel superior
+            groq_payload = {
+                "messages": [{"role": msg.role, "content": msg.content} for msg in messages],
+                "model": query_config.model.value,  # Usar el enum ChatModel
+                "temperature": query_config.temperature,
+                "max_tokens": query_config.max_tokens,
+                "top_p": query_config.top_p,
+                "frequency_penalty": query_config.frequency_penalty,
+                "presence_penalty": query_config.presence_penalty,
+                "stop": query_config.stop_sequences if query_config.stop_sequences else None,
+                "tools": tools,  # Parámetro de nivel superior según especificaciones de Groq
+                "tool_choice": tool_choice  # Parámetro de nivel superior según especificaciones de Groq
+            }
+            
+            # Crear cliente Groq con timeout dinámico
             groq_client = GroqClient(
                 api_key=self.app_settings.groq_api_key,
-                timeout=max(60, payload.max_tokens // 100)  # Timeout dinámico
+                timeout=max(60, query_config.max_tokens // 100)  # Timeout dinámico basado en max_tokens
             )
             
-            # Preparar mensajes para Groq
-            groq_messages = [
-                self._message_to_groq_format(msg)
-                for msg in payload.messages
-            ]
+            # Llamar al cliente de Groq
+            response_text, token_usage = await groq_client.create_completion(**groq_payload)
             
-            # Llamar a Groq con tools
-            response = await groq_client.client.chat.completions.create(
-                messages=groq_messages,
-                model=payload.model.value,
-                temperature=payload.temperature,
-                max_tokens=payload.max_tokens,
-                top_p=payload.top_p,
-                frequency_penalty=payload.frequency_penalty,
-                presence_penalty=payload.presence_penalty,
-                stop=payload.stop,
-                tools=payload.tools,  # Ya están en formato Groq
-                tool_choice=payload.tool_choice
-            )
-            
-            # Extraer respuesta
-            choice = response.choices[0]
-            message = choice.message
-            
-            # Construir mensaje de respuesta
-            response_message = ChatMessage(
-                role="assistant",
-                content=message.content
-            )
-            
-            # Si hay tool calls, agregarlas
-            if hasattr(message, 'tool_calls') and message.tool_calls:
-                response_message.tool_calls = [
-                    {
-                        "id": tc.id,
-                        "type": tc.type,
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
-                        }
-                    }
-                    for tc in message.tool_calls
-                ]
-            
-            # Extraer uso de tokens
-            token_usage = TokenUsage(
-                prompt_tokens=response.usage.prompt_tokens,
-                completion_tokens=response.usage.completion_tokens,
-                total_tokens=response.usage.total_tokens
-            )
-            
-            execution_time_ms = int((time.time() - start_time) * 1000)
-            
-            return ChatResponse(
-                message=response_message,
+            # Construir respuesta
+            end_time = time.time()
+            response = ChatResponse(
+                conversation_id=UUID(query_id),
+                content=response_text,
+                model=query_config.model,
                 usage=token_usage,
-                conversation_id=query_id,
-                execution_time_ms=execution_time_ms,
-                sources=[]  # No hay sources en advance (las herramientas manejan sus propias fuentes)
+                sources=[],  # En advance mode no hay sources directos de RAG
+                processing_time=end_time - start_time
             )
+            
+            self._logger.info(
+                f"Chat avanzado procesado exitosamente. Tokens: {token_usage.total_tokens}",
+                extra={
+                    "query_id": query_id,
+                    "processing_time": response.processing_time,
+                    "tools_used": len(tools)
+                }
+            )
+            
+            return response
             
         except Exception as e:
-            self._logger.error(f"Error en advance query: {e}", exc_info=True)
-            raise ExternalServiceError(f"Error procesando query advance: {str(e)}")
+            self._logger.error(f"Error procesando chat avanzado: {str(e)}", exc_info=True)
+            if isinstance(e, (AppValidationError, ExternalServiceError)):
+                raise
+            raise ExternalServiceError(f"Error interno en chat avanzado: {str(e)}")
     
-    def _message_to_groq_format(self, msg: ChatMessage) -> Dict[str, Any]:
-        """Convierte un ChatMessage al formato esperado por Groq."""
-        groq_msg = {"role": msg.role}
+    def _validate_query_config(self, query_config):
+        """Valida la configuración de query."""
+        from common.models.config_models import QueryConfig
         
-        if msg.content:
-            groq_msg["content"] = msg.content
+        # Validar campos requeridos
+        if not query_config.model:
+            raise AppValidationError("Modelo de lenguaje es requerido")
+        if not query_config.system_prompt_template:
+            raise AppValidationError("Plantilla de prompt del sistema es requerida")
+        if query_config.temperature is None:
+            raise AppValidationError("Temperatura es requerida")
+        if not query_config.max_tokens:
+            raise AppValidationError("Cantidad máxima de tokens es requerida")
+        if query_config.top_p is None:
+            raise AppValidationError("Umbral de probabilidad es requerido")
+        if query_config.frequency_penalty is None:
+            raise AppValidationError("Penalización de frecuencia es requerida")
+        if query_config.presence_penalty is None:
+            raise AppValidationError("Penalización de presencia es requerida")
         
-        if msg.tool_calls:
-            groq_msg["tool_calls"] = msg.tool_calls
+        # Validar valores válidos
+        if query_config.temperature < 0 or query_config.temperature > 1:
+            raise AppValidationError("Temperatura debe estar entre 0 y 1")
+        if query_config.max_tokens < 1:
+            raise AppValidationError("Cantidad máxima de tokens debe ser mayor que 0")
+        if query_config.top_p < 0 or query_config.top_p > 1:
+            raise AppValidationError("Umbral de probabilidad debe estar entre 0 y 1")
+        if query_config.frequency_penalty < 0 or query_config.frequency_penalty > 1:
+            raise AppValidationError("Penalización de frecuencia debe estar entre 0 y 1")
+        if query_config.presence_penalty < 0 or query_config.presence_penalty > 1:
+            raise AppValidationError("Penalización de presencia debe estar entre 0 y 1")
+    
+    def _validate_tools(self, tools):
+        """Valida la configuración de herramientas."""
+        if not isinstance(tools, list):
+            raise AppValidationError("Tools debe ser una lista")
         
-        if msg.tool_call_id:
-            groq_msg["tool_call_id"] = msg.tool_call_id
-        
-        if msg.name:
-            groq_msg["name"] = msg.name
-        
-        return groq_msg
+        for i, tool in enumerate(tools):
+            if not isinstance(tool, dict):
+                raise AppValidationError(f"Tool {i} debe ser un diccionario")
+            
+            # Validar estructura básica según especificaciones de Groq
+            if tool.get("type") != "function":
+                raise AppValidationError(f"Tool {i}: type debe ser 'function'")
+            
+            function_def = tool.get("function")
+            if not function_def:
+                raise AppValidationError(f"Tool {i}: 'function' es requerida")
+            
+            if not isinstance(function_def, dict):
+                raise AppValidationError(f"Tool {i}: 'function' debe ser un diccionario")
+            
+            if not function_def.get("name"):
+                raise AppValidationError(f"Tool {i}: 'name' es requerida en function")
+            
+            if not function_def.get("description"):
+                raise AppValidationError(f"Tool {i}: 'description' es requerida en function")
+            
+            # Validar parameters si existe
+            parameters = function_def.get("parameters")
+            if parameters and not isinstance(parameters, dict):
+                raise AppValidationError(f"Tool {i}: 'parameters' debe ser un diccionario")
+            
+            if parameters:
+                if parameters.get("type") != "object":
+                    raise AppValidationError(f"Tool {i}: parameters.type debe ser 'object'")
+                
+                properties = parameters.get("properties")
+                if properties and not isinstance(properties, dict):
+                    raise AppValidationError(f"Tool {i}: parameters.properties debe ser un diccionario")
