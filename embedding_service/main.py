@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from common.clients import RedisManager
 from common.utils import init_logging
 
-from .config.settings import get_settings
+from common.config import EmbeddingServiceSettings
 from .workers.embedding_worker import EmbeddingWorker
 
 
@@ -26,7 +26,7 @@ embedding_workers: List[EmbeddingWorker] = []
 worker_tasks: List[asyncio.Task] = []
 
 # Configuración
-settings = get_settings()
+settings = EmbeddingServiceSettings()
 logger = logging.getLogger(__name__)
 
 

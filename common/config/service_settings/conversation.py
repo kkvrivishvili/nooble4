@@ -23,11 +23,6 @@ class ConversationSettings(CommonAppSettings):
     # Domain específico para colas
     domain_name: str = Field("conversation", description="Dominio para colas y lógica del servicio de conversación.")
     
-    # Configuración de Supabase (estos campos son específicos de ConversationSettings)
-    # Si las variables de entorno CONVERSATION_SUPABASE_URL y CONVERSATION_SUPABASE_KEY existen, se usarán.
-    # De lo contrario, serán None o el valor por defecto si se especifica uno.
-    supabase_url: Optional[str] = Field(default=None, description="URL de Supabase")
-    supabase_key: Optional[str] = Field(default=None, description="Supabase anon key")
     
     # Redis para conversaciones activas
     conversation_active_ttl: int = Field(

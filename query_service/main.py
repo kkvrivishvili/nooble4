@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from common.clients import RedisManager
 from common.utils import init_logging
 
-from .config.settings import get_settings
+from common.config import QueryServiceSettings
 from .workers.query_worker import QueryWorker
 
 
@@ -26,7 +26,7 @@ query_workers: List[QueryWorker] = []
 worker_tasks: List[asyncio.Task] = []
 
 # Configuración
-settings = get_settings()
+settings = QueryServiceSettings()
 logger = logging.getLogger(__name__)
 
 

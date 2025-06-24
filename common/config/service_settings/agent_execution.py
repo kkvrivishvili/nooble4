@@ -3,16 +3,10 @@ Definición de la configuración específica para Agent Execution Service.
 """
 from typing import Optional
 
-from pydantic import Field, model_validator
+from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 
 from ..base_settings import CommonAppSettings # Ajustado para la nueva ubicación
-
-# Ajuste de ruta para importar constantes del servicio específico.
-# Esto asume que la raíz del proyecto está en el PYTHONPATH
-# o que la ejecución se hace desde un contexto donde esta ruta es válida.
-# Si no, se podría necesitar una configuración de PYTHONPATH más explícita.
-from .....agent_execution_service.config.constants import LLMProviders, DEFAULT_MODELS
 
 class ExecutionSettings(CommonAppSettings):
     """Configuración específica para Agent Execution Service."""
@@ -37,12 +31,7 @@ class ExecutionSettings(CommonAppSettings):
     conversation_service_url: str = Field("http://localhost:8004", description="URL del Conversation Service")
     agent_management_service_url: str = Field("http://localhost:8003", description="URL del Agent Management Service")
 
-    # Configuración de LLM
-    default_llm_provider: str = Field(default=LLMProviders.OPENAI, description="Proveedor LLM por defecto si no se especifica en la configuración del agente")
-    default_model_name: Optional[str] = Field(default=None, description="Nombre del modelo por defecto. Si no se establece, se deriva de default_llm_provider.")
-
     # Límites y comportamiento de ejecución
-    default_agent_type: str = Field("conversational", description="Tipo de agente por defecto")
     max_iterations: int = Field(10, description="Máximo de iteraciones para agentes")
     max_execution_time: int = Field(120, description="Tiempo máximo de ejecución (segundos)")
     max_tools: int = Field(10, description="Número máximo de herramientas que un agente puede usar")
@@ -68,12 +57,3 @@ class ExecutionSettings(CommonAppSettings):
     tool_timeout_seconds: int = Field(30, description="Timeout for individual tool executions in seconds.")
     stream_chunk_size: int = Field(10, description="Chunk size in tokens for streaming LLM responses.")
     
-    @model_validator(mode='after')
-    def set_default_model_name_if_none(self) -> 'ExecutionSettings':
-        if self.default_model_name is None:
-            provider = self.default_llm_provider
-            if provider in DEFAULT_MODELS:
-                self.default_model_name = DEFAULT_MODELS[provider]
-            # Si el proveedor no está en DEFAULT_MODELS o no hay un modelo para el proveedor, permanece None.
-            # AgentExecutionHandler debe manejar el caso donde default_model_name sigue siendo None.
-        return self
