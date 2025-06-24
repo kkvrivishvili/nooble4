@@ -13,7 +13,7 @@ from common.models import DomainAction
 from common.clients import BaseRedisClient
 
 from ..services.embedding_service import EmbeddingService
-from ..config.settings import get_settings
+from common.config.service_settings import EmbeddingServiceSettings
 
 class EmbeddingWorker(BaseWorker):
     """

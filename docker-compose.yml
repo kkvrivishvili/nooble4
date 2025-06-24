@@ -43,7 +43,8 @@ services:
 
   ingestion_service:
     build:
-      context: ./ingestion_service
+      context: .
+      dockerfile: ./ingestion_service/Dockerfile
     ports:
       - "8002:8002"
     depends_on:
@@ -54,17 +55,6 @@ services:
     env_file:
       - ./.env
 
-  agent_management_service:
-    build:
-      context: ./agent_management_service
-    ports:
-      - "8003:8003"
-    depends_on:
-      - redis
-    volumes:
-      - ./common:/app/common
-    env_file:
-      - ./.env
 
   conversation_service:
     build:

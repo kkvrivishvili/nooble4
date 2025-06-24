@@ -14,7 +14,8 @@ class ConversationSettings(CommonAppSettings):
     model_config = SettingsConfigDict(
         env_prefix='CONVERSATION_',
         extra='ignore',
-        env_file='.env'
+        env_file='.env',
+        protected_namespaces=(), # Desactiva la protección de espacios de nombres
     )
 
     # service_name, environment, log_level, redis_url, database_url son heredados de CommonAppSettings.

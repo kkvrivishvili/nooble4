@@ -13,11 +13,11 @@ COPY embedding_service/requirements.txt .
 # Instalar dependencias de Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar código de la aplicación
-COPY embedding_service/ .
+# Copiar código de la aplicación, preservando la estructura de directorios
+COPY embedding_service/ /app/embedding_service/
 
 # Copiar módulo common (asumiendo estructura de monorepo)
-COPY common/ /app/common
+COPY common/ /app/common/
 
 # Variables de entorno por defecto
 ENV PYTHONPATH=/app

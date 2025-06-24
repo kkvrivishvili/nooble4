@@ -5,21 +5,21 @@ FROM python:3.9-slim
 WORKDIR /app
 
 # Copy the dependencies file to the working directory
-COPY requirements.txt .
+COPY ingestion_service/requirements.txt .
 
 # Install any needed packages specified in requirements.txt
 # Adding gcc for potential C extensions in dependencies
 RUN apt-get update && apt-get install -y gcc && rm -rf /var/lib/apt/lists/* && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application's code to the working directory
-COPY . .
+# Copy the service code into the container, preserving the directory structure
+COPY ingestion_service/ /app/ingestion_service/
 
-# Copy common module (assuming monorepo structure)
-COPY ../common /app/common
+# Copy the common module
+COPY common/ /app/common/
 
-# Set PYTHONPATH to include the app directory and the common module
-ENV PYTHONPATH=/app:/app/common
+# Set PYTHONPATH to include the root app directory
+ENV PYTHONPATH=/app
 
 # Expose the port the app runs on
 EXPOSE 8002

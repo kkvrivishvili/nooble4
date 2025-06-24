@@ -10,11 +10,11 @@ COPY agent_execution_service/requirements.txt .
 # Install any needed packages specified in requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the service-specific code into the container
-COPY agent_execution_service/ .
+# Copy the service-specific code into the container, preserving the directory structure
+COPY agent_execution_service/ /app/agent_execution_service/
 
 # Copy the shared common module
-COPY common/ /app/common
+COPY common/ /app/common/
 
 # Add the app directory to the Python path to ensure modules are found
 ENV PYTHONPATH=/app

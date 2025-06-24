@@ -1,6 +1,6 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic import Field, field_validator
 
 class CommonAppSettings(BaseSettings):
     model_config = SettingsConfigDict(extra='ignore', env_file='.env')
@@ -15,6 +15,7 @@ class CommonAppSettings(BaseSettings):
     # Configuración de Redis (común a todos los servicios)
     redis_url: str = Field("redis://localhost:6379", description="URL de conexión a Redis.")
     redis_password: Optional[str] = Field(None, description="Contraseña para Redis (si aplica).")
+    redis_decode_responses: bool = Field(True, description="Decodificar respuestas de Redis a UTF-8.")
     
     # Puertos de servicios (configurables desde .env)
     agent_orchestrator_port: int = Field(8001, description="Puerto para Agent Orchestrator Service.")
@@ -55,4 +56,15 @@ class CommonAppSettings(BaseSettings):
     
     # Qdrant (para búsqueda vectorial)
     search_timeout_seconds: int = Field(30, description="Timeout en segundos para búsquedas vectoriales.")
+
+    # CORS
+    cors_origins: List[str] = Field(default=["*"], description="Orígenes permitidos para CORS.")
+
+    @field_validator("cors_origins", mode='before')
+    def parse_cors_origins(cls, v):
+        if isinstance(v, str) and not v.startswith("["):
+            return [origin.strip() for origin in v.split(",")]
+        if isinstance(v, list):
+            return v
+        return ["*"]
 

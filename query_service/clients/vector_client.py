@@ -10,7 +10,7 @@ import time
 from typing import List, Optional, Dict, Any
 
 from common.clients.base_http_client import BaseHTTPClient
-from common.errors.http_errors import NotFoundError, ServiceUnavailableError
+from common.errors.exceptions import NotFoundError, ServiceUnavailableError
 
 from ..models.vector_search_result import SearchResult
 

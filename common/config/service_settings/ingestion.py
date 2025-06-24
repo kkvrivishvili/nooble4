@@ -87,14 +87,6 @@ class IngestionServiceSettings(CommonAppSettings):
     # CORS (ya en CommonAppSettings, se puede sobreescribir si es necesario)
     # cors_origins: List[str] = Field(default=["*"], description="Orígenes permitidos para CORS en Ingestion Service")
 
-    @field_validator("cors_origins", pre=True, check_fields=False) # check_fields=False si se hereda
-    def parse_cors_origins(cls, v):
-        if isinstance(v, str) and not v.startswith("["):
-            return [origin.strip() for origin in v.split(",")]
-        if isinstance(v, list):
-            return v
-        if v is None and CommonAppSettings.model_fields['cors_origins'].default:
-             return CommonAppSettings.model_fields['cors_origins'].default
-        return ["*"] # Fallback genérico si todo falla
+
 
     # Podrían añadirse validadores para asegurar que las URLs de servicios tienen scheme, etc.

@@ -8,7 +8,7 @@ de respuestas usando Retrieval-Augmented Generation (RAG).
 __version__ = "1.0.0"
 
 from .clients import GroqClient, VectorClient, EmbeddingClient
-from .config import QueryServiceSettings, get_settings
+from common.config.service_settings import QueryServiceSettings
 from .handlers import SimpleHandler, AdvanceHandler, RAGHandler
 from .models import (
     ACTION_QUERY_SIMPLE,

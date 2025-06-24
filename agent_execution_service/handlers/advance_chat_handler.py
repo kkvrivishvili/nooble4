@@ -20,7 +20,7 @@ from common.models.chat_models import (
 from common.models.config_models import ExecutionConfig, QueryConfig, RAGConfig
 from common.clients.redis.redis_state_manager import RedisStateManager
 
-from ..config.settings import ExecutionServiceSettings
+from common.config.service_settings import ExecutionServiceSettings
 from ..clients.query_client import QueryClient
 from ..clients.conversation_client import ConversationClient
 from ..tools.base_tool import BaseTool

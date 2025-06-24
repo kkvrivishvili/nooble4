@@ -6,7 +6,7 @@ import logging
 from typing import Optional, Dict, Any, List, Tuple, Union
 
 from groq import AsyncGroq, APIConnectionError, RateLimitError, APIStatusError
-from common.errors.http_errors import ServiceUnavailableError
+from common.errors.exceptions import ServiceUnavailableError
 
 
 class GroqClient:

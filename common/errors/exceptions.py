@@ -35,3 +35,35 @@ class QueueManagerError(BaseError):
 class WorkerError(BaseError):
     """Errores generales dentro de la lógica de un Worker."""
     pass
+
+
+# --- HTTP Error Classes ---
+
+class BadRequestError(ExternalServiceError):
+    """Corresponds to a 400 Bad Request error."""
+    pass
+
+class UnauthorizedError(ExternalServiceError):
+    """Corresponds to a 401 Unauthorized error."""
+    pass
+
+class ForbiddenError(ExternalServiceError):
+    """Corresponds to a 403 Forbidden error."""
+    pass
+
+class NotFoundError(ExternalServiceError):
+    """Corresponds to a 404 Not Found error."""
+    pass
+
+class ConflictError(ExternalServiceError):
+    """Corresponds to a 409 Conflict error."""
+    pass
+
+class InternalServerError(ExternalServiceError):
+    """Corresponds to a 500 Internal Server Error."""
+    pass
+
+class ServiceUnavailableError(ExternalServiceError):
+    """Corresponds to a 503 Service Unavailable error."""
+    pass
+

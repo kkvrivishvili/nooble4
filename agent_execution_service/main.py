@@ -11,7 +11,7 @@ from fastapi import FastAPI
 
 from common.clients.redis.redis_manager import RedisManager
 from common.utils.logging import init_logging
-from common.config import ExecutionSettings
+from common.config.service_settings import ExecutionServiceSettings
 from .workers.execution_worker import ExecutionWorker
 
 # Variables globales para gestión de recursos

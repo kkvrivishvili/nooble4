@@ -8,7 +8,7 @@ para textos usando la API de OpenAI y otros proveedores.
 __version__ = "1.0.0"
 
 from .clients import OpenAIClient
-from .config import get_settings
+from common.config.service_settings import EmbeddingServiceSettings
 from .handlers import OpenAIHandler, ValidationHandler
 from .models import (
     EmbeddingBatchPayload,

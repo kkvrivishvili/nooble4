@@ -10,7 +10,7 @@ __description__ = "Servicio de ejecución con soporte para chat simple + RAG y c
 
 # Importar desde los módulos correctos
 from .clients import QueryClient, ConversationClient
-from .config import ExecutionServiceSettings
+from common.config.service_settings import ExecutionServiceSettings
 from .handlers import AdvanceChatHandler, SimpleChatHandler
 from .services import ExecutionService
 from .tools import BaseTool, KnowledgeTool, ToolRegistry

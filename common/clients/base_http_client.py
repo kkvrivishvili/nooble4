@@ -1,7 +1,7 @@
 import httpx
 from typing import Any, Dict, Optional
 
-from common.errors.http_errors import (BadRequestError, UnauthorizedError, ForbiddenError, 
+from common.errors.exceptions import (BadRequestError, UnauthorizedError, ForbiddenError, 
                                      NotFoundError, ConflictError, InternalServerError, ServiceUnavailableError)
 
 class BaseHTTPClient:
