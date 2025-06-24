@@ -65,6 +65,8 @@ class QueryConfig(BaseModel):
     """
     Configuración para consultas LLM (Groq).
     Contiene todos los parámetros necesarios para llamadas al modelo.
+    
+    También incluye configuración para el SDK de Groq (timeout, max_retries).    
     """
     model: ChatModel = Field(
         ...,
@@ -119,6 +121,18 @@ class QueryConfig(BaseModel):
         description="Habilitar búsquedas paralelas en colecciones"
     )
     
+    # Configuración específica del SDK de Groq
+    timeout: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        description="Timeout en segundos para la API de Groq (None usa el valor por defecto del servicio)"
+    )
+    max_retries: Optional[int] = Field(
+        default=None, 
+        ge=0,
+        description="Número máximo de reintentos para la API de Groq (None usa el valor por defecto del servicio)"
+    )
+    
     model_config = {"extra": "forbid"}
 
 
@@ -166,6 +180,18 @@ class RAGConfig(BaseModel):
         ge=0.0,
         le=1.0,
         description="Umbral mínimo de similitud para considerar un documento relevante"
+    )
+    
+    # Configuración específica del SDK de OpenAI
+    timeout: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        description="Timeout en segundos para la API de OpenAI (None usa el valor por defecto del servicio)"
+    )
+    max_retries: Optional[int] = Field(
+        default=None, 
+        ge=0,
+        description="Número máximo de reintentos para la API de OpenAI (None usa el valor por defecto del servicio)"
     )
     
     model_config = {"extra": "forbid"}

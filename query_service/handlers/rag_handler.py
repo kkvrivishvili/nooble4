@@ -22,29 +22,29 @@ from ..clients.embedding_client import EmbeddingClient
 class RAGHandler(BaseHandler):
     """Handler para búsqueda RAG pura (knowledge tool)."""
     
-    def __init__(self, app_settings, embedding_client: EmbeddingClient, direct_redis_conn=None):
+    def __init__(self, app_settings, embedding_client: EmbeddingClient, vector_client: VectorClient, direct_redis_conn=None):
         """
-        Inicializa el handler.
+        Inicializa el handler para procesamiento RAG avanzado recibiendo los clientes como dependencias.
         
         Args:
-            app_settings: QueryServiceSettings
-            embedding_client: Cliente para obtener embeddings
-            direct_redis_conn: Conexión Redis directa
+            app_settings: Configuración global de la aplicación
+            embedding_client: Cliente para comunicación con Embedding Service
+            vector_client: Cliente para búsqueda vectorial en Qdrant
+            direct_redis_conn: Conexión Redis directa (opcional)
         """
         super().__init__(app_settings, direct_redis_conn)
         
+        # Validar que todos los clientes requeridos estén presentes
         if not embedding_client:
             raise ValueError("embedding_client es requerido para RAGHandler")
+        if not vector_client:
+            raise ValueError("vector_client es requerido para RAGHandler")
             
+        # Asignar los clientes recibidos como dependencias
         self.embedding_client = embedding_client
+        self.vector_client = vector_client
         
-        # Inicializar vector client
-        self.vector_client = VectorClient(
-            base_url=str(app_settings.qdrant_url) if hasattr(app_settings, 'qdrant_url') and app_settings.qdrant_url else "http://localhost:6333",
-            timeout=app_settings.search_timeout_seconds
-        )
-        
-        self._logger.info("RAGHandler inicializado")
+        self._logger.info("RAGHandler inicializado con inyección de clientes")
     
     async def process_rag_search(
         self,

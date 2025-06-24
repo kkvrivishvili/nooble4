@@ -21,6 +21,8 @@ from ..handlers.simple_handler import SimpleHandler
 from ..handlers.advance_handler import AdvanceHandler
 from ..handlers.rag_handler import RAGHandler
 from ..clients.embedding_client import EmbeddingClient
+from ..clients.groq_client import GroqClient
+from ..clients.vector_client import VectorClient
 
 
 class QueryService(BaseService):
@@ -30,36 +32,56 @@ class QueryService(BaseService):
     
     def __init__(self, app_settings, service_redis_client=None, direct_redis_conn=None):
         """
-        Inicializa el servicio con sus handlers.
+        Inicializa el servicio con sus handlers y clientes.
+        
+        Todos los clientes se inicializan a nivel de servicio y se inyectan en los handlers,
+        siguiendo el patrón de inyección de dependencias.
         """
         super().__init__(app_settings, service_redis_client, direct_redis_conn)
         
-        # Crear embedding client
-        self.embedding_client = None
-        if service_redis_client:
-            self.embedding_client = EmbeddingClient(service_redis_client)
-        else:
+        # Inicializar clientes
+        if not service_redis_client:
             raise ValueError("service_redis_client es requerido para comunicación con Embedding Service")
+            
+        # 1. Cliente de embeddings para comunicación con el Embedding Service
+        self.embedding_client = EmbeddingClient(service_redis_client)
         
-        # Inicializar handlers
+        # 2. Cliente de vectores para búsqueda en Qdrant
+        self.vector_client = VectorClient(
+            base_url=str(app_settings.qdrant_url) if hasattr(app_settings, 'qdrant_url') and app_settings.qdrant_url else "http://localhost:6333",
+            timeout=app_settings.search_timeout_seconds
+        )
+        
+        # 3. Cliente de Groq para consultas LLM
+        self.groq_client = GroqClient(
+            api_key=app_settings.groq_api_key,
+            timeout=app_settings.groq_timeout_seconds,
+            max_retries=app_settings.groq_max_retries
+        )
+        
+        # Inicializar handlers inyectando los clientes como dependencias
         self.simple_handler = SimpleHandler(
             app_settings=app_settings,
             embedding_client=self.embedding_client,
+            vector_client=self.vector_client,
+            groq_client=self.groq_client,
             direct_redis_conn=direct_redis_conn
         )
         
         self.advance_handler = AdvanceHandler(
             app_settings=app_settings,
+            groq_client=self.groq_client,
             direct_redis_conn=direct_redis_conn
         )
         
         self.rag_handler = RAGHandler(
             app_settings=app_settings,
             embedding_client=self.embedding_client,
+            vector_client=self.vector_client,
             direct_redis_conn=direct_redis_conn
         )
         
-        self.logger.info("QueryService inicializado correctamente")
+        self.logger.info("QueryService inicializado correctamente con inyección de clientes")
     
     async def process_action(self, action: DomainAction) -> Optional[Dict[str, Any]]:
         """

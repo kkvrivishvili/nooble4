@@ -21,16 +21,25 @@ from ..clients.groq_client import GroqClient
 class AdvanceHandler(BaseHandler):
     """Handler para procesamiento de chat avanzado con tools."""
     
-    def __init__(self, app_settings, direct_redis_conn=None):
+    def __init__(self, app_settings, groq_client: GroqClient, direct_redis_conn=None):
         """
-        Inicializa el handler.
+        Inicializa el handler recibiendo el cliente como dependencia.
         
         Args:
             app_settings: QueryServiceSettings
+            groq_client: Cliente para consultas LLM en Groq
             direct_redis_conn: Conexión Redis directa
         """
         super().__init__(app_settings, direct_redis_conn)
-        self._logger.info("AdvanceHandler inicializado")
+        
+        # Validar que el cliente esté presente
+        if not groq_client:
+            raise ValueError("groq_client es requerido para AdvanceHandler")
+            
+        # Asignar el cliente recibido como dependencia
+        self.groq_client = groq_client
+        
+        self._logger.info("AdvanceHandler inicializado con inyección de cliente")
     
     async def process_advance_query(
         self,
@@ -121,15 +130,23 @@ class AdvanceHandler(BaseHandler):
                 "tool_choice": tool_choice  # Parámetro de nivel superior según especificaciones de Groq
             }
             
-            # Crear cliente Groq con timeout dinámico
-            groq_client = GroqClient(
-                api_key=self.app_settings.groq_api_key,
-                timeout=max(60, query_config.max_tokens // 100),  # Timeout dinámico basado en max_tokens
-                max_retries=self.app_settings.groq_max_retries
-            )
+            # Aplicar configuración dinámica del timeout si está especificada en query_config
+            # Si no hay configuración específica, usar el cliente ya inyectado
+            groq_client_instance = self.groq_client
             
-            # Llamar al cliente de Groq
-            response_text, token_usage = await groq_client.generate(**groq_payload)
+            # Si hay configuración específica en query_config (timeout o max_retries), usar with_options
+            if query_config.timeout is not None or query_config.max_retries is not None:
+                options = {}
+                if query_config.timeout is not None:
+                    options["timeout"] = query_config.timeout
+                if query_config.max_retries is not None:
+                    options["max_retries"] = query_config.max_retries
+                
+                # Crear una copia del cliente con las opciones específicas
+                groq_client_instance = self.groq_client.with_options(**options)
+            
+            # Llamar al cliente de Groq (original o con opciones específicas)
+            response_text, token_usage = await groq_client_instance.generate(**groq_payload)
             
             # Construir respuesta
             end_time = time.time()

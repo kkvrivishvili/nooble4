@@ -24,31 +24,34 @@ from ..clients.embedding_client import EmbeddingClient
 class SimpleHandler(BaseHandler):
     """Handler para procesamiento de chat simple con RAG automático."""
     
-    def __init__(self, app_settings, embedding_client: EmbeddingClient, direct_redis_conn=None):
+    def __init__(self, app_settings, embedding_client: EmbeddingClient, vector_client: VectorClient, 
+                 groq_client: GroqClient, direct_redis_conn=None):
         """
-        Inicializa el handler.
+        Inicializa el handler recibiendo todos los clientes como dependencias.
+        
+        Args:
+            app_settings: Configuración del servicio
+            embedding_client: Cliente para comunicación con Embedding Service
+            vector_client: Cliente para búsqueda vectorial en Qdrant
+            groq_client: Cliente para consultas LLM en Groq
+            direct_redis_conn: Conexión directa a Redis (opcional)
         """
         super().__init__(app_settings, direct_redis_conn)
         
+        # Validar que todos los clientes requeridos estén presentes
         if not embedding_client:
             raise ValueError("embedding_client es requerido para SimpleHandler")
+        if not vector_client:
+            raise ValueError("vector_client es requerido para SimpleHandler")
+        if not groq_client:
+            raise ValueError("groq_client es requerido para SimpleHandler")
             
+        # Asignar los clientes recibidos como dependencias
         self.embedding_client = embedding_client
+        self.vector_client = vector_client
+        self.groq_client = groq_client
         
-        # Inicializar vector client
-        self.vector_client = VectorClient(
-            base_url=str(app_settings.qdrant_url) if hasattr(app_settings, 'qdrant_url') and app_settings.qdrant_url else "http://localhost:6333",
-            timeout=app_settings.search_timeout_seconds
-        )
-        
-        # Inicializar Groq client
-        self.groq_client = GroqClient(
-            api_key=app_settings.groq_api_key,
-            timeout=app_settings.groq_timeout_seconds,
-            max_retries=app_settings.groq_max_retries
-        )
-        
-        self.logger.info("SimpleHandler inicializado")
+        self.logger.info("SimpleHandler inicializado con inyección de clientes")
     
     async def process_simple_query(
         self,
@@ -200,8 +203,22 @@ class SimpleHandler(BaseHandler):
                 "stop": query_config.stop_sequences if query_config.stop_sequences else None
             }
             
-            # Llamar al cliente de Groq
-            response_text, token_usage = await self.groq_client.generate(**groq_payload)
+            # Aplicar configuración dinámica si está especificada en query_config
+            groq_client_instance = self.groq_client
+            
+            # Si hay configuración específica en query_config (timeout o max_retries), usar with_options
+            if query_config.timeout is not None or query_config.max_retries is not None:
+                options = {}
+                if query_config.timeout is not None:
+                    options["timeout"] = query_config.timeout
+                if query_config.max_retries is not None:
+                    options["max_retries"] = query_config.max_retries
+                
+                # Crear una copia del cliente con las opciones específicas
+                groq_client_instance = self.groq_client.with_options(**options)
+            
+            # Llamar al cliente de Groq (original o con opciones específicas)
+            response_text, token_usage = await groq_client_instance.generate(**groq_payload)
             
             # Construir respuesta
             end_time = time.time()

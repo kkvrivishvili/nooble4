@@ -24,19 +24,23 @@ class OpenAIHandler(BaseHandler):
     manejo de errores y tracking de métricas.
     """
     
-    def __init__(self, app_settings, direct_redis_conn=None):
+    def __init__(self, app_settings, openai_client: OpenAIClient, direct_redis_conn=None):
         """
         Inicializa el handler con sus dependencias.
+        
+        Args:
+            app_settings: Configuración global de la aplicación
+            openai_client: Cliente para comunicación con OpenAI API
+            direct_redis_conn: Conexión Redis directa (opcional)
         """
         super().__init__(app_settings, direct_redis_conn)
         
-        # Inicializar cliente OpenAI
-        self.openai_client = OpenAIClient(
-            api_key=self.app_settings.openai_api_key,
-            base_url=self.app_settings.openai_base_url,
-            timeout=self.app_settings.openai_timeout_seconds,
-            max_retries=self.app_settings.openai_max_retries
-        )
+        # Validar que el cliente esté presente
+        if not openai_client:
+            raise ValueError("openai_client es requerido para OpenAIHandler")
+        
+        # Asignar el cliente recibido como dependencia
+        self.openai_client = openai_client
         
         # Configuración por defecto
         self.default_model = self.app_settings.openai_default_model
@@ -45,7 +49,7 @@ class OpenAIHandler(BaseHandler):
             1536  # Default para text-embedding-3-small
         )
         
-        self._logger.info("OpenAIHandler inicializado")
+        self._logger.info("OpenAIHandler inicializado con inyección de cliente")
     
     async def generate_embeddings(
         self,
@@ -55,7 +59,8 @@ class OpenAIHandler(BaseHandler):
         encoding_format: Optional[str] = None,
         tenant_id: Optional[str] = None,
         agent_id: Optional[str] = None,
-        trace_id: Optional[UUID] = None
+        trace_id: Optional[UUID] = None,
+        rag_config: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Genera embeddings para una lista de textos.
@@ -66,7 +71,9 @@ class OpenAIHandler(BaseHandler):
             dimensions: Dimensiones del embedding
             encoding_format: Formato de codificación
             tenant_id: ID del tenant
+            agent_id: ID del agente
             trace_id: ID de traza
+            rag_config: Configuración RAG opcional con parámetros dinámicos
             
         Returns:
             Dict con embeddings y metadatos
@@ -89,8 +96,20 @@ class OpenAIHandler(BaseHandler):
         )
         
         try:
-            # Llamar al cliente OpenAI
-            result = await self.openai_client.generate_embeddings(
+            # Configurar cliente con opciones dinámicas si están disponibles
+            client = self.openai_client
+            if rag_config and (rag_config.get("timeout") is not None or rag_config.get("max_retries") is not None):
+                client = self.openai_client.with_options(
+                    timeout=rag_config.get("timeout"),
+                    max_retries=rag_config.get("max_retries")
+                )
+                self._logger.debug(
+                    f"Usando configuración dinámica para OpenAI: "
+                    f"timeout={rag_config.get('timeout')}, max_retries={rag_config.get('max_retries')}"
+                )
+            
+            # Llamar al cliente OpenAI (original o configurado dinámicamente)
+            result = await client.generate_embeddings(
                 texts=texts,
                 model=model,
                 dimensions=dimensions,

@@ -41,13 +41,22 @@ class EmbeddingService(BaseService):
     
     def __init__(self, app_settings, service_redis_client=None, direct_redis_conn=None):
         """
-        Inicializa el servicio con sus handlers.
+        Inicializa el servicio con sus clientes y handlers.
         """
         super().__init__(app_settings, service_redis_client, direct_redis_conn)
         
-        # Inicializar handlers
+        # Inicializar clientes a nivel de servicio
+        self.openai_client = OpenAIClient(
+            api_key=app_settings.openai_api_key,
+            timeout=app_settings.openai_timeout_seconds,
+            max_retries=app_settings.openai_max_retries,
+            base_url=app_settings.openai_base_url
+        )
+        
+        # Inicializar handlers e inyectar dependencias
         self.openai_handler = OpenAIHandler(
             app_settings=app_settings,
+            openai_client=self.openai_client,
             direct_redis_conn=direct_redis_conn
         )
         
@@ -56,7 +65,7 @@ class EmbeddingService(BaseService):
             direct_redis_conn=direct_redis_conn
         )
         
-        self._logger.info("EmbeddingService inicializado correctamente")
+        self._logger.info("EmbeddingService inicializado correctamente con inyección de cliente")
     
     async def process_action(self, action: DomainAction) -> Optional[Dict[str, Any]]:
         """
@@ -120,7 +129,12 @@ class EmbeddingService(BaseService):
         if not validation_result["is_valid"]:
             raise ValueError(f"Validación fallida: {validation_result['messages'][0]}")
         
-        # Generar embeddings
+        # Extraer rag_config del DomainAction si existe
+        # Esto sigue el flujo arquitectónico correcto donde las configuraciones
+        # viajan explícitamente en el DomainAction
+        rag_config = action.rag_config.dict() if action.rag_config else None
+        
+        # Generar embeddings con la configuración dinámica
         result = await self.openai_handler.generate_embeddings(
             texts=texts,
             model=payload.model.value,
@@ -128,7 +142,8 @@ class EmbeddingService(BaseService):
             encoding_format=payload.encoding_format,
             tenant_id=action.tenant_id,
             agent_id=action.agent_id,
-            trace_id=action.trace_id
+            trace_id=action.trace_id,
+            rag_config=rag_config
         )
         
         # Construir respuesta
@@ -158,7 +173,10 @@ class EmbeddingService(BaseService):
         else:
             query_text = payload.input
         
-        # Generar embedding
+        # Extraer configuración RAG del DomainAction
+        rag_config = action.rag_config.dict() if action.rag_config else None
+        
+        # Generar embedding con configuración dinámica
         result = await self.openai_handler.generate_embeddings(
             texts=[query_text],
             model=payload.model.value,
@@ -166,7 +184,8 @@ class EmbeddingService(BaseService):
             encoding_format=payload.encoding_format,
             tenant_id=action.tenant_id,
             agent_id=action.agent_id,
-            trace_id=action.trace_id
+            trace_id=action.trace_id,
+            rag_config=rag_config
         )
         
         # Para query única, retornar solo el primer embedding
@@ -194,14 +213,18 @@ class EmbeddingService(BaseService):
             # El modelo ahora es un campo obligatorio en el payload
             model = payload.model
             
-            # Generar embeddings
+            # Extraer configuración RAG del DomainAction
+            rag_config = action.rag_config.dict() if action.rag_config else None
+            
+            # Generar embeddings con configuración dinámica
             result = await self.openai_handler.generate_embeddings(
                 texts=payload.texts,
                 model=model,
                 dimensions=payload.dimensions,
                 tenant_id=action.tenant_id,
                 agent_id=action.agent_id,
-                trace_id=action.trace_id
+                trace_id=action.trace_id,
+                rag_config=rag_config
             )
             
             # Construir respuesta de batch

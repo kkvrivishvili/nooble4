@@ -20,9 +20,9 @@ class OpenAIClient:
     def __init__(
         self, 
         api_key: str,
-        base_url: Optional[str] = None, 
         timeout: int,
-        max_retries: int
+        max_retries: int,
+        base_url: Optional[str] = None
     ):
         """
         Inicializa el cliente con la API key y otras configuraciones.
@@ -36,6 +36,11 @@ class OpenAIClient:
         if not api_key:
             raise ValueError("API key de OpenAI es requerida")
         
+        self.api_key = api_key
+        self.base_url = base_url
+        self.timeout = timeout
+        self.max_retries = max_retries
+        
         self.client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url, 
@@ -43,6 +48,34 @@ class OpenAIClient:
             max_retries=max_retries
         )
         self.logger = logging.getLogger(__name__)
+
+    def with_options(self, timeout: Optional[float] = None, max_retries: Optional[int] = None) -> 'OpenAIClient':
+        """
+        Crea una nueva instancia del cliente con opciones personalizadas.
+        
+        Permite configurar dinámicamente el timeout y reintentos sin modificar la instancia original.
+        
+        Args:
+            timeout: Timeout personalizado en segundos para las peticiones (None para usar el valor por defecto).
+            max_retries: Número máximo de reintentos (None para usar el valor por defecto).
+            
+        Returns:
+            Una nueva instancia de OpenAIClient con las opciones actualizadas.
+        """
+        # Crear una nueva instancia con los mismos parámetros base
+        new_client = OpenAIClient(
+            api_key=self.api_key,
+            timeout=timeout if timeout is not None else self.timeout,
+            max_retries=max_retries if max_retries is not None else self.max_retries,
+            base_url=self.base_url
+        )
+        
+        self.logger.debug(
+            f"Cliente OpenAI clonado con opciones: timeout={new_client.timeout}s, "
+            f"max_retries={new_client.max_retries}"
+        )
+        
+        return new_client
 
     async def generate_embeddings(
         self,
