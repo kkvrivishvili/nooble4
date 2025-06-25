@@ -7,6 +7,7 @@ from typing import Optional, Dict, Any
 
 from pydantic import ValidationError
 import redis.asyncio as redis_async
+import redis.exceptions
 
 from common.models.actions import DomainAction, DomainActionResponse, ErrorDetail
 from common.clients.queue_manager import QueueManager
@@ -97,7 +98,7 @@ class BaseWorker(ABC):
                 mkstream=True
             )
             logger.info(f"[{self.service_name}] Grupo de consumidores '{self.consumer_group_name}' creado/verificado para el stream '{self.action_stream_name}'.")
-        except redis_async.exceptions.ResponseError as e:
+        except redis.exceptions.ResponseError as e:
             if "BUSYGROUP" in str(e):
                 logger.info(f"[{self.service_name}] Grupo de consumidores '{self.consumer_group_name}' ya existe para el stream '{self.action_stream_name}'.")
             else:
