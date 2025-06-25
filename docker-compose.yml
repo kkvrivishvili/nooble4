@@ -1,4 +1,3 @@
-
 networks:
   nooble-network:
     driver: bridge
@@ -7,7 +6,9 @@ services:
   redis:
     networks:
       - nooble-network
-    image: redis:7.2-alpine
+    build:
+      context: ./redis_database
+      dockerfile: Dockerfile
     ports:
       - "6379:6379"
     volumes:
@@ -22,6 +23,21 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
+
+  postgres:
+    networks:
+      - nooble-network
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    env_file:
+      - ./.env
 
   query_service:
     networks:
@@ -69,7 +85,6 @@ services:
       - ./common:/app/common
     env_file:
       - ./.env
-
 
   conversation_service:
     networks:
@@ -119,3 +134,4 @@ services:
 volumes:
   redis_data:
   qdrant_data:
+  postgres_data:
