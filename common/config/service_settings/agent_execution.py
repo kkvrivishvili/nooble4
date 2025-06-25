@@ -21,7 +21,6 @@ class ExecutionServiceSettings(CommonAppSettings):
 # service_name, environment, log_level, redis_url, database_url, http_timeout_seconds son heredados de CommonAppSettings.
 
     service_name: str = Field("agent_execution_service", description="Nombre del servicio de ejecución de agentes.")
-
     service_version: str = Field("1.0.0", description="Versión del servicio")
 
     # Campos específicos del Execution Service

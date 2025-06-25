@@ -40,20 +40,20 @@ class CommonAppSettings(BaseSettings):
     agent_execution_url: str = Field("http://localhost:8005", description="URL del Agent Execution Service.")
     embedding_service_url: str = Field("http://localhost:8006", description="URL del Embedding Service.")
     
-    # Configuración de bases de datos externas
-    # Qdrant
+
+    # Qdrant (configurables desde .env)
     qdrant_url: str = Field("http://localhost:6333", description="URL de conexión a Qdrant.")
-    qdrant_api_key: Optional[str] = Field(None, description="API key para Qdrant (si aplica).")
+    qdrant_api_key: Optional[str] = Field(None, description="API key para Qdrant (SI NO SE USA VERSION LOCAL SERVER).")
     
-    # Postgres
+    # Postgres (configurables desde .env)
     postgres_url: str = Field("postgresql://postgres:postgres@localhost:5432/nooble", description="URL de conexión a Postgres.")
     
-    # OpenAI (para Embedding Service)
+    # OpenAI (configurables desde .env)
     openai_api_key: Optional[str] = Field(None, description="API key para OpenAI.")
-    openai_base_url: Optional[str] = Field(None, description="URL base para API de OpenAI (si se usa un endpoint alternativo).")
-    openai_timeout_seconds: int = Field(60, description="Timeout en segundos para peticiones a la API de OpenAI.")
-    openai_max_retries: int = Field(2, description="Número máximo de reintentos para peticiones a OpenAI.")
+    openai_base_url: Optional[str] = Field(None, description="URL base para API de OpenAI (SI NO SE USA OPEN AI EMBEDDING Y SE USA OTRO EMBEDDINGS).")
 
+    # Groq API Settings (configurables desde .env)
+    groq_api_key: str = Field(..., description="API Key para Groq (usar variable de entorno QUERY_GROQ_API_KEY)")
     
     # CORS
     cors_origins: List[str] = Field(default=["*"], description="Orígenes permitidos para CORS.")

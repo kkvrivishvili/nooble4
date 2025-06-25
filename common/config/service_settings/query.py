@@ -15,13 +15,7 @@ class QueryServiceSettings(CommonAppSettings):
     
     # Domain específico para colas
     domain_name: str = Field(default="query", description="Dominio del servicio para colas y logging")
-    
-    # Groq API Settings
-    groq_api_key: str = Field(..., description="API Key para Groq (usar variable de entorno QUERY_GROQ_API_KEY)")
-    
-    # LLM Operational Settings ( esta configuracion se debe eliminar porque esta en query_config.py)
-    groq_max_retries: int = Field(default=3, description="Número de reintentos del cliente Groq")
-
+        
     # Embedding Service Configuration
     embedding_service_timeout: int = Field(default=30, description="Timeout para comunicación con Embedding Service")
     
