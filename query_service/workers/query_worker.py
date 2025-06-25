@@ -13,7 +13,7 @@ from common.models import DomainAction
 from common.clients import BaseRedisClient
 
 from ..services.query_service import QueryService
-from ..config.settings import get_settings
+from common.config.service_settings.query import QueryServiceSettings
 
 
 class QueryWorker(BaseWorker):
@@ -40,7 +40,7 @@ class QueryWorker(BaseWorker):
         """
         # Cargar settings si no se proporcionan
         if app_settings is None:
-            app_settings = get_settings()
+            app_settings = QueryServiceSettings()
         
         if async_redis_conn is None:
             raise ValueError("async_redis_conn es requerido para QueryWorker")

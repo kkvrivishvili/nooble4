@@ -15,7 +15,7 @@ qdrant-client==1.14.3
 
 # Document Processing and NLP
 llama-index-core==0.12.42
-numpy==2.3.0 # Often a dependency for NLP/ML libraries
+numpy==2.3.1 # Often a dependency for NLP/ML libraries
 spacy==3.8.7
 nltk==3.9.1
 

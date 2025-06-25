@@ -1,6 +1,12 @@
 
+networks:
+  nooble-network:
+    driver: bridge
+
 services:
   redis:
+    networks:
+      - nooble-network
     image: redis:7.2-alpine
     ports:
       - "6379:6379"
@@ -8,6 +14,8 @@ services:
       - redis_data:/data
 
   qdrant:
+    networks:
+      - nooble-network
     image: qdrant/qdrant:v1.7.4
     ports:
       - "6333:6333"
@@ -16,6 +24,8 @@ services:
       - qdrant_data:/qdrant/storage
 
   query_service:
+    networks:
+      - nooble-network
     build:
       context: .
       dockerfile: ./query_service/Dockerfile
@@ -30,6 +40,8 @@ services:
       - ./.env
 
   agent_orchestrator_service:
+    networks:
+      - nooble-network
     build:
       context: .
       dockerfile: ./agent_orchestrator_service/Dockerfile
@@ -43,6 +55,8 @@ services:
       - ./.env
 
   ingestion_service:
+    networks:
+      - nooble-network
     build:
       context: .
       dockerfile: ./ingestion_service/Dockerfile
@@ -58,6 +72,8 @@ services:
 
 
   conversation_service:
+    networks:
+      - nooble-network
     build:
       context: .
       dockerfile: ./conversation_service/Dockerfile
@@ -71,6 +87,8 @@ services:
       - ./.env
 
   agent_execution_service:
+    networks:
+      - nooble-network
     build:
       context: .
       dockerfile: ./agent_execution_service/Dockerfile
@@ -84,6 +102,8 @@ services:
       - ./.env
 
   embedding_service:
+    networks:
+      - nooble-network
     build:
       context: .
       dockerfile: ./embedding_service/Dockerfile

@@ -12,7 +12,6 @@ class ExecutionServiceSettings(CommonAppSettings):
     """Configuración específica para Agent Execution Service."""
 
     model_config = SettingsConfigDict(
-        env_prefix='AES_',
         extra='ignore',
         env_file='.env'
     )
