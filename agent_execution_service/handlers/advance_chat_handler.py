@@ -140,7 +140,7 @@ class AdvanceChatHandler:
                 user_message=last_user_message,
                 assistant_message=response_message,
                 task_id=chat_request.task_id,
-                ttl=self.execution_config.conversation_cache_ttl,
+                ttl=self.action.execution_config.history_ttl,
                 metadata={
                     "mode": "advance",
                     "execution_time_seconds": execution_time,

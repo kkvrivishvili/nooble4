@@ -31,7 +31,7 @@ class SimpleChatHandler:
         query_client: QueryClient,
         conversation_client: ConversationClient,
         cache_manager: CacheManager,
-        execution_config: ExecutionConfig
+        action
     ):
         """
         Inicializa SimpleChatHandler.
@@ -40,11 +40,11 @@ class SimpleChatHandler:
             query_client: Cliente para consultas al LLM
             conversation_client: Cliente para persistencia de conversaciones
             cache_manager: Gestor de cache
-            execution_config: Configuración de ejecución
+            action: DomainAction que contiene la configuración en action.execution_config
         """
         self.query_client = query_client
         self.cache_manager = cache_manager
-        self.execution_config = execution_config
+        self.action = action
         
         # Inicializar ConversationHelper
         self.conversation_helper = ConversationHelper(
@@ -145,7 +145,7 @@ class SimpleChatHandler:
                 user_message=last_user_message,
                 assistant_message=response_message,
                 task_id=chat_request.task_id,
-                ttl=self.execution_config.conversation_cache_ttl,
+                ttl=self.action.execution_config.history_ttl,
                 metadata={
                     "mode": "simple",
                     "query_service_response": query_response
