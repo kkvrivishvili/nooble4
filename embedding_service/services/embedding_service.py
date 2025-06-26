@@ -113,56 +113,78 @@ class EmbeddingService(BaseService):
     
     async def _handle_generate(self, action: DomainAction) -> Dict[str, Any]:
         """
-        Maneja la acción embedding.generate para múltiples textos.
+        Maneja la acción embedding.generate para múltiples textos, con reporte de errores por chunk.
         """
         if not action.rag_config:
             raise ValueError("rag_config es requerido para embedding.generate")
 
         texts = action.data.get("texts", [])
-        if not texts:
-            raise ValueError("texts es requerido en el payload")
-
-        if isinstance(texts, str):
-            texts = [texts]
-        elif not isinstance(texts, list):
-            raise ValueError("texts debe ser una lista de strings")
+        chunk_ids = action.data.get("chunk_ids", [])
+        if not texts or not chunk_ids or len(texts) != len(chunk_ids):
+            raise ValueError("Payload debe contener 'texts' y 'chunk_ids' con la misma longitud.")
 
         rag_config = action.rag_config
+        results = {}
+        valid_chunks = []
 
-        # La validación ahora usa rag_config para obtener el modelo y max_text_length
-        validation_result = await self.validation_handler.validate_texts(
-            texts=texts,
-            rag_config=rag_config,
-            tenant_id=action.tenant_id
-        )
-
-        if not validation_result["is_valid"]:
-            raise ValueError(f"Validación fallida: {validation_result['messages'][0]}")
-
-        # Pasamos el rag_config completo para que el handler decida cómo usarlo
-        result = await self.openai_handler.generate_embeddings(
-            texts=texts,
-            model=rag_config.embedding_model.value,
-            dimensions=rag_config.embedding_dimensions,
-            encoding_format=rag_config.encoding_format,
-            tenant_id=action.tenant_id,
-            agent_id=action.agent_id,
-            trace_id=action.trace_id,
-            rag_config=rag_config
-        )
-
-        response = EmbeddingResponse(
-            embeddings=result["embeddings"],
-            model=result["model"],
-            dimensions=result["dimensions"],
-            usage=TokenUsage(
-                prompt_tokens=result.get("prompt_tokens", 0),
-                completion_tokens=0,
-                total_tokens=result.get("total_tokens", 0)
+        # 1. Validar cada chunk individualmente
+        for i, text in enumerate(texts):
+            chunk_id = chunk_ids[i]
+            validation_result = await self.validation_handler.validate_texts(
+                texts=[text],
+                rag_config=rag_config,
+                tenant_id=action.tenant_id
             )
-        )
+            if not validation_result["is_valid"]:
+                results[chunk_id] = {
+                    "chunk_id": chunk_id,
+                    "error": {
+                        "error_type": "ValidationError",
+                        "message": validation_result['messages'][0]
+                    }
+                }
+            else:
+                valid_chunks.append({"id": chunk_id, "text": text})
 
-        return response.model_dump()
+        # 2. Procesar chunks válidos en un solo lote
+        if valid_chunks:
+            valid_texts = [chunk["text"] for chunk in valid_chunks]
+            try:
+                embedding_api_result = await self.openai_handler.generate_embeddings(
+                    texts=valid_texts,
+                    model=rag_config.embedding_model.value,
+                    dimensions=rag_config.embedding_dimensions,
+                    encoding_format=rag_config.encoding_format,
+                    tenant_id=action.tenant_id,
+                    agent_id=action.agent_id,
+                    trace_id=action.trace_id,
+                    rag_config=rag_config
+                )
+                
+                # Mapear resultados de vuelta a los chunk_ids
+                for i, chunk in enumerate(valid_chunks):
+                    results[chunk["id"]] = {
+                        "chunk_id": chunk["id"],
+                        "embedding": embedding_api_result["embeddings"][i]["embedding"],
+                        "text_index": embedding_api_result["embeddings"][i]["index"]
+                    }
+
+            except Exception as e:
+                self._logger.error(f"Error llamando a OpenAI para un lote de embeddings: {e}", exc_info=True)
+                # Si la API falla, todos los chunks en el lote fallan
+                for chunk in valid_chunks:
+                    results[chunk["id"]] = {
+                        "chunk_id": chunk["id"],
+                        "error": {
+                            "error_type": "ExternalServiceError",
+                            "message": f"Failed to get embedding from provider: {str(e)}"
+                        }
+                    }
+        
+        # 3. Ordenar los resultados para que coincidan con el orden de entrada
+        final_results = [results[chunk_id] for chunk_id in chunk_ids]
+
+        return {"embeddings": final_results}
 
     async def _handle_generate_query(self, action: DomainAction) -> Dict[str, Any]:
         """

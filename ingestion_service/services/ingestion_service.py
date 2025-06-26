@@ -260,34 +260,49 @@ class IngestionService(BaseService):
         # Process embeddings
         chunks_to_store = []
         if len(chunk_ids) != len(embeddings):
-            self._logger.error(
-                f"Task {task_id}: Mismatch between chunk_ids ({len(chunk_ids)}) and embeddings ({len(embeddings)}) count."
+            error_message = f"Critical mismatch: received {len(embeddings)} embeddings for {len(chunk_ids)} chunks."
+            self._logger.error(f"Task {task_id}: {error_message}")
+            
+            task.status = IngestionStatus.FAILED
+            task.error_message = error_message
+            task.completed_at = datetime.utcnow()
+            
+            await self._update_progress(
+                task,
+                IngestionStatus.FAILED,
+                "Task failed due to embedding count mismatch",
+                task.processed_chunks / task.total_chunks * 100, # Progress so far
+                error=error_message
             )
-            # Potentially mark task as failed or handle error appropriately
+            
+            await self.task_state_manager.save_state(f"task:{task.task_id}", task)
             return
 
         for i, chunk_id in enumerate(chunk_ids):
-            embedding_result_dict = embeddings[i] # This is a dict like {"text_index": N, "embedding": [...], ...}
-            actual_embedding_vector = embedding_result_dict.get("embedding")
+            embedding_result_dict = embeddings[i]
+            error_detail = embedding_result_dict.get("error")
 
+            if error_detail:
+                self._logger.error(
+                    f"Task {task_id}, Chunk {chunk_id}: Received error from embedding service.",
+                    extra={"error": error_detail, "chunk_id": chunk_id, "task_id": task_id}
+                )
+                task.failed_chunks += 1
+                await self.direct_redis_conn.delete(f"chunk:{chunk_id}") # Clean up
+                continue
+
+            actual_embedding_vector = embedding_result_dict.get("embedding")
             if actual_embedding_vector is None:
-                self._logger.warning(f"Task {task_id}, Chunk {chunk_id}: No 'embedding' key in embedding_result_dict: {embedding_result_dict}")
-                continue # Or handle as a failed chunk
+                self._logger.warning(f"Task {task_id}, Chunk {chunk_id}: Embedding result missing 'embedding' vector and no error reported.")
+                task.failed_chunks += 1
+                await self.direct_redis_conn.delete(f"chunk:{chunk_id}") # Clean up
+                continue
 
             # Load chunk
             chunk_data = await self.direct_redis_conn.get(f"chunk:{chunk_id}")
             if chunk_data:
                 try:
-                    chunk = ChunkModel.model_validate_json(chunk_data)
-                    
-                    # NUEVO: Verificar que el chunk tiene el agent_id correcto
-                    if chunk.agent_id != agent_id:
-                        self._logger.warning(
-                            f"Task {task_id}, Chunk {chunk_id}: agent_id mismatch - "
-                            f"chunk has {chunk.agent_id}, expected {agent_id}"
-                        )
-                        continue
-                        
+                    chunk = ChunkModel.parse_raw(chunk_data)
                     chunk.embedding = actual_embedding_vector
                     chunks_to_store.append(chunk)
                     
@@ -295,9 +310,11 @@ class IngestionService(BaseService):
                     await self.direct_redis_conn.delete(f"chunk:{chunk_id}")
                 except Exception as e:
                     self._logger.error(f"Task {task_id}, Chunk {chunk_id}: Failed to process chunk after embedding: {e}", exc_info=True)
+                    task.failed_chunks += 1
             else:
                 self._logger.warning(f"Task {task_id}: Chunk {chunk_id} not found in Redis for embedding result.")
-        
+                task.failed_chunks += 1
+
         # Store in Qdrant CON agent_id
         if chunks_to_store:
             await self._update_progress(task, IngestionStatus.STORING, "Storing vectors", 80)
@@ -307,13 +324,14 @@ class IngestionService(BaseService):
             task.processed_chunks += result["stored"]
             
             # Check if complete
-            if task.processed_chunks >= task.total_chunks:
+            if (task.processed_chunks + task.failed_chunks) >= task.total_chunks:
                 task.status = IngestionStatus.COMPLETED
                 task.completed_at = datetime.utcnow()
                 task.result = {
                     "document_id": task.document_id,
                     "total_chunks": task.total_chunks,
-                    "stored_chunks": task.processed_chunks
+                    "stored_chunks": task.processed_chunks,
+                    "failed_chunks": task.failed_chunks
                 }
                 
                 await self._update_progress(
