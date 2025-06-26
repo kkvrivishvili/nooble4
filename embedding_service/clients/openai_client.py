@@ -83,7 +83,9 @@ class OpenAIClient:
         model: str = "text-embedding-3-small",
         dimensions: Optional[int] = None,
         encoding_format: str = "float", 
-        user: Optional[str] = None
+        user: Optional[str] = None,
+        timeout: Optional[float] = None,
+        max_retries: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Genera embeddings para una lista de textos usando el SDK de OpenAI.
@@ -94,6 +96,8 @@ class OpenAIClient:
             dimensions: Dimensiones del embedding (opcional, soportado por modelos v3).
             encoding_format: Formato de codificación ('float' o 'base64').
             user: Identificador único del usuario final (opcional).
+            timeout: Timeout personalizado en segundos para la petición (None para usar el valor por defecto).
+            max_retries: Número máximo de reintentos (None para usar el valor por defecto).
             
         Returns:
             Un diccionario conteniendo la lista de embeddings, el modelo usado,
@@ -141,7 +145,14 @@ class OpenAIClient:
         )
 
         try:
-            response = await self.client.embeddings.create(**api_params)
+            # Preparamos los overrides para la llamada a la API
+            request_options = {}
+            if timeout is not None:
+                request_options["timeout"] = timeout
+            if max_retries is not None:
+                request_options["max_retries"] = max_retries
+
+            response = await self.client.embeddings.create(**api_params, **request_options)
             
             sdk_embeddings_map = {item.index: item.embedding for item in response.data}
             

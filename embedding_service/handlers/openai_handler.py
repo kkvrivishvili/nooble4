@@ -96,24 +96,23 @@ class OpenAIHandler(BaseHandler):
         )
         
         try:
-            # Configurar cliente con opciones dinámicas si están disponibles
-            client = self.openai_client
-            if rag_config and (rag_config.get("timeout") is not None or rag_config.get("max_retries") is not None):
-                client = self.openai_client.with_options(
-                    timeout=rag_config.get("timeout"),
-                    max_retries=rag_config.get("max_retries")
-                )
+            request_timeout = None
+            request_max_retries = None
+
+            if rag_config:
+                request_timeout = rag_config.get("timeout")
+                request_max_retries = rag_config.get("max_retries")
                 self._logger.debug(
-                    f"Usando configuración dinámica para OpenAI: "
-                    f"timeout={rag_config.get('timeout')}, max_retries={rag_config.get('max_retries')}"
+                    f"Usando configuración de RAG para la solicitud: timeout={request_timeout}, max_retries={request_max_retries}"
                 )
-            
-            # Llamar al cliente OpenAI (original o configurado dinámicamente)
-            result = await client.generate_embeddings(
+
+            result = await self.openai_client.generate_embeddings(
                 texts=texts,
                 model=model,
                 dimensions=dimensions,
                 encoding_format=encoding_format,
+                timeout=request_timeout,
+                max_retries=request_max_retries,
                 user=tenant_id  # Usar tenant_id como user para tracking en OpenAI
             )
             

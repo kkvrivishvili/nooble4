@@ -11,7 +11,7 @@ redis==5.0.0
 httpx==0.28.1
 
 # OpenAI SDK
-openai~=1.30.0 # Using a recent version, includes httpx
+openai=1.91.0 
 
 # Utilities
 python-dotenv==1.0.1
