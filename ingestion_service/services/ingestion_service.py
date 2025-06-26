@@ -4,6 +4,8 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 import uuid
 
+from qdrant_client import AsyncQdrantClient
+
 from common.services import BaseService
 from common.models import DomainAction, DomainActionResponse
 from common.config import CommonAppSettings
@@ -31,10 +33,21 @@ class IngestionService(BaseService):
     ):
         super().__init__(app_settings, service_redis_client, direct_redis_conn)
         
+        # NUEVO: Cliente Qdrant a nivel de servicio
+        self.qdrant_client = AsyncQdrantClient(
+            url=str(app_settings.qdrant_url),
+            api_key=app_settings.qdrant_api_key
+        )
+        
         # Initialize handlers
         self.document_processor = DocumentProcessorHandler(app_settings)
         self.chunk_enricher = ChunkEnricherHandler(app_settings)
-        self.qdrant_handler = QdrantHandler(app_settings)
+        
+        # CAMBIO: Inyectar el cliente Qdrant al handler
+        self.qdrant_handler = QdrantHandler(
+            app_settings=app_settings,
+            qdrant_client=self.qdrant_client
+        )
         
         # State managers
         self.task_state_manager = RedisStateManager[IngestionTask](
@@ -73,12 +86,26 @@ class IngestionService(BaseService):
         # Parse request
         request = DocumentIngestionRequest(**action.data)
         
-        # Create task
+        # NUEVO: Validar agent_id
+        if not request.agent_id:
+            raise ValueError("agent_id is required for document ingestion")
+        
+        # NUEVO: Validar rag_config
+        if not action.rag_config:
+            raise ValueError("rag_config is required for document ingestion")
+        
+        self._logger.info(
+            f"Starting document ingestion for agent_id={request.agent_id}, "
+            f"document={request.document_name}, tenant={request.tenant_id}"
+        )
+        
+        # Create task CON agent_id
         task = IngestionTask(
             task_id=str(action.task_id),
             tenant_id=action.tenant_id,
             user_id=action.user_id,
             session_id=action.session_id,
+            agent_id=request.agent_id,  # NUEVO: Incluir agent_id
             request=request,
             status=IngestionStatus.PROCESSING
         )
@@ -90,13 +117,14 @@ class IngestionService(BaseService):
             expiration_seconds=86400  # 24 hours
         )
         
-        # Start async processing
+        # Start async processing CON rag_config
         asyncio.create_task(self._process_ingestion_task(task, action))
         
         return {
             "task_id": task.task_id,
             "document_id": task.document_id,
             "status": task.status.value,
+            "agent_id": task.agent_id,  # NUEVO: Incluir en respuesta
             "message": "Document ingestion started"
         }
     
@@ -106,23 +134,25 @@ class IngestionService(BaseService):
             # Update progress: Processing
             await self._update_progress(task, IngestionStatus.PROCESSING, "Loading document", 10)
             
-            # Process document into chunks
+            # CAMBIO: Process document into chunks CON agent_id
             chunks = await self.document_processor.process_document(
                 task.request,
-                task.document_id
+                task.document_id,
+                agent_id=task.agent_id  # NUEVO: Propagar agent_id
             )
             task.total_chunks = len(chunks)
             
             # Update progress: Chunking
             await self._update_progress(task, IngestionStatus.CHUNKING, f"Created {len(chunks)} chunks", 30)
             
-            # Enrich chunks
+            # Enrich chunks with agent_id validation
+            self._logger.info(f"Enriching {len(chunks)} chunks for agent_id={task.agent_id}")
             chunks = await self.chunk_enricher.enrich_chunks(chunks)
             
             # Update progress: Embedding
             await self._update_progress(task, IngestionStatus.EMBEDDING, "Generating embeddings", 50)
             
-            # Send chunks to embedding service in batches
+            # CAMBIO: Send chunks to embedding service in batches CON rag_config
             batch_size = 10
             for i in range(0, len(chunks), batch_size):
                 batch = chunks[i:i+batch_size]
@@ -131,7 +161,7 @@ class IngestionService(BaseService):
             # State will be updated when embeddings are received
             
         except Exception as e:
-            self._logger.error(f"Error processing task {task.task_id}: {e}")
+            self._logger.error(f"Error processing task {task.task_id} for agent_id={task.agent_id}: {e}")
             await self._update_progress(
                 task, 
                 IngestionStatus.FAILED, 
@@ -151,7 +181,14 @@ class IngestionService(BaseService):
         texts = [chunk.text for chunk in chunks]
         chunk_ids = [chunk.chunk_id for chunk in chunks]
         
-        # Create action for embedding service
+        # NUEVO: Extraer configuración del embedding desde rag_config
+        embedding_model = original_action.rag_config.embedding_model
+        
+        self._logger.info(
+            f"Sending {len(chunks)} chunks for embedding using model={embedding_model} for agent_id={task.agent_id}"
+        )
+        
+        # Create action for embedding service CON rag_config en header
         embedding_action = DomainAction(
             action_type="embedding.batch.process",
             tenant_id=task.tenant_id,
@@ -160,30 +197,24 @@ class IngestionService(BaseService):
             user_id=task.user_id,
             origin_service=self.service_name,
             trace_id=original_action.trace_id,
+            rag_config=original_action.rag_config,  # NUEVO: Propagar rag_config
             data={
                 "texts": texts,
                 "chunk_ids": chunk_ids,
-                "model": "text-embedding-ada-002"
+                "agent_id": task.agent_id  # NUEVO: Incluir agent_id en datos
             },
             metadata={
                 "batch_index": chunks[0].chunk_index,
-                "batch_size": len(chunks)
+                "batch_size": len(chunks),
+                "agent_id": task.agent_id  # NUEVO: También en metadata
             }
         )
         
-        # Send with callback
+        # Send with callback usando service_redis_client
         await self.service_redis_client.send_action_async_with_callback(
             embedding_action,
             callback_event_name="ingestion.embedding_result"
         )
-        
-        # Save chunks temporarily
-        for chunk in chunks:
-            await self.direct_redis_conn.setex(
-                f"chunk:{chunk.chunk_id}",
-                3600,  # 1 hour
-                chunk.model_dump_json()
-            )
     
     async def _handle_embedding_result(self, action: DomainAction) -> None:
         """Handle embedding results from embedding service"""
@@ -192,8 +223,15 @@ class IngestionService(BaseService):
         chunk_ids = data.get("chunk_ids", [])
         embeddings = data.get("embeddings", [])
         
+        # NUEVO: Extraer agent_id desde metadata o data
+        agent_id = data.get("agent_id") or action.metadata.get("agent_id")
+        
         if not task_id:
             self._logger.error("No task_id in embedding result")
+            return
+            
+        if not agent_id:
+            self._logger.error(f"No agent_id in embedding result for task {task_id}")
             return
         
         # Load task
@@ -201,6 +239,19 @@ class IngestionService(BaseService):
         if not task:
             self._logger.error(f"Task {task_id} not found")
             return
+            
+        # NUEVO: Validar que agent_id coincida
+        if task.agent_id != agent_id:
+            self._logger.error(
+                f"Task {task_id}: agent_id mismatch - task has {task.agent_id}, "
+                f"embedding result has {agent_id}"
+            )
+            return
+        
+        self._logger.info(
+            f"Processing embedding results for task {task_id}, agent_id={agent_id}, "
+            f"{len(chunk_ids)} chunks"
+        )
         
         # Process embeddings
         chunks_to_store = []
@@ -224,6 +275,15 @@ class IngestionService(BaseService):
             if chunk_data:
                 try:
                     chunk = ChunkModel.model_validate_json(chunk_data)
+                    
+                    # NUEVO: Verificar que el chunk tiene el agent_id correcto
+                    if chunk.agent_id != agent_id:
+                        self._logger.warning(
+                            f"Task {task_id}, Chunk {chunk_id}: agent_id mismatch - "
+                            f"chunk has {chunk.agent_id}, expected {agent_id}"
+                        )
+                        continue
+                        
                     chunk.embedding = actual_embedding_vector
                     chunks_to_store.append(chunk)
                     
@@ -234,10 +294,11 @@ class IngestionService(BaseService):
             else:
                 self._logger.warning(f"Task {task_id}: Chunk {chunk_id} not found in Redis for embedding result.")
         
-        # Store in Qdrant
+        # Store in Qdrant CON agent_id
         if chunks_to_store:
             await self._update_progress(task, IngestionStatus.STORING, "Storing vectors", 80)
             
+            self._logger.info(f"Storing {len(chunks_to_store)} chunks in Qdrant for agent_id={agent_id}")
             result = await self.qdrant_handler.store_chunks(chunks_to_store)
             task.processed_chunks += result["stored"]
             
@@ -344,12 +405,6 @@ class IngestionService(BaseService):
                 "total_chunks": task.total_chunks,
                 "processed_chunks": task.processed_chunks
             }
-        )
-        
-        # Send WebSocket notification
-        await self.ws_manager.send_to_user(
-            task.user_id,
-            progress.model_dump()
         )
         
         # Save task state

@@ -24,7 +24,8 @@ class DocumentProcessorHandler(BaseHandler):
     async def process_document(
         self, 
         request: DocumentIngestionRequest,
-        document_id: str
+        document_id: str,
+        agent_id: str
     ) -> List[ChunkModel]:
         """Process document and return chunks"""
         try:
@@ -48,6 +49,7 @@ class DocumentProcessorHandler(BaseHandler):
                 chunk = ChunkModel(
                     document_id=document_id,
                     tenant_id=request.tenant_id,
+                    agent_id=agent_id,
                     collection_id=request.collection_id,
                     text=node.get_content(),
                     chunk_index=idx,
@@ -55,6 +57,7 @@ class DocumentProcessorHandler(BaseHandler):
                         **request.metadata,
                         "document_name": request.document_name,
                         "document_type": request.document_type.value,
+                        "agent_id": agent_id,
                         "start_char_idx": node.start_char_idx,
                         "end_char_idx": node.end_char_idx,
                         "relationships": self._extract_relationships(node)
@@ -62,7 +65,7 @@ class DocumentProcessorHandler(BaseHandler):
                 )
                 chunks.append(chunk)
                 
-            self._logger.info(f"Processed document {document_id} into {len(chunks)} chunks")
+            self._logger.info(f"Processed document {document_id} into {len(chunks)} chunks for agent {agent_id}")
             return chunks
             
         except Exception as e:

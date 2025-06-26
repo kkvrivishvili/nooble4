@@ -27,6 +27,7 @@ class DocumentType(str, Enum):
 class DocumentIngestionRequest(BaseModel):
     """Request model for document ingestion"""
     tenant_id: str = Field(..., description="Tenant ID for multitenancy")
+    agent_id: str = Field(..., description="Agent ID that owns this document")
     collection_id: str = Field(..., description="Virtual collection ID within tenant")
     user_id: str = Field(..., description="User initiating the ingestion")
     session_id: str = Field(..., description="Session ID for tracking")
@@ -50,9 +51,10 @@ class DocumentIngestionRequest(BaseModel):
         json_schema_extra = {
             "example": {
                 "tenant_id": "tenant-123",
+                "agent_id": "agent-456",
                 "collection_id": "kb-001",
-                "user_id": "user-456",
-                "session_id": "session-789",
+                "user_id": "user-789",
+                "session_id": "session-abc",
                 "document_name": "PostgreSQL Guide",
                 "document_type": "pdf",
                 "file_path": "/tmp/uploads/postgres-guide.pdf",
@@ -68,6 +70,7 @@ class ChunkModel(BaseModel):
     chunk_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     document_id: str = Field(..., description="Parent document ID")
     tenant_id: str = Field(..., description="Tenant ID")
+    agent_id: str = Field(..., description="Agent ID that owns this chunk")
     collection_id: str = Field(..., description="Virtual collection ID")
     
     text: str = Field(..., description="Chunk text content")
@@ -100,6 +103,7 @@ class IngestionTask(BaseModel):
     """Internal model for tracking ingestion tasks"""
     task_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     tenant_id: str
+    agent_id: str
     user_id: str
     session_id: str
     document_id: str = Field(default_factory=lambda: str(uuid.uuid4()))

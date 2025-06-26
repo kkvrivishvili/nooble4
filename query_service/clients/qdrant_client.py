@@ -39,25 +39,40 @@ class QdrantClient:
         top_k: int,
         similarity_threshold: float,
         tenant_id: UUID,
+        agent_id: str,
         filters: Optional[Dict[str, Any]] = None
     ) -> List[RAGChunk]:
         """
         Realiza búsqueda vectorial en las colecciones.
+        
+        Args:
+            agent_id: ID del agente - OBLIGATORIO para filtrado
         
         Returns:
             Lista de RAGChunk directamente
         """
         all_results = []
         
-        # Construir filtro de tenant
+        # Validar agent_id obligatorio
+        if not agent_id:
+            raise ValueError("agent_id is required for vector search")
+        
+        # Construir filtro con tenant_id Y agent_id
         qdrant_filter = Filter(
             must=[
                 FieldCondition(
                     key="tenant_id",
                     match=MatchValue(value=str(tenant_id))
+                ),
+                # Filtro obligatorio por agent_id
+                FieldCondition(
+                    key="agent_id",
+                    match=MatchValue(value=str(agent_id))
                 )
             ]
         )
+        
+        self.logger.info(f"Searching vectors for agent_id={agent_id}, tenant_id={tenant_id}")
         
         # Agregar filtros adicionales si existen
         if filters and filters.get("document_ids"):
@@ -80,7 +95,7 @@ class QdrantClient:
                     with_payload=True
                 )
                 
-                # Convertir a RAGChunk
+                # Convertir a RAGChunk CON agent_id
                 for hit in results:
                     chunk = RAGChunk(
                         chunk_id=str(hit.id),
@@ -88,16 +103,21 @@ class QdrantClient:
                         document_id=UUID(hit.payload.get("document_id", str(UUID(int=0)))),
                         collection_id=collection_id,
                         similarity_score=hit.score,
-                        metadata=hit.payload.get("metadata", {})
+                        metadata={
+                            **hit.payload.get("metadata", {}),
+                            "agent_id": hit.payload.get("agent_id", agent_id)  # Incluir agent_id
+                        }
                     )
                     all_results.append(chunk)
                     
             except Exception as e:
-                self.logger.error(f"Error buscando en {collection_id}: {e}")
+                self.logger.error(f"Error buscando en {collection_id} para agent_id={agent_id}: {e}")
                 continue
         
         # Ordenar por score
         all_results.sort(key=lambda x: x.similarity_score, reverse=True)
+        
+        self.logger.info(f"Found {len(all_results)} chunks for agent_id={agent_id}")
         
         # Retornar solo top_k globales
         return all_results[:top_k]

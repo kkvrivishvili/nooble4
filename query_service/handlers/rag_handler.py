@@ -90,13 +90,14 @@ class RAGHandler(BaseHandler):
                 agent_id=agent_id
             )
             
-            # 2. Buscar en vector store
+            # 2. Buscar en vector store CON agent_id obligatorio
             search_results = await self.qdrant_client.search(
                 query_embedding=query_embedding,
                 collection_ids=rag_config.collection_ids,
                 top_k=rag_config.top_k,
                 similarity_threshold=rag_config.similarity_threshold,
                 tenant_id=tenant_id,
+                agent_id=str(agent_id),  # NUEVO: agent_id obligatorio para filtrado
                 filters={"document_ids": rag_config.document_ids} if rag_config.document_ids else None
             )
             

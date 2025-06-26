@@ -7,7 +7,7 @@ import os
 import aiofiles
 from pathlib import Path
 
-from common.models import DomainAction
+from common.models import DomainAction, RAGConfig
 from ..models import DocumentIngestionRequest, DocumentType
 from ..dependencies import get_ingestion_service, get_ws_manager
 
@@ -34,11 +34,31 @@ async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(secur
 @router.post("/ingest")
 async def ingest_document(
     request: DocumentIngestionRequest,
+    rag_config: RAGConfig,
     user_info: dict = Depends(verify_token),
     service = Depends(get_ingestion_service)
 ):
     """Ingest a document"""
     try:
+        # Validate agent_id
+        if not request.agent_id:
+            raise HTTPException(
+                status_code=400, 
+                detail="agent_id is required for document ingestion"
+            )
+        
+        # Validate rag_config
+        if not rag_config:
+            raise HTTPException(
+                status_code=400, 
+                detail="rag_config is required for document ingestion"
+            )
+        
+        logger.info(
+            f"Ingesting document for agent_id={request.agent_id}, "
+            f"document={request.document_name}, tenant={user_info['tenant_id']}"
+        )
+        
         # Create domain action
         action = DomainAction(
             action_type="ingestion.ingest_document",
@@ -47,6 +67,7 @@ async def ingest_document(
             session_id=user_info["session_id"],
             task_id=uuid.uuid4(),
             origin_service="api",
+            rag_config=rag_config,
             data=request.model_dump()
         )
         
@@ -58,8 +79,10 @@ async def ingest_document(
             "data": result
         }
         
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
-        logger.error(f"Error in ingest endpoint: {e}")
+        logger.error(f"Error in ingest endpoint for agent_id={getattr(request, 'agent_id', 'unknown')}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

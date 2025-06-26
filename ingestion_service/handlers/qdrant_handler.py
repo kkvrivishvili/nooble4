@@ -2,7 +2,7 @@ from typing import List, Dict, Any, Optional
 import logging
 from datetime import datetime
 
-from qdrant_client import QdrantClient
+from qdrant_client import QdrantClient, AsyncQdrantClient
 from qdrant_client.models import (
     Distance, VectorParams, PointStruct, 
     Filter, FieldCondition, MatchValue, PointIdsList
@@ -20,14 +20,12 @@ class QdrantHandler(BaseHandler):
     def __init__(
         self, 
         app_settings: CommonAppSettings,
+        qdrant_client: AsyncQdrantClient,  
         collection_name: str = "documents"
     ):
         super().__init__(app_settings)
         self.collection_name = collection_name
-        self.client = QdrantClient(
-            url=str(app_settings.qdrant_url),
-            api_key=app_settings.qdrant_api_key
-        )
+        self.client = qdrant_client  
         self.vector_size = 1536  # Default for OpenAI embeddings
         
         # Ensure collection exists
@@ -50,6 +48,11 @@ class QdrantHandler(BaseHandler):
                 self.client.create_payload_index(
                     collection_name=self.collection_name,
                     field_name="tenant_id",
+                    field_type="keyword"
+                )
+                self.client.create_payload_index(
+                    collection_name=self.collection_name,
+                    field_name="agent_id",
                     field_type="keyword"
                 )
                 self.client.create_payload_index(
@@ -82,11 +85,12 @@ class QdrantHandler(BaseHandler):
                 failed_chunks.append(chunk.chunk_id)
                 continue
             
-            # Prepare payload
+            # Prepare payload - AHORA INCLUYE agent_id
             payload = {
                 "chunk_id": chunk.chunk_id,
                 "document_id": chunk.document_id,
                 "tenant_id": chunk.tenant_id,
+                "agent_id": chunk.agent_id,  # NUEVO
                 "collection_id": chunk.collection_id,
                 "text": chunk.text,
                 "chunk_index": chunk.chunk_index,
@@ -124,7 +128,8 @@ class QdrantHandler(BaseHandler):
     
     async def delete_document(
         self, 
-        tenant_id: str, 
+        tenant_id: str,
+        agent_id: str,  
         document_id: str
     ) -> int:
         """Delete all chunks for a document"""
@@ -138,6 +143,10 @@ class QdrantHandler(BaseHandler):
                             match=MatchValue(value=tenant_id)
                         ),
                         FieldCondition(
+                            key="agent_id",  
+                            match=MatchValue(value=agent_id)
+                        ),
+                        FieldCondition(
                             key="document_id",
                             match=MatchValue(value=document_id)
                         )
@@ -146,7 +155,7 @@ class QdrantHandler(BaseHandler):
             )
             
             deleted_count = result.status
-            self._logger.info(f"Deleted {deleted_count} chunks for document {document_id}")
+            self._logger.info(f"Deleted {deleted_count} chunks for document {document_id} (agent: {agent_id})")
             return deleted_count
             
         except Exception as e:
@@ -192,10 +201,3 @@ class QdrantHandler(BaseHandler):
         except Exception as e:
             self._logger.error(f"Error getting stats: {e}")
             raise
-
-
-# ingestion_service/services/__init__.py
-"""Services for Ingestion Service"""
-from .ingestion_service import IngestionService
-
-__all__ = ["IngestionService"]
