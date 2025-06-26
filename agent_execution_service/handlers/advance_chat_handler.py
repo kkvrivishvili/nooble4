@@ -16,7 +16,6 @@ from common.clients.redis.cache_manager import CacheManager
 from agent_execution_service.handlers.conversation_handler import ConversationHelper
 from agent_execution_service.clients.query_client import QueryClient
 from agent_execution_service.clients.conversation_client import ConversationClient
-from query_service.models.rag_payloads import AdvanceQueryPayload
 
 
 logger = logging.getLogger(__name__)
