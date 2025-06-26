@@ -67,7 +67,7 @@ class ValidationHandler(BaseHandler):
             validation_result["messages"].append("No se proporcionaron textos")
             return validation_result
         
-        # El límite de batch de OpenAI es 2048
+        # El límite de batch de OpenAI es 2048, HAY QUE REVISAR QUE INGESTION SERVICE NO ENVIA MAS QUE 2048 TEXTOS
         MAX_BATCH_SIZE = 2048
         if len(texts) > MAX_BATCH_SIZE:
             validation_result["is_valid"] = False
