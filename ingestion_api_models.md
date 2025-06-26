@@ -32,7 +32,7 @@ class DocumentIngestionRequest(BaseModel):
     tenant_id: str = Field(..., description="Tenant ID")
     agent_id: str = Field(..., description="Agent ID - REQUIRED for multi-agent isolation")
     collection_id: str = Field(..., description="Collection ID - REQUIRED for document organization")
-    user_id: str = Field(..., description="User ID")
+    user_id: str = Field(..., description="User ID
     session_id: str = Field(..., description="Session ID")
     
     # DOCUMENTO
