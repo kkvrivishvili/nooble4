@@ -193,8 +193,8 @@ class AdvanceChatHandler:
         Returns:
             Tupla con (respuesta_final, metadatos_de_iteraciones)
         """
-        max_iterations = self.execution_config.max_iterations or 5
-        timeout_seconds = self.execution_config.timeout_seconds or 60
+        max_iterations = self.execution_config.max_iterations
+        timeout_seconds = self.execution_config.timeout_seconds
         
         iterations_metadata = []
         current_messages = messages.copy()
