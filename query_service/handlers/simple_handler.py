@@ -105,7 +105,7 @@ class SimpleHandler(BaseHandler):
             if not user_message:
                 raise AppValidationError("No se encontró mensaje del usuario")
             
-            self.logger.info(
+            self._logger.info(
                 f"Procesando simple query: '{user_message[:50]}...'",
                 extra={
                     "query_id": conversation_id,
@@ -238,7 +238,7 @@ class SimpleHandler(BaseHandler):
                 execution_time_ms=int((end_time - start_time) * 1000)
             )
             
-            self.logger.info(
+            self._logger.info(
                 f"Simple query procesada exitosamente. Tokens: {token_usage.total_tokens}",
                 extra={
                     "query_id": conversation_id,
@@ -250,7 +250,7 @@ class SimpleHandler(BaseHandler):
             return response
             
         except Exception as e:
-            self.logger.error(f"Error procesando simple query: {str(e)}", exc_info=True)
+            self._logger.error(f"Error procesando simple query: {str(e)}", exc_info=True)
             if isinstance(e, (AppValidationError, ExternalServiceError)):
                 raise
             raise ExternalServiceError(f"Error interno en simple query: {str(e)}")

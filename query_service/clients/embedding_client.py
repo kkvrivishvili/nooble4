@@ -29,7 +29,7 @@ class EmbeddingClient:
             redis_client: Cliente Redis para enviar acciones
         """
         self.redis_client = redis_client
-        self.logger = logging.getLogger(__name__)
+        self._logger = logging.getLogger(__name__)
     
     async def get_embeddings(
         self,
@@ -77,7 +77,7 @@ class EmbeddingClient:
             data=payload
         )
         
-        self.logger.info(
+        self._logger.info(
             f"Solicitando embeddings para {len(texts)} textos",
             extra={
                 "action_id": action.action_id,
@@ -96,7 +96,7 @@ class EmbeddingClient:
         
         if not response.success:
             error_msg = f"Error obteniendo embeddings: {response.error.message if response.error else 'Unknown error'}"
-            self.logger.error(
+            self._logger.error(
                 error_msg,
                 extra={
                     "action_id": action.action_id,
@@ -106,7 +106,7 @@ class EmbeddingClient:
             )
             raise Exception(error_msg)
         
-        self.logger.info(
+        self._logger.info(
             f"Embeddings generados exitosamente",
             extra={
                 "action_id": action.action_id,

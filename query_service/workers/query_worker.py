@@ -55,7 +55,7 @@ class QueryWorker(BaseWorker):
         # El servicio se inicializará en el método initialize
         self.query_service = None
         
-        self.logger = logging.getLogger(f"{__name__}.{self.consumer_name}")
+        self._logger = logging.getLogger(f"{__name__}.{self.consumer_name}")
         
     async def initialize(self):
         """
@@ -80,7 +80,7 @@ class QueryWorker(BaseWorker):
             direct_redis_conn=self.async_redis_conn
         )
         
-        self.logger.info(
+        self._logger.info(
             f"QueryWorker inicializado. "
             f"Escuchando en stream: {self.action_stream_name}, "
             f"grupo: {self.consumer_group_name}"
@@ -102,7 +102,7 @@ class QueryWorker(BaseWorker):
         if not self.query_service:
             raise RuntimeError("QueryService no inicializado. Llamar initialize() primero.")
         
-        self.logger.debug(
+        self._logger.debug(
             f"Procesando acción {action.action_type} "
             f"(ID: {action.action_id}, Tenant: {action.tenant_id})"
         )
@@ -113,19 +113,19 @@ class QueryWorker(BaseWorker):
             
             # Log resultado
             if result:
-                self.logger.debug(
+                self._logger.debug(
                     f"Acción {action.action_id} procesada exitosamente. "
                     f"Respuesta generada: {bool(result)}"
                 )
             else:
-                self.logger.debug(
+                self._logger.debug(
                     f"Acción {action.action_id} procesada sin respuesta (fire-and-forget)"
                 )
             
             return result
             
         except Exception as e:
-            self.logger.error(
+            self._logger.error(
                 f"Error procesando acción {action.action_id}: {e}",
                 exc_info=True
             )

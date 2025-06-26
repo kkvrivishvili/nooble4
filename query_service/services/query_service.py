@@ -81,13 +81,13 @@ class QueryService(BaseService):
             direct_redis_conn=direct_redis_conn
         )
         
-        self.logger.info("QueryService inicializado correctamente con inyección de clientes")
+        self._logger.info("QueryService inicializado correctamente con inyección de clientes")
     
     async def process_action(self, action: DomainAction) -> Optional[Dict[str, Any]]:
         """
         Procesa una DomainAction según su tipo.
         """
-        self.logger.info(
+        self._logger.info(
             f"Procesando acción: {action.action_type} ({action.action_id})",
             extra={
                 "action_id": str(action.action_id),
@@ -106,20 +106,20 @@ class QueryService(BaseService):
             elif action.action_type == ACTION_QUERY_RAG:
                 return await self._handle_rag(action)
             else:
-                self.logger.warning(f"Tipo de acción no soportado: {action.action_type}")
+                self._logger.warning(f"Tipo de acción no soportado: {action.action_type}")
                 raise InvalidActionError(
                     f"Acción '{action.action_type}' no es soportada por Query Service"
                 )
                 
         except ValidationError as e:
-            self.logger.error(f"Error de validación en {action.action_type}: {e}")
+            self._logger.error(f"Error de validación en {action.action_type}: {e}")
             raise AppValidationError(f"Payload inválido: {str(e)}")
             
         except ExternalServiceError:
             raise
             
         except Exception as e:
-            self.logger.exception(f"Error inesperado procesando {action.action_type}")
+            self._logger.exception(f"Error inesperado procesando {action.action_type}")
             raise ExternalServiceError(f"Error interno en Query Service: {str(e)}")
     
     async def _handle_simple(self, action: DomainAction) -> Dict[str, Any]:

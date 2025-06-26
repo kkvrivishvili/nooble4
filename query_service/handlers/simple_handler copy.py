@@ -52,7 +52,7 @@ class SimpleHandler(BaseHandler):
         self.vector_client = vector_client
         self.groq_client = groq_client
         
-        self.logger.info("SimpleHandler inicializado con inyección de clientes")
+        self._logger.info("SimpleHandler inicializado con inyección de clientes")
     
     async def process_simple_query(
         self,
@@ -105,7 +105,7 @@ class SimpleHandler(BaseHandler):
             if not user_message:
                 raise AppValidationError("No se encontró mensaje del usuario")
             
-            self.logger.info(
+            self._logger.info(
                 f"Procesando simple query: '{user_message[:50]}...'",
                 extra={
                     "query_id": conversation_id,
@@ -142,7 +142,7 @@ class SimpleHandler(BaseHandler):
                     # Búsqueda paralela cuando hay múltiples colecciones
                     import asyncio
                     
-                    self.logger.info(
+                    self._logger.info(
                         f"Iniciando búsqueda paralela en {len(rag_config.collection_ids)} colecciones", 
                         extra={"tenant_id": str(tenant_id), "parallel_search": True}
                     )
@@ -167,7 +167,7 @@ class SimpleHandler(BaseHandler):
                     all_search_results = []
                     for i, result in enumerate(search_results_by_collection):
                         if isinstance(result, Exception):
-                            self.logger.error(
+                            self._logger.error(
                                 f"Error en búsqueda para colección {rag_config.collection_ids[i]}: {str(result)}", 
                                 exc_info=True
                             )
@@ -291,7 +291,7 @@ class SimpleHandler(BaseHandler):
                 execution_time_ms=int((end_time - start_time) * 1000)
             )
             
-            self.logger.info(
+            self._logger.info(
                 f"Simple query procesada exitosamente. Tokens: {token_usage.total_tokens}",
                 extra={
                     "query_id": conversation_id,
@@ -303,7 +303,7 @@ class SimpleHandler(BaseHandler):
             return response
             
         except Exception as e:
-            self.logger.error(f"Error procesando simple query: {str(e)}", exc_info=True)
+            self._logger.error(f"Error procesando simple query: {str(e)}", exc_info=True)
             if isinstance(e, (AppValidationError, ExternalServiceError)):
                 raise
             raise ExternalServiceError(f"Error interno en simple query: {str(e)}")
@@ -354,7 +354,7 @@ class SimpleHandler(BaseHandler):
             # Este encoder es compatible con la mayoría de modelos modernos
             encoder = tiktoken.get_encoding("cl100k_base")
         except Exception as e:
-            self.logger.warning(f"No se pudo inicializar tokenizer: {str(e)}. Usando aproximación por caracteres.")
+            self._logger.warning(f"No se pudo inicializar tokenizer: {str(e)}. Usando aproximación por caracteres.")
             # Fallback: aproximación simple (4 caracteres ≈ 1 token)
             encoder = None
         
@@ -387,7 +387,7 @@ class SimpleHandler(BaseHandler):
             if total_tokens + fragment_tokens > max_context_tokens:
                 # Si ya tenemos al menos un fragmento, paramos aquí para no exceder el límite
                 if context_parts:
-                    self.logger.info(
+                    self._logger.info(
                         f"Límite de tokens alcanzado ({total_tokens}/{max_context_tokens}). "
                         f"Truncando después de {len(context_parts)} fragmentos."
                     )
@@ -418,10 +418,10 @@ class SimpleHandler(BaseHandler):
             
             # Si ya alcanzamos el límite después de agregar, paramos
             if total_tokens >= max_context_tokens:
-                self.logger.info(f"Límite de tokens alcanzado ({total_tokens}/{max_context_tokens}). Truncando contexto.")
+                self._logger.info(f"Límite de tokens alcanzado ({total_tokens}/{max_context_tokens}). Truncando contexto.")
                 break
         
-        self.logger.info(f"Contexto construido con {len(context_parts)} fragmentos. Total tokens: {total_tokens}/{max_context_tokens}")
+        self._logger.info(f"Contexto construido con {len(context_parts)} fragmentos. Total tokens: {total_tokens}/{max_context_tokens}")
         return "\n\n".join(context_parts)
     
     def _validate_query_config(self, query_config: "QueryConfig"):

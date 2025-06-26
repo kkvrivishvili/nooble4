@@ -33,7 +33,7 @@ class VectorClient(BaseHTTPClient):
         """
         super().__init__(base_url=base_url)
         self.timeout = timeout
-        self.logger = logging.getLogger(__name__)
+        self._logger = logging.getLogger(__name__)
     
     async def search(
         self,
@@ -83,7 +83,7 @@ class VectorClient(BaseHTTPClient):
                 payload["filter"] = {}
             payload["filter"].update(filters)
         
-        self.logger.debug(
+        self._logger.debug(
             f"Búsqueda vectorial en colecciones {collection_ids}, "
             f"top_k={top_k}, threshold={similarity_threshold}"
         )
@@ -104,7 +104,7 @@ class VectorClient(BaseHTTPClient):
             
             # Log métricas
             elapsed = time.time() - start_time
-            self.logger.info(
+            self._logger.info(
                 f"Búsqueda completada en {elapsed:.2f}s. "
                 f"Encontrados {len(results)} resultados"
             )
@@ -113,11 +113,11 @@ class VectorClient(BaseHTTPClient):
             
         except NotFoundError as e:
             # Una o más colecciones no existen
-            self.logger.error(f"Colección no encontrada: {e}")
+            self._logger.error(f"Colección no encontrada: {e}")
             raise
             
         except Exception as e:
-            self.logger.error(f"Error en búsqueda vectorial: {e}")
+            self._logger.error(f"Error en búsqueda vectorial: {e}")
             raise ServiceUnavailableError(
                 f"Error al buscar en vector store: {str(e)}"
             )
@@ -181,7 +181,7 @@ class VectorClient(BaseHTTPClient):
             return data.get("collections", [])
             
         except Exception as e:
-            self.logger.error(f"Error listando colecciones: {e}")
+            self._logger.error(f"Error listando colecciones: {e}")
             raise ServiceUnavailableError(
                 f"Error al listar colecciones: {str(e)}"
             )
@@ -204,11 +204,11 @@ class VectorClient(BaseHTTPClient):
             return response.json()
             
         except NotFoundError:
-            self.logger.error(f"Colección {collection_id} no encontrada")
+            self._logger.error(f"Colección {collection_id} no encontrada")
             raise
             
         except Exception as e:
-            self.logger.error(f"Error obteniendo info de colección: {e}")
+            self._logger.error(f"Error obteniendo info de colección: {e}")
             raise ServiceUnavailableError(
                 f"Error al obtener información de colección: {str(e)}"
             )

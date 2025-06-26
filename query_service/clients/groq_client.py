@@ -30,7 +30,7 @@ class GroqClient:
             max_retries=max_retries
         )
         
-        self.logger = logging.getLogger(__name__)
+        self._logger = logging.getLogger(__name__)
     
     async def generate(
         self,
@@ -77,15 +77,15 @@ class GroqClient:
             return content, usage
             
         except APIConnectionError as e:
-            self.logger.error(f"Error de conexión con Groq API: {e}")
+            self._logger.debug(f"Error de conexión con Groq API: {e}")
             raise ServiceUnavailableError("Error de conexión con la API de Groq")
         
         except RateLimitError as e:
-            self.logger.error(f"Límite de peticiones excedido: {e}")
+            self._logger.debug(f"Límite de peticiones excedido: {e}")
             raise ServiceUnavailableError("Límite de peticiones de Groq API excedido")
         
         except APIStatusError as e:
-            self.logger.error(f"Error de API de Groq: {e}")
+            self._logger.debug(f"Error de API de Groq: {e}")
             if 400 <= e.status_code < 500:
                 raise ValueError(f"Error en la petición: {e.message}")
             raise ServiceUnavailableError(f"Error en el servidor de Groq: {e.message}")
