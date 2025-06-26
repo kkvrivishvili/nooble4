@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 
 from qdrant_client import AsyncQdrantClient
@@ -99,7 +99,10 @@ class IngestionService(BaseService):
             f"document={request.document_name}, tenant={request.tenant_id}"
         )
         
-        # Create task CON agent_id
+        # Define la duración del timeout para la tarea (idealmente desde app_settings)
+        task_timeout_hours = getattr(self.app_settings, 'ingestion_task_timeout_hours', 2)
+
+        # Create task CON agent_id y expires_at
         task = IngestionTask(
             task_id=str(action.task_id),
             tenant_id=action.tenant_id,
@@ -107,7 +110,8 @@ class IngestionService(BaseService):
             session_id=action.session_id,
             agent_id=request.agent_id,  # NUEVO: Incluir agent_id
             request=request,
-            status=IngestionStatus.PROCESSING
+            status=IngestionStatus.PROCESSING,
+            expires_at=datetime.utcnow() + timedelta(hours=task_timeout_hours)
         )
         
         # Save task state
@@ -364,16 +368,24 @@ class IngestionService(BaseService):
     async def _handle_delete_document(self, action: DomainAction) -> Dict[str, Any]:
         """Delete a document and its chunks"""
         document_id = action.data.get("document_id")
-        if not document_id:
-            raise ValueError("document_id is required")
-        
-        deleted_count = await self.qdrant_handler.delete_document(
-            action.tenant_id,
-            document_id
+        agent_id = action.data.get("agent_id")
+
+        if not document_id or not agent_id:
+            raise ValueError("document_id and agent_id are required for deletion")
+
+        self._logger.info(
+            f"Deleting document {document_id} for agent_id={agent_id}, tenant={action.tenant_id}"
         )
-        
+
+        deleted_count = await self.qdrant_handler.delete_document(
+            tenant_id=action.tenant_id,
+            agent_id=agent_id,
+            document_id=document_id
+        )
+
         return {
             "document_id": document_id,
+            "agent_id": agent_id,
             "deleted_chunks": deleted_count,
             "status": "deleted"
         }
@@ -391,28 +403,144 @@ class IngestionService(BaseService):
         task.updated_at = datetime.utcnow()
         if error:
             task.error_message = error
-        
-        # Create progress update
-        progress = ProcessingProgress(
-            task_id=task.task_id,
-            status=status,
-            current_step=status.value,
-            progress_percentage=percentage,
-            message=message,
-            error=error,
-            details={
-                "document_id": task.document_id,
-                "total_chunks": task.total_chunks,
-                "processed_chunks": task.processed_chunks
-            }
-        )
-        
-        # Save task state
+
+        # Guardar el estado actualizado de la tarea
         await self.task_state_manager.save_state(
             f"task:{task.task_id}",
             task,
-            expiration_seconds=86400
+            expiration_seconds=86400  # Mantener el estado por 24h
         )
+
+        # Notificar por WebSocket
+        progress_update = ProcessingProgress(
+            task_id=task.task_id,
+            status=status,
+            current_step=message,
+            progress_percentage=round(percentage, 2),
+            message=message,
+            error=error
+        )
+        await self.ws_manager.broadcast(task.session_id, progress_update.model_dump_json())
+
+    async def _task_sweeper_loop(self):
+        """Periodically checks for and fails expired tasks."""
+        # Idealmente, este intervalo es configurable
+        sweep_interval_seconds = getattr(self.app_settings, 'ingestion_sweeper_interval_seconds', 300)
+        
+        self._logger.info(f"Task sweeper started. Checking every {sweep_interval_seconds} seconds.")
+        
+        while True:
+            await asyncio.sleep(sweep_interval_seconds)
+            self._logger.info("Running task sweeper for expired tasks...")
+            
+            try:
+                expired_tasks_count = 0
+                # Use scan_iter to avoid blocking Redis with a potentially large number of keys
+                async for task_key in self.direct_redis_conn.scan_iter("task:*"):
+                    task_data = await self.direct_redis_conn.get(task_key)
+                    if not task_data:
+                        continue
+                    
+                    try:
+                        task = IngestionTask.model_validate_json(task_data)
+                    except Exception as e:
+                        self._logger.warning(f"Could not parse task data for key {task_key}: {e}")
+                        continue
+
+                    # Check if task is in a terminal state
+                    if task.status in [IngestionStatus.COMPLETED, IngestionStatus.FAILED]:
+                        continue
+
+                    # Check for expiration
+                    if task.expires_at and datetime.utcnow() > task.expires_at:
+                        self._logger.warning(
+                            f"Task {task.task_id} for agent_id={task.agent_id} has expired. "
+                            f"Marking as FAILED. Expiration was at {task.expires_at}."
+                        )
+                        
+                        # Re-use the progress update logic to fail the task
+                        await self._update_progress(
+                            task,
+                            IngestionStatus.FAILED,
+                            "Task processing timed out.",
+                            task.processed_chunks / task.total_chunks * 100 if task.total_chunks > 0 else 0,
+                            error="Task exceeded the maximum configured processing time."
+                        )
+                        expired_tasks_count += 1
+
+                if expired_tasks_count > 0:
+                    self._logger.info(f"Task sweeper finished. Found and failed {expired_tasks_count} expired tasks.")
+                else:
+                    self._logger.info("Task sweeper finished. No expired tasks found.")
+
+            except Exception as e:
+                self._logger.error(f"Error during task sweeper run: {e}", exc_info=True)
+
+    def start_background_tasks(self):
+        """Starts all background tasks for the service."""
+        self._logger.info("Scheduling background tasks...")
+        asyncio.create_task(self._task_sweeper_loop())
+        self._logger.info("Task sweeper has been scheduled.")
+
+    async def _task_sweeper_loop(self):
+        """Periodically checks for and fails expired tasks."""
+        # Idealmente, este intervalo es configurable
+        sweep_interval_seconds = getattr(self.app_settings, 'ingestion_sweeper_interval_seconds', 300)
+        
+        self._logger.info(f"Task sweeper started. Checking every {sweep_interval_seconds} seconds.")
+        
+        while True:
+            await asyncio.sleep(sweep_interval_seconds)
+            self._logger.info("Running task sweeper for expired tasks...")
+            
+            try:
+                expired_tasks_count = 0
+                # Use scan_iter to avoid blocking Redis with a potentially large number of keys
+                async for task_key in self.direct_redis_conn.scan_iter("task:*"):
+                    task_data = await self.direct_redis_conn.get(task_key)
+                    if not task_data:
+                        continue
+                    
+                    try:
+                        task = IngestionTask.model_validate_json(task_data)
+                    except Exception as e:
+                        self._logger.warning(f"Could not parse task data for key {task_key}: {e}")
+                        continue
+
+                    # Check if task is in a terminal state
+                    if task.status in [IngestionStatus.COMPLETED, IngestionStatus.FAILED]:
+                        continue
+
+                    # Check for expiration
+                    if task.expires_at and datetime.utcnow() > task.expires_at:
+                        self._logger.warning(
+                            f"Task {task.task_id} for agent_id={task.agent_id} has expired. "
+                            f"Marking as FAILED. Expiration was at {task.expires_at}."
+                        )
+                        
+                        # Re-use the progress update logic to fail the task
+                        await self._update_progress(
+                            task,
+                            IngestionStatus.FAILED,
+                            "Task processing timed out.",
+                            task.processed_chunks / task.total_chunks * 100 if task.total_chunks > 0 else 0,
+                            error="Task exceeded the maximum configured processing time."
+                        )
+                        expired_tasks_count += 1
+
+                if expired_tasks_count > 0:
+                    self._logger.info(f"Task sweeper finished. Found and failed {expired_tasks_count} expired tasks.")
+                else:
+                    self._logger.info("Task sweeper finished. No expired tasks found.")
+
+            except Exception as e:
+                self._logger.error(f"Error during task sweeper run: {e}", exc_info=True)
+
+    def start_background_tasks(self):
+        """Starts all background tasks for the service."""
+        self._logger.info("Scheduling background tasks...")
+        asyncio.create_task(self._task_sweeper_loop())
+        self._logger.info("Task sweeper has been scheduled.")
 
 
 # ingestion_service/workers/__init__.py

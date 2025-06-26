@@ -130,11 +130,13 @@ class IngestionTask(BaseModel):
     
     total_chunks: int = Field(default=0)
     processed_chunks: int = Field(default=0)
-    
+    failed_chunks: int = Field(default=0, description="Number of chunks that failed during processing")
+
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     completed_at: Optional[datetime] = None
-    
+    expires_at: Optional[datetime] = Field(None, description="Timestamp for when the task should be considered timed out")
+
     error_message: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
 

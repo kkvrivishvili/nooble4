@@ -92,36 +92,31 @@ class QdrantClient:
             )
         
         # CAMBIO CRÍTICO: Buscar solo en colección unificada "documents"
-        try:
-            results = await self.client.search(
-                collection_name="documents",  # Colección única
-                query_vector=query_embedding,
-                query_filter=qdrant_filter,
-                limit=top_k,
-                score_threshold=similarity_threshold,
-                with_payload=True
+        results = await self.client.search(
+            collection_name="documents",  # Colección única
+            query_vector=query_embedding,
+            query_filter=qdrant_filter,
+            limit=top_k,
+            score_threshold=similarity_threshold,
+            with_payload=True
+        )
+        
+        # Convertir a RAGChunk CON agent_id y collection_id del payload
+        all_results = []
+        for hit in results:
+            chunk = RAGChunk(
+                chunk_id=str(hit.id),
+                content=hit.payload.get("content", ""),  # Ya usa 'content' 
+                document_id=UUID(hit.payload.get("document_id", str(UUID(int=0)))),
+                collection_id=hit.payload.get("collection_id", ""),  # Del payload, no parámetro
+                similarity_score=hit.score,
+                metadata={
+                    **hit.payload.get("metadata", {}),
+                    "agent_id": hit.payload.get("agent_id", agent_id),  # Incluir agent_id
+                    "tenant_id": hit.payload.get("tenant_id", str(tenant_id))
+                }
             )
-            
-            # Convertir a RAGChunk CON agent_id y collection_id del payload
-            all_results = []
-            for hit in results:
-                chunk = RAGChunk(
-                    chunk_id=str(hit.id),
-                    content=hit.payload.get("content", ""),  # Ya usa 'content' 
-                    document_id=UUID(hit.payload.get("document_id", str(UUID(int=0)))),
-                    collection_id=hit.payload.get("collection_id", ""),  # Del payload, no parámetro
-                    similarity_score=hit.score,
-                    metadata={
-                        **hit.payload.get("metadata", {}),
-                        "agent_id": hit.payload.get("agent_id", agent_id),  # Incluir agent_id
-                        "tenant_id": hit.payload.get("tenant_id", str(tenant_id))
-                    }
-                )
-                all_results.append(chunk)
-                
-        except Exception as e:
-            self.logger.error(f"Error searching in documents collection for agent_id={agent_id}: {e}")
-            return []
+            all_results.append(chunk)
         
         # Ordenar por score
         all_results.sort(key=lambda x: x.similarity_score, reverse=True)

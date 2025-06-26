@@ -1,6 +1,6 @@
 from typing import Optional
 import logging
-from fastapi import APIRouter, HTTPException, Depends, WebSocket, WebSocketDisconnect, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Body, Query, WebSocket, WebSocketDisconnect, UploadFile, File, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import uuid
 import os
@@ -380,8 +380,9 @@ async def get_ingestion_status(
 @router.delete("/document/{document_id}")
 async def delete_document(
     document_id: str,
+    agent_id: str = Query(..., description="The ID of the agent that owns the document"),
     user_info: dict = Depends(verify_token),
-    service = Depends(get_ingestion_service)
+    service: IngestionService = Depends(get_ingestion_service)
 ):
     """Delete a document and all its chunks"""
     try:
@@ -392,7 +393,10 @@ async def delete_document(
             session_id=user_info["session_id"],
             task_id=uuid.uuid4(),
             origin_service="api",
-            data={"document_id": document_id}
+            data={
+                "document_id": document_id,
+                "agent_id": agent_id
+            }
         )
         
         result = await service.process_action(action)
