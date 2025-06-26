@@ -36,6 +36,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./postgres_database/init:/docker-entrypoint-initdb.d
     env_file:
       - ./.env
 
@@ -147,6 +148,68 @@ services:
     volumes:
       - ./keycloak_auth/realm-export.json:/opt/keycloak/data/import/realm-export.json
       - keycloak_data:/opt/keycloak/data
+
+  kong-migrations:
+    build:
+      context: ./kong_gateway
+      dockerfile: kong.Dockerfile
+    container_name: nooble4-kong-migrations
+    networks:
+      - nooble-network
+    command: "kong migrations bootstrap"
+    depends_on:
+      - postgres
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: postgres
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: ${KONG_PG_PASSWORD}
+      KONG_PG_DATABASE: kong
+    restart: on-failure
+    env_file:
+      - ./.env
+
+  kong:
+    build:
+      context: ./kong_gateway
+      dockerfile: kong.Dockerfile
+    container_name: nooble4-kong-gateway
+    networks:
+      - nooble-network
+    depends_on:
+      - kong-migrations
+    environment:
+      # The password is the only variable needed now, as it's injected into kong.conf
+      KONG_PG_PASSWORD: ${KONG_PG_PASSWORD}
+    ports:
+      - "8081:8000" # Proxy HTTP
+      - "8443:8443" # Proxy HTTPS
+      - "8011:8001" # Admin API
+      - "8454:8444" # Admin API SSL
+    restart: always
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    env_file:
+      - ./.env
+
+  konga:
+    build:
+      context: ./kong_gateway
+      dockerfile: konga.Dockerfile
+    container_name: nooble4-konga
+    networks:
+      - nooble-network
+    depends_on:
+      - kong
+    environment:
+      NODE_ENV: development
+      KONGA_KONG_URL: http://kong:8001
+    ports:
+      - "1337:1337"
+    restart: always
 
 volumes:
   redis_data:
