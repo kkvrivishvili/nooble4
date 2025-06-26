@@ -188,6 +188,25 @@ Se ha analizado el archivo `agent_execution_service/services/execution_service.p
    - Configuraciones estáticas: Provienen de `ExecutionServiceSettings` y se utilizan para inicializar componentes.
    - Configuraciones dinámicas: Provienen de cada `DomainAction` y se utilizan para operaciones específicas.
 
+## Simplificación de Validaciones
+
+Se ha identificado y corregido una redundancia en el sistema de validación de configuraciones:
+
+1. **Problema identificado**:
+   - `ExecutionService` realizaba validaciones redundantes de presencia (`if not execution_config`, etc.) para los campos de configuración.
+   - Estas validaciones eran innecesarias ya que los modelos Pydantic (`ExecutionConfig`, `QueryConfig`, `RAGConfig`) ya validan sus propios campos.
+
+2. **Solución implementada**:
+   - Se eliminaron las validaciones redundantes en los métodos `_handle_simple_chat` y `_handle_advance_chat`.
+   - Se confió en la validación de los modelos de configuración específicos.
+   - Se mantuvieron los comentarios explicativos para claridad del código.
+
+3. **Beneficios**:
+   - Código más limpio y mantenible
+   - Eliminación de validaciones duplicadas
+   - Mejor separación de responsabilidades
+   - Mayor coherencia con el diseño del sistema
+
 ## Conclusiones Generales
 
 Después de analizar los componentes principales del servicio de ejecución de agentes, podemos concluir:
@@ -201,9 +220,11 @@ Después de analizar los componentes principales del servicio de ejecución de a
    - Eliminación de la carga redundante de `.env` en `ExecutionServiceSettings`
    - Adición de `worker_count` faltante
    - Renombramiento de `agent_config_cache_ttl` a `user_config_cache_ttl`
+   - Eliminación de validaciones redundantes en `ExecutionService`
 
 3. La separación de responsabilidades es clara:
    - `main.py`: Inicialización y estructura del servicio
    - `ExecutionWorker`: Procesamiento de acciones
    - `ExecutionService`: Lógica de negocio
    - `BaseWorker` y `BaseService`: Funcionalidad común reutilizable
+   - Modelos Pydantic: Validación de datos

@@ -110,24 +110,13 @@ class ExecutionService(BaseService):
     async def _handle_simple_chat(self, action: DomainAction) -> Dict[str, Any]:
         """Maneja chat simple."""
         try:
-            # Extraer configuraciones del DomainAction
-            execution_config = action.execution_config
-            query_config = action.query_config
-            rag_config = action.rag_config
-            
-            if not execution_config:
-                raise InvalidActionError("execution_config es requerido para chat simple")
-            if not query_config:
-                raise InvalidActionError("query_config es requerido para chat simple")
-            if not rag_config:
-                raise InvalidActionError("rag_config es requerido para chat simple")
-            
             # Ejecutar handler con configuraciones del contexto
+            # Las configuraciones ya están validadas por sus respectivos modelos Pydantic
             response = await self.simple_handler.handle_simple_chat(
                 payload=action.data,  # Datos de chat
-                execution_config=execution_config,  # Config del contexto
-                query_config=query_config,  # Config para Query Service
-                rag_config=rag_config,  # Config para RAG
+                execution_config=action.execution_config,  # Config del contexto
+                query_config=action.query_config,  # Config para Query Service
+                rag_config=action.rag_config,  # Config para RAG
                 tenant_id=action.tenant_id,
                 session_id=action.session_id,
                 task_id=action.task_id,
@@ -143,24 +132,13 @@ class ExecutionService(BaseService):
     async def _handle_advance_chat(self, action: DomainAction) -> Dict[str, Any]:
         """Maneja chat avanzado."""
         try:
-            # Extraer configuraciones del DomainAction
-            execution_config = action.execution_config
-            query_config = action.query_config
-            rag_config = action.rag_config
-            
-            if not execution_config:
-                raise InvalidActionError("execution_config es requerido para chat avanzado")
-            if not query_config:
-                raise InvalidActionError("query_config es requerido para chat avanzado")
-            if not rag_config:
-                raise InvalidActionError("rag_config es requerido para chat avanzado")
-            
             # Ejecutar handler con configuraciones del contexto
+            # Las configuraciones ya están validadas por sus respectivos modelos Pydantic
             response = await self.advance_handler.handle_advance_chat(
                 payload=action.data,  # Datos de chat
-                execution_config=execution_config,  # Config del contexto
-                query_config=query_config,  # Config para Query Service
-                rag_config=rag_config,  # Config para RAG
+                execution_config=action.execution_config,  # Config del contexto
+                query_config=action.query_config,  # Config para Query Service
+                rag_config=action.rag_config,  # Config para RAG
                 tenant_id=action.tenant_id,
                 session_id=action.session_id,
                 task_id=action.task_id,
