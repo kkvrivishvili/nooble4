@@ -417,6 +417,6 @@ class IngestionService(BaseService):
 
 # ingestion_service/workers/__init__.py
 """Workers for Ingestion Service"""
-from .ingestion_worker import IngestionWorker
+
 
 __all__ = ["IngestionWorker"]
