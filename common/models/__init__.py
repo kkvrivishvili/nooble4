@@ -5,9 +5,14 @@ facilitando la estandarización de la estructura de datos para acciones, respues
 """
 
 from .actions import DomainAction, DomainActionResponse, ErrorDetail
+from .actions import DomainAction, DomainActionResponse, ErrorDetail
+from .config_models import RAGConfig, QueryConfig, ExecutionConfig
 
 __all__ = [
     "DomainAction",
     "DomainActionResponse",
     "ErrorDetail",
+    "RAGConfig",
+    "QueryConfig",
+    "ExecutionConfig",
 ]
