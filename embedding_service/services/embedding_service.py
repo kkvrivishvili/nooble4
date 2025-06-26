@@ -128,11 +128,11 @@ class EmbeddingService(BaseService):
             raise ValueError("texts debe ser una lista de strings")
 
         rag_config = action.rag_config
-        model = rag_config.embedding_model.value
 
+        # La validación ahora usa rag_config para obtener el modelo y max_text_length
         validation_result = await self.validation_handler.validate_texts(
             texts=texts,
-            model=model,
+            rag_config=rag_config,
             tenant_id=action.tenant_id
         )
 
@@ -142,7 +142,7 @@ class EmbeddingService(BaseService):
         # Pasamos el rag_config completo para que el handler decida cómo usarlo
         result = await self.openai_handler.generate_embeddings(
             texts=texts,
-            model=model,
+            model=rag_config.embedding_model.value,
             dimensions=rag_config.embedding_dimensions,
             encoding_format=rag_config.encoding_format,
             tenant_id=action.tenant_id,
@@ -176,12 +176,21 @@ class EmbeddingService(BaseService):
             raise ValueError("query_text es requerido en el payload")
 
         rag_config = action.rag_config
-        model = rag_config.embedding_model.value
+
+        # Añadimos validación también para la consulta única
+        validation_result = await self.validation_handler.validate_texts(
+            texts=[query_text],
+            rag_config=rag_config,
+            tenant_id=action.tenant_id
+        )
+
+        if not validation_result["is_valid"]:
+            raise ValueError(f"Validación de consulta fallida: {validation_result['messages'][0]}")
 
         # Pasamos el rag_config completo para que el handler decida cómo usarlo
         result = await self.openai_handler.generate_embeddings(
             texts=[query_text],
-            model=model,
+            model=rag_config.embedding_model.value,
             dimensions=rag_config.embedding_dimensions,
             encoding_format=rag_config.encoding_format,
             tenant_id=action.tenant_id,
