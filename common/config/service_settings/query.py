@@ -1,7 +1,7 @@
 """
 Configuración específica para el Query Service.
 """
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 from ..base_settings import CommonAppSettings
@@ -24,9 +24,8 @@ class QueryServiceSettings(CommonAppSettings):
     # Embedding Service Configuration
     embedding_service_timeout: int = Field(default=30, description="Timeout para comunicación con Embedding Service")
     
-    # Search Settings
-    search_timeout_seconds: int = Field(default=10, description="Timeout para búsquedas vectoriales")
-
     # Worker Settings
     worker_count: int = Field(default=1, description="Número de workers para procesar queries")
     worker_sleep_seconds: float = Field(1.0, description="Tiempo de espera entre polls para los workers de ejecución")
+
+    
