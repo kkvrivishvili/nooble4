@@ -18,14 +18,14 @@ from common.models.chat_models import (
 from common.models.config_models import RAGConfig
 
 from ..clients.groq_client import GroqClient
-from ..clients.vector_client import VectorClient
+from ..clients.qdrant_client import QdrantClient
 from ..clients.embedding_client import EmbeddingClient
 
 
 class SimpleHandler(BaseHandler):
     """Handler para procesamiento de chat simple con RAG automático."""
     
-    def __init__(self, app_settings, embedding_client: EmbeddingClient, vector_client: VectorClient, 
+    def __init__(self, app_settings, embedding_client: EmbeddingClient, qdrant_client: QdrantClient, 
                  groq_client: GroqClient, direct_redis_conn=None):
         """
         Inicializa el handler recibiendo todos los clientes como dependencias.
@@ -33,7 +33,7 @@ class SimpleHandler(BaseHandler):
         Args:
             app_settings: Configuración del servicio
             embedding_client: Cliente para comunicación con Embedding Service
-            vector_client: Cliente para búsqueda vectorial en Qdrant
+            qdrant_client: Cliente para búsqueda vectorial en Qdrant
             groq_client: Cliente para consultas LLM en Groq
             direct_redis_conn: Conexión directa a Redis (opcional)
         """
@@ -42,14 +42,14 @@ class SimpleHandler(BaseHandler):
         # Validar que todos los clientes requeridos estén presentes
         if not embedding_client:
             raise ValueError("embedding_client es requerido para SimpleHandler")
-        if not vector_client:
-            raise ValueError("vector_client es requerido para SimpleHandler")
+        if not qdrant_client:
+            raise ValueError("qdrant_client es requerido para SimpleHandler")
         if not groq_client:
             raise ValueError("groq_client es requerido para SimpleHandler")
             
         # Asignar los clientes recibidos como dependencias
         self.embedding_client = embedding_client
-        self.vector_client = vector_client
+        self.qdrant_client = qdrant_client
         self.groq_client = groq_client
         
         self._logger.info("SimpleHandler inicializado con inyección de clientes")
@@ -138,7 +138,7 @@ class SimpleHandler(BaseHandler):
                 )
                 
                 # 2. Buscar en vector store
-                search_results = await self.vector_client.search(
+                search_results = await self.qdrant_client.search(
                     query_embedding=query_embedding,
                     collection_ids=rag_config.collection_ids,
                     top_k=rag_config.top_k,

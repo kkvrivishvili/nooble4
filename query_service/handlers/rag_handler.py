@@ -15,21 +15,21 @@ from common.models.chat_models import (
     EmbeddingRequest
 )
 
-from ..clients.vector_client import VectorClient
+from ..clients.qdrant_client import QdrantClient
 from ..clients.embedding_client import EmbeddingClient
 
 
 class RAGHandler(BaseHandler):
     """Handler para búsqueda RAG pura (knowledge tool)."""
     
-    def __init__(self, app_settings, embedding_client: EmbeddingClient, vector_client: VectorClient, direct_redis_conn=None):
+    def __init__(self, app_settings, embedding_client: EmbeddingClient, qdrant_client: QdrantClient, direct_redis_conn=None):
         """
         Inicializa el handler para procesamiento RAG avanzado recibiendo los clientes como dependencias.
         
         Args:
             app_settings: Configuración global de la aplicación
             embedding_client: Cliente para comunicación con Embedding Service
-            vector_client: Cliente para búsqueda vectorial en Qdrant
+            qdrant_client: Cliente para búsqueda vectorial en Qdrant
             direct_redis_conn: Conexión Redis directa (opcional)
         """
         super().__init__(app_settings, direct_redis_conn)
@@ -37,12 +37,12 @@ class RAGHandler(BaseHandler):
         # Validar que todos los clientes requeridos estén presentes
         if not embedding_client:
             raise ValueError("embedding_client es requerido para RAGHandler")
-        if not vector_client:
-            raise ValueError("vector_client es requerido para RAGHandler")
+        if not qdrant_client:
+            raise ValueError("qdrant_client es requerido para RAGHandler")
             
         # Asignar los clientes recibidos como dependencias
         self.embedding_client = embedding_client
-        self.vector_client = vector_client
+        self.qrant_client = qrant_client
         
         self._logger.info("RAGHandler inicializado con inyección de clientes")
     
@@ -91,7 +91,7 @@ class RAGHandler(BaseHandler):
             )
             
             # 2. Buscar en vector store
-            search_results = await self.vector_client.search(
+            search_results = await self.qrant_client.search(
                 query_embedding=query_embedding,
                 collection_ids=rag_config.collection_ids,
                 top_k=rag_config.top_k,
