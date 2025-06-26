@@ -10,7 +10,6 @@ from typing import List
 
 from common.models.chat_models import ChatRequest, ChatResponse, ChatMessage, ConversationHistory
 from common.clients.redis import CacheManager
-from common.config import ExecutionConfig
 from ..clients.query_client import QueryClient
 from ..clients.conversation_client import ConversationClient
 from .conversation_handler import ConversationHelper

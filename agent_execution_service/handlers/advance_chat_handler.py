@@ -12,7 +12,6 @@ from typing import Dict, Any, List
 
 from common.models.chat_models import ChatRequest, ChatResponse, ChatMessage, ConversationHistory
 from common.clients.redis import CacheManager
-from common.config import ExecutionConfig
 from ..clients.query_client import QueryClient
 from ..clients.conversation_client import ConversationClient
 from .conversation_handler import ConversationHelper
@@ -34,7 +33,7 @@ class AdvanceChatHandler:
         query_client: QueryClient,
         conversation_client: ConversationClient,
         cache_manager: CacheManager,
-        execution_config: ExecutionConfig
+        action
     ):
         """
         Inicializa AdvanceChatHandler.
@@ -43,11 +42,11 @@ class AdvanceChatHandler:
             query_client: Cliente para consultas al LLM
             conversation_client: Cliente para persistencia de conversaciones
             cache_manager: Gestor de cache
-            execution_config: Configuración de ejecución
+            action: DomainAction que contiene la configuración en action.execution_config
         """
         self.query_client = query_client
         self.cache_manager = cache_manager
-        self.execution_config = execution_config
+        self.action = action
         
         # Inicializar ConversationHelper
         self.conversation_helper = ConversationHelper(
@@ -193,8 +192,8 @@ class AdvanceChatHandler:
         Returns:
             Tupla con (respuesta_final, metadatos_de_iteraciones)
         """
-        max_iterations = self.execution_config.max_iterations
-        timeout_seconds = self.execution_config.timeout_seconds
+        max_iterations = self.action.execution_config.max_iterations
+        timeout_seconds = self.action.execution_config.timeout_seconds
         
         iterations_metadata = []
         current_messages = messages.copy()
