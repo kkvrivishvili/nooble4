@@ -28,7 +28,7 @@ class AgentService:
         self.execution_client = ExecutionClient(redis_client)
         
         # Cache TTL
-        self.cache_ttl = settings.agent_config_cache_ttl
+        self.cache_ttl = settings.user_config_cache_ttl
     
     async def create_agent(
         self,

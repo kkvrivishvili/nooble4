@@ -12,8 +12,7 @@ class ExecutionServiceSettings(CommonAppSettings):
     """Configuración específica para Agent Execution Service."""
 
     model_config = SettingsConfigDict(
-        extra='ignore',
-        env_file='.env'
+        extra='ignore'
     )
 
 # Campos específicos de ExecutionSettings o que anulan valores de CommonAppSettings.
@@ -29,7 +28,8 @@ class ExecutionServiceSettings(CommonAppSettings):
     callback_queue_prefix: str = Field("orchestrator", description="Prefijo para colas de callback hacia el orquestador")
 
     # Cache de configuraciones
-    agent_config_cache_ttl: int = Field(600, description="TTL del cache de configuraciones de agente (segundos)")
+    user_config_cache_ttl: int = Field(600, description="TTL del cache de configuraciones de usuario (segundos)")
 
     # Worker configuración
+    worker_count: int = Field(default=2, description="Número de workers para procesar ejecuciones de agentes")
     worker_sleep_seconds: float = Field(1.0, description="Tiempo de espera entre polls para los workers de ejecución")
