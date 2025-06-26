@@ -6,10 +6,10 @@ Delega la gestión de conversaciones al ConversationHelper.
 """
 import logging
 import uuid
-from typing import List
+from typing import List, Dict, Any
 
 from common.models.chat_models import ChatRequest, ChatResponse, ChatMessage, ConversationHistory
-from common.clients.redis import CacheManager
+from common.clients.redis import RedisStateManager
 from ..clients.query_client import QueryClient
 from ..clients.conversation_client import ConversationClient
 from .conversation_handler import ConversationHelper
@@ -49,7 +49,8 @@ class SimpleChatHandler:
         # Inicializar CacheManager
         self.cache_manager = CacheManager(
             redis_conn=redis_conn,
-            service_name="agent_execution"
+            state_model=ConversationHistory,
+            app_settings=settings
         )
         
         # Inicializar ConversationHelper

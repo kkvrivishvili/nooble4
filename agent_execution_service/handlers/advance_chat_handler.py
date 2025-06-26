@@ -54,7 +54,8 @@ class AdvanceChatHandler:
         # Inicializar CacheManager
         self.cache_manager = CacheManager(
             redis_conn=redis_conn,
-            service_name="agent_execution"
+            state_model=ConversationHistory,
+            app_settings=settings
         )
         
         # Inicializar ConversationHelper
