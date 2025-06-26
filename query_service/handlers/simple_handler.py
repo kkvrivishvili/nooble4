@@ -52,7 +52,7 @@ class SimpleHandler(BaseHandler):
         self.vector_client = vector_client
         self.groq_client = groq_client
         
-        self.logger.info("SimpleHandler inicializado con inyección de clientes")
+        self._logger.info("SimpleHandler inicializado con inyección de clientes")
     
     async def process_simple_query(
         self,
