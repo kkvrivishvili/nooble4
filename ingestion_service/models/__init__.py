@@ -1,16 +1,29 @@
 """Models for Ingestion Service"""
+
 from .ingestion_models import (
-    DocumentIngestionRequest,
     ChunkModel,
+    DocumentIngestionRequest,
+    DocumentIngestionResponse,
+    DocumentType,
     IngestionStatus,
+    IngestionStatusResponse,
     IngestionTask,
-    ProcessingProgress
+    ProcessingProgress,
+    S3DocumentIngestionRequest,
+    S3IngestionStatusResponse,
+    UploadURLResponse,
 )
 
 __all__ = [
+    "ChunkModel",
     "DocumentIngestionRequest",
-    "ChunkModel", 
+    "DocumentIngestionResponse",
+    "DocumentType",
     "IngestionStatus",
+    "IngestionStatusResponse",
     "IngestionTask",
-    "ProcessingProgress"
+    "ProcessingProgress",
+    "S3DocumentIngestionRequest",
+    "S3IngestionStatusResponse",
+    "UploadURLResponse",
 ]
