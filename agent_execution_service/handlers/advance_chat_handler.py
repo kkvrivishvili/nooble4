@@ -33,6 +33,7 @@ class AdvanceChatHandler:
         self,
         query_client: QueryClient,
         conversation_client: ConversationClient,
+        tool_registry,
         redis_conn,
         settings
     ):
@@ -42,11 +43,13 @@ class AdvanceChatHandler:
         Args:
             query_client: Cliente para consultas al LLM
             conversation_client: Cliente para persistencia de conversaciones
+            tool_registry: Registro de herramientas disponibles (para implementación futura)
             redis_conn: Conexión directa a Redis
             settings: Configuración del servicio
         """
         self.query_client = query_client
         self.conversation_client = conversation_client
+        self.tool_registry = tool_registry  # Para implementación futura
         self.logger = logging.getLogger(__name__)
         
         # Initialize cache manager with proper typing
