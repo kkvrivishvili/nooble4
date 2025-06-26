@@ -33,3 +33,6 @@ class ExecutionServiceSettings(CommonAppSettings):
     # Worker configuración
     worker_count: int = Field(default=2, description="Número de workers para procesar ejecuciones de agentes")
     worker_sleep_seconds: float = Field(1.0, description="Tiempo de espera entre polls para los workers de ejecución")
+    
+    # Timeouts para servicios externos
+    query_timeout_seconds: int = Field(60, description="Timeout para peticiones al Query Service (segundos)")

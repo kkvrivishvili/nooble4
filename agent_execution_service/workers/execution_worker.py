@@ -68,3 +68,17 @@ class ExecutionWorker(BaseWorker):
                 }
             )
             raise
+            
+    async def cleanup(self):
+        """Limpia recursos utilizados por el worker durante el apagado."""
+        try:
+            # Liberar recursos específicos del ExecutionWorker si los hay
+            if self.execution_service:
+                # Si el execution_service tiene recursos que necesitan ser liberados
+                # se podrían liberar aquí
+                pass
+                
+            logger.info(f"ExecutionWorker ({self.consumer_name}) recursos liberados correctamente")
+        except Exception as e:
+            logger.error(f"Error durante cleanup de ExecutionWorker: {e}")
+            # No re-lanzamos la excepción para permitir que el proceso de apagado continúe

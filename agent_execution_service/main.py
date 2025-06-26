@@ -102,13 +102,6 @@ async def lifespan(app: FastAPI):
                     except asyncio.CancelledError:
                         pass
             
-            # Cleanup de workers
-            for worker in workers:
-                try:
-                    await worker.cleanup()
-                except Exception as e:
-                    logger.error(f"Error en cleanup de worker: {e}")
-            
             # Cerrar Redis
             if redis_manager:
                 await redis_manager.close()
