@@ -30,5 +30,9 @@ class EmbeddingServiceSettings(CommonAppSettings):
     callback_queue_prefix: str = Field("embedding", description="Prefijo para colas de callback.")
     worker_sleep_seconds: float = Field(0.1, description="Tiempo de espera para workers de procesamiento.")
 
+    # --- Configuración del Cliente OpenAI ---
+    openai_timeout_seconds: int = Field(default=30, description="Timeout en segundos para las llamadas a la API de OpenAI.")
+    openai_max_retries: int = Field(default=3, description="Número máximo de reintentos para las llamadas a la API de OpenAI.")
+
 
     
