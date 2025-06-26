@@ -270,6 +270,53 @@ Después de analizar los componentes principales del servicio de ejecución de a
    - Configuraciones específicas del servicio en `ExecutionServiceSettings`
    - Configuraciones dinámicas en objetos `DomainAction`
 
+## Estandarización de Claves de Caché
+
+### Análisis del Uso de Caché
+
+Durante el análisis de los handlers (`SimpleChatHandler`, `AdvanceChatHandler`), se observó que ambos utilizan un patrón similar para generar claves de caché para el historial de conversaciones:
+
+```python
+def _build_cache_key(self, tenant_id: uuid.UUID, session_id: uuid.UUID) -> str:
+    return f"nooble4:{self.settings.environment}:agent_execution:history:{tenant_id}:{session_id}"
+```
+
+Este patrón sigue una estructura consistente:
+- Prefijo (`nooble4`)
+- Entorno (`dev`, `prod`, etc.)
+- Servicio (`agent_execution`)
+- Tipo de caché (`history`)
+- Contexto específico (`tenant_id`, `session_id`)
+
+Sin embargo, esta lógica está duplicada en diferentes handlers y podría extenderse a otros servicios en el futuro.
+
+### Solución Implementada: CacheKeyManager
+
+Para estandarizar la generación de claves de caché, se ha implementado un nuevo componente `CacheKeyManager` en `common/clients/redis/cache_key_manager.py`. Este componente:
+
+1. **Genera claves estandarizadas**: Siguiendo el patrón `{prefix}:{environment}:{service_name}:{cache_type}:{context}`
+2. **Proporciona métodos específicos** para tipos comunes de caché:
+   - `get_history_key(tenant_id, session_id)`: Para historiales de conversación
+   - `get_config_key(entity_id, config_type)`: Para configuraciones
+   - `get_embedding_key(document_id)`: Para embeddings
+   - `get_custom_key(cache_type, context)`: Para casos personalizados
+3. **Se integra con RedisStateManager**: Se ha modificado `RedisStateManager` para aceptar opcionalmente un `CacheKeyManager`
+
+### Beneficios
+
+- **Consistencia**: Todas las claves de caché seguirán el mismo patrón
+- **Mantenibilidad**: Cambios en el formato de claves se hacen en un solo lugar
+- **Extensibilidad**: Fácil adición de nuevos tipos de caché
+- **Compatibilidad**: Cambios realizados de forma compatible con el código existente
+
+### Próximos Pasos
+
+Para completar la estandarización de claves de caché:
+
+1. Refactorizar los handlers existentes para utilizar el `CacheKeyManager`
+2. Actualizar la documentación para incluir las mejores prácticas de uso de caché
+3. Considerar la creación de un cliente de caché completo que combine `CacheKeyManager` y `RedisStateManager`
+
 2. Las mejoras implementadas han optimizado este flujo:
    - Eliminación de la carga redundante de `.env` en `ExecutionServiceSettings`
    - Adición de `worker_count` faltante

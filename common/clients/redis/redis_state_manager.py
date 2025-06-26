@@ -6,6 +6,12 @@ from pydantic import BaseModel, ValidationError
 
 from common.config.base_settings import CommonAppSettings
 
+# Importación condicional para evitar dependencias circulares
+# Solo se usa para type hints
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from .cache_key_manager import CacheKeyManager
+
 # Tipo genérico para el modelo de estado Pydantic
 TStateModel = TypeVar('TStateModel', bound=BaseModel)
 
@@ -24,8 +30,8 @@ class RedisStateManager(Generic[TStateModel]):
         redis_conn: redis_async.Redis,
         state_model: Type[TStateModel],
         app_settings: CommonAppSettings,
-        # Opcional: un prefijo de clave global para todos los estados gestionados por esta instancia
-        # key_prefix: Optional[str] = None 
+        # Opcional: un gestor de claves de caché para generar claves estandarizadas
+        cache_key_manager: Optional['CacheKeyManager'] = None
     ):
         """
         Inicializa el RedisStateManager.
@@ -41,7 +47,7 @@ class RedisStateManager(Generic[TStateModel]):
         self.redis_conn = redis_conn
         self.state_model = state_model
         self.app_settings = app_settings
-        # self.key_prefix = key_prefix or ""
+        self.cache_key_manager = cache_key_manager
         self._logger = logging.getLogger(f"{app_settings.service_name}.RedisStateManager.{state_model.__name__}")
         self._logger.debug(f"RedisStateManager para el modelo {state_model.__name__} inicializado.")
 

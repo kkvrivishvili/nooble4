@@ -7,10 +7,14 @@ from .base_redis_client import BaseRedisClient # Correct, as base_redis_client.p
 from .queue_manager.queue_manager import QueueManager
 from .redis.redis_manager import RedisManager
 from .redis.redis_state_manager import RedisStateManager
+from .redis.cache_key_manager import CacheKeyManager
+from .redis.cache_manager import CacheManager
 
 __all__ = [
     "BaseRedisClient",
     "QueueManager",
     "RedisManager",
     "RedisStateManager",
+    "CacheKeyManager",
+    "CacheManager",
 ]

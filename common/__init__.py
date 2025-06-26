@@ -24,7 +24,7 @@ from .handlers import BaseHandler
 from .workers import BaseWorker
 
 # Clients
-from .clients import BaseRedisClient, RedisManager, RedisStateManager, QueueManager
+from .clients import BaseRedisClient, RedisManager, RedisStateManager, QueueManager, CacheKeyManager, CacheManager
 
 # Services
 from .services import BaseService
