@@ -55,8 +55,8 @@ class QueryService(BaseService):
         # 3. Cliente de Groq para consultas LLM
         self.groq_client = GroqClient(
             api_key=app_settings.groq_api_key,
-            timeout=app_settings.groq_timeout_seconds,
-            max_retries=app_settings.groq_max_retries
+            timeout=60,      # Valor por defecto razonable
+            max_retries=2    # Valor por defecto razonable
         )
         
         # Inicializar handlers inyectando los clientes como dependencias
