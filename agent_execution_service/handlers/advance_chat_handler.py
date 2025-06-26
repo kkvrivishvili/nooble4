@@ -32,8 +32,9 @@ class AdvanceChatHandler:
         self,
         query_client: QueryClient,
         conversation_client: ConversationClient,
-        cache_manager: CacheManager,
-        action
+        tool_registry,
+        settings,
+        redis_conn
     ):
         """
         Inicializa AdvanceChatHandler.
@@ -41,22 +42,67 @@ class AdvanceChatHandler:
         Args:
             query_client: Cliente para consultas al LLM
             conversation_client: Cliente para persistencia de conversaciones
-            cache_manager: Gestor de cache
-            action: DomainAction que contiene la configuración en action.execution_config
+            tool_registry: Registro de herramientas disponibles
+            settings: Configuración del servicio
+            redis_conn: Conexión directa a Redis
         """
         self.query_client = query_client
-        self.cache_manager = cache_manager
-        self.action = action
+        self.conversation_client = conversation_client
+        self.tool_registry = tool_registry
+        self.settings = settings
+        
+        # Inicializar CacheManager
+        self.cache_manager = CacheManager(
+            redis_conn=redis_conn,
+            service_name="agent_execution"
+        )
         
         # Inicializar ConversationHelper
         self.conversation_helper = ConversationHelper(
-            cache_manager=cache_manager,
-            conversation_client=conversation_client
+            cache_manager=self.cache_manager,
+            conversation_client=self.conversation_client
         )
         
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
     
-    async def process_chat(self, chat_request: ChatRequest) -> ChatResponse:
+    async def handle_advance_chat(
+        self,
+        payload: Dict[str, Any],
+        execution_config,
+        query_config,
+        rag_config,
+        tenant_id: uuid.UUID,
+        session_id: uuid.UUID,
+        task_id: uuid.UUID,
+        agent_id: uuid.UUID
+    ) -> ChatResponse:
+        """
+        Maneja una solicitud de chat avanzado con configuración explícita.
+        
+        Args:
+            payload: Datos de la solicitud de chat
+            execution_config: Configuración de ejecución
+            query_config: Configuración para Query Service
+            rag_config: Configuración para RAG
+            tenant_id: ID del tenant
+            session_id: ID de la sesión
+            task_id: ID de la tarea
+            agent_id: ID del agente
+            
+        Returns:
+            Respuesta del chat
+        """
+        # Parsear ChatRequest
+        chat_request = ChatRequest.model_validate(payload)
+        chat_request.tenant_id = tenant_id
+        chat_request.session_id = session_id
+        chat_request.task_id = task_id
+        chat_request.agent_id = agent_id
+        
+        # Procesar el chat con la configuración recibida
+        return await self._process_chat(chat_request, execution_config, query_config, rag_config)
+        
+    async def _process_chat(self, chat_request: ChatRequest, execution_config, query_config=None, rag_config=None) -> ChatResponse:
         """
         Procesa una solicitud de chat avanzado con herramientas.
         
@@ -101,7 +147,8 @@ class AdvanceChatHandler:
             # 4. Ejecutar loop ReAct con herramientas
             final_response, iterations_metadata = await self._execute_react_loop(
                 messages=integrated_messages,
-                chat_request=chat_request
+                chat_request=chat_request,
+                execution_config=execution_config
             )
             
             # 5. Crear respuesta final
@@ -140,7 +187,7 @@ class AdvanceChatHandler:
                 user_message=last_user_message,
                 assistant_message=response_message,
                 task_id=chat_request.task_id,
-                ttl=self.action.execution_config.history_ttl,
+                ttl=execution_config.history_ttl,
                 metadata={
                     "mode": "advance",
                     "execution_time_seconds": execution_time,
@@ -180,7 +227,8 @@ class AdvanceChatHandler:
     async def _execute_react_loop(
         self,
         messages: List[ChatMessage],
-        chat_request: ChatRequest
+        chat_request: ChatRequest,
+        execution_config
     ) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
         """
         Ejecuta el loop ReAct con herramientas y múltiples iteraciones.
@@ -192,8 +240,9 @@ class AdvanceChatHandler:
         Returns:
             Tupla con (respuesta_final, metadatos_de_iteraciones)
         """
-        max_iterations = self.action.execution_config.max_iterations
-        timeout_seconds = self.action.execution_config.timeout_seconds
+        # Usar valores de configuración del execution_config
+        max_iterations = execution_config.max_iterations
+        timeout_seconds = execution_config.timeout_seconds
         
         iterations_metadata = []
         current_messages = messages.copy()
