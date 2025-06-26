@@ -41,7 +41,7 @@ class ConversationHelper:
         """
         self.cache_manager = cache_manager
         self.conversation_client = conversation_client
-        self.logger = logging.getLogger(f"{__name__}.ConversationHelper")
+        self._logger = logging.getLogger(f"{__name__}.ConversationHelper")
     
     def generate_conversation_id(
         self, 
@@ -63,7 +63,7 @@ class ConversationHelper:
         combined = f"{tenant_id}:{session_id}:{agent_id}"
         conversation_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, combined))
         
-        self.logger.debug(
+        self._logger.debug(
             "Conversation ID generado determinísticamente",
             extra={
                 "tenant_id": str(tenant_id),
@@ -97,7 +97,7 @@ class ConversationHelper:
         """
         conversation_id = self.generate_conversation_id(tenant_id, session_id, agent_id)
         
-        self.logger.info(
+        self._logger.info(
             "Recuperando/creando conversación",
             extra={
                 "tenant_id": str(tenant_id),
@@ -114,7 +114,7 @@ class ConversationHelper:
         if history:
             # Validar conversation_id por consistencia
             if history.conversation_id != conversation_id:
-                self.logger.warning(
+                self._logger.warning(
                     "Conversation ID en cache no coincide con determinístico, actualizando",
                     extra={
                         "cached_id": history.conversation_id,
@@ -123,7 +123,7 @@ class ConversationHelper:
                 )
                 history.conversation_id = conversation_id
             
-            self.logger.info(
+            self._logger.info(
                 "Conversación recuperada desde cache",
                 extra={
                     "conversation_id": conversation_id,
@@ -140,7 +140,7 @@ class ConversationHelper:
             agent_id=agent_id
         )
         
-        self.logger.info(
+        self._logger.info(
             "Nueva conversación creada",
             extra={
                 "conversation_id": conversation_id,
@@ -175,7 +175,7 @@ class ConversationHelper:
         # Integrar en orden: system -> history -> user
         integrated_messages = system_messages + history_messages + user_messages
         
-        self.logger.debug(
+        self._logger.debug(
             "Historial integrado con mensajes",
             extra={
                 "conversation_id": history.conversation_id,
@@ -222,7 +222,7 @@ class ConversationHelper:
         context = [str(tenant_id), str(session_id), str(agent_id)]
         await self.cache_manager.save("history", context, history, ttl)
         
-        self.logger.info(
+        self._logger.info(
             "Conversación guardada en cache",
             extra={
                 "conversation_id": history.conversation_id,
@@ -245,7 +245,7 @@ class ConversationHelper:
                 metadata=metadata or {}
             )
             
-            self.logger.info(
+            self._logger.info(
                 "Conversación guardada en Conversation Service",
                 extra={
                     "conversation_id": history.conversation_id,
@@ -255,7 +255,7 @@ class ConversationHelper:
             
         except Exception as e:
             # Fire-and-forget: no fallar si no se puede guardar en DB
-            self.logger.error(
+            self._logger.error(
                 "Error guardando en Conversation Service",
                 extra={
                     "conversation_id": history.conversation_id,

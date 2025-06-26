@@ -46,7 +46,7 @@ class SimpleChatHandler:
         """
         self.query_client = query_client
         self.conversation_client = conversation_client
-        self.logger = logging.getLogger(__name__)
+
         
         # Initialize cache manager with proper typing
         self.cache_manager = CacheManager[ConversationHistory](
@@ -84,7 +84,7 @@ class SimpleChatHandler:
             # Validar y parsear el payload
             chat_request = ChatRequest(**payload)
             
-            self.logger.info(
+            self._logger.info(
                 f"Processing simple chat for tenant {chat_request.tenant_id}, "
                 f"session {chat_request.session_id}, agent {chat_request.agent_id}"
             )
@@ -93,7 +93,7 @@ class SimpleChatHandler:
             return await self._process_chat(chat_request, execution_config, query_config, rag_config)
             
         except Exception as e:
-            self.logger.error(f"Error in handle_simple_chat: {str(e)}")
+            self._logger.error(f"Error in handle_simple_chat: {str(e)}")
             raise
 
     async def _process_chat(self, chat_request: ChatRequest, execution_config, query_config=None, rag_config=None) -> ChatResponse:
@@ -107,7 +107,7 @@ class SimpleChatHandler:
             Respuesta del chat con el mensaje generado
         """
         try:
-            self.logger.info(
+            self._logger.info(
                 "Iniciando procesamiento de chat simple",
                 extra={
                     "tenant_id": str(chat_request.tenant_id),
@@ -144,7 +144,7 @@ class SimpleChatHandler:
                 "task_id": str(chat_request.task_id)
             }
             
-            self.logger.debug(
+            self._logger.debug(
                 "Payload preparado para query service",
                 extra={
                     "agent_id": str(chat_request.agent_id),
@@ -202,7 +202,7 @@ class SimpleChatHandler:
                 }
             )
             
-            self.logger.info(
+            self._logger.info(
                 "Chat simple procesado exitosamente",
                 extra={
                     "conversation_id": history.conversation_id,
@@ -214,7 +214,7 @@ class SimpleChatHandler:
             return chat_response
             
         except Exception as e:
-            self.logger.error(
+            self._logger.error(
                 "Error procesando chat simple",
                 extra={
                     "tenant_id": str(chat_request.tenant_id),

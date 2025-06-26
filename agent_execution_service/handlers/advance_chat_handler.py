@@ -50,7 +50,7 @@ class AdvanceChatHandler:
         self.query_client = query_client
         self.conversation_client = conversation_client
         self.tool_registry = tool_registry  # Para implementación futura
-        self.logger = logging.getLogger(__name__)
+        self._logger = logging.getLogger(__name__)
         
         # Initialize cache manager with proper typing
         self.cache_manager = CacheManager[ConversationHistory](
@@ -65,7 +65,7 @@ class AdvanceChatHandler:
             conversation_client=self.conversation_client
         )
         
-        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+        self._logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
     
     async def handle_advance_chat(
         self,
@@ -117,7 +117,7 @@ class AdvanceChatHandler:
         start_time = time.time()
         
         try:            
-            self.logger.info(
+            self._logger.info(
                 "Iniciando procesamiento de chat avanzado",
                 extra={
                     "tenant_id": str(chat_request.tenant_id),
@@ -200,7 +200,7 @@ class AdvanceChatHandler:
                 }
             )
             
-            self.logger.info(
+            self._logger.info(
                 "Chat avanzado procesado exitosamente",
                 extra={
                     "conversation_id": history.conversation_id,
@@ -215,7 +215,7 @@ class AdvanceChatHandler:
             
         except Exception as e:
             execution_time = time.time() - start_time
-            self.logger.error(
+            self._logger.error(
                 "Error procesando chat avanzado",
                 extra={
                     "tenant_id": str(chat_request.tenant_id),
@@ -253,7 +253,7 @@ class AdvanceChatHandler:
         iterations_metadata = []
         current_messages = messages.copy()
         
-        self.logger.debug(
+        self._logger.debug(
             "Iniciando loop ReAct",
             extra={
                 "max_iterations": max_iterations,
@@ -324,7 +324,7 @@ class AdvanceChatHandler:
                         "status": "continued"
                     })
                     
-                    self.logger.debug(
+                    self._logger.debug(
                         f"Iteración {iteration + 1}: {len(tool_calls)} tool calls ejecutados",
                         extra={
                             "iteration": iteration + 1,
@@ -342,7 +342,7 @@ class AdvanceChatHandler:
                         "status": "completed"
                     })
                     
-                    self.logger.debug(
+                    self._logger.debug(
                         f"Iteración {iteration + 1}: respuesta final generada",
                         extra={
                             "iteration": iteration + 1,
@@ -361,7 +361,7 @@ class AdvanceChatHandler:
                     "status": "timeout"
                 })
                 
-                self.logger.warning(
+                self._logger.warning(
                     f"Timeout en iteración {iteration + 1}",
                     extra={
                         "iteration": iteration + 1,
@@ -380,7 +380,7 @@ class AdvanceChatHandler:
                     "error": str(e)
                 })
                 
-                self.logger.error(
+                self._logger.error(
                     f"Error en iteración {iteration + 1}: {e}",
                     extra={
                         "iteration": iteration + 1,
@@ -413,7 +413,7 @@ class AdvanceChatHandler:
         
         tool_name = tool_call.get("function", {}).get("name", "unknown")
         
-        self.logger.debug(
+        self._logger.debug(
             f"Ejecutando tool call: {tool_name}",
             extra={
                 "tool_name": tool_name,

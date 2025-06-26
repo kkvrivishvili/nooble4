@@ -71,7 +71,7 @@ class ExecutionService(BaseService):
         """
         try:
             action_type = action.action_type
-            self.logger.info(
+            self._logger.info(
                 f"Procesando acción: {action_type}",
                 extra={
                     "action_id": str(action.action_id),
@@ -96,7 +96,7 @@ class ExecutionService(BaseService):
         except ExternalServiceError:
             raise
         except Exception as e:
-            self.logger.error(f"Error procesando acción: {e}", exc_info=True)
+            self._logger.error(f"Error procesando acción: {e}", exc_info=True)
             raise ExternalServiceError(f"Error interno: {str(e)}")
 
     def _validate_action(self, action: DomainAction) -> None:
@@ -126,7 +126,7 @@ class ExecutionService(BaseService):
             return response.model_dump()
             
         except Exception as e:
-            self.logger.error(f"Error en chat simple: {e}")
+            self._logger.error(f"Error en chat simple: {e}")
             raise
 
     async def _handle_advance_chat(self, action: DomainAction) -> Dict[str, Any]:
@@ -148,5 +148,5 @@ class ExecutionService(BaseService):
             return response.model_dump()
             
         except Exception as e:
-            self.logger.error(f"Error en chat avanzado: {e}")
+            self._logger.error(f"Error en chat avanzado: {e}")
             raise
