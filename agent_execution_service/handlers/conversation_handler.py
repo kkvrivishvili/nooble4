@@ -29,7 +29,7 @@ class ConversationHelper:
     
     def __init__(
         self,
-        cache_manager: CacheManager,
+        cache_manager: 'CacheManager[ConversationHistory]',
         conversation_client: ConversationClient
     ):
         """

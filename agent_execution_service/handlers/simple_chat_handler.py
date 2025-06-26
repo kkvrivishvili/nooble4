@@ -4,15 +4,18 @@ Handler para procesamiento simple de chat usando QueryService.
 Maneja conversaciones simples sin herramientas ni ReAct loops.
 Delega la gestión de conversaciones al ConversationHelper.
 """
+import asyncio
 import logging
 import uuid
 from typing import List, Dict, Any
 
+from common.models.actions import DomainAction
 from common.models.chat_models import ChatRequest, ChatResponse, ChatMessage, ConversationHistory
-from common.clients.redis import RedisStateManager
-from ..clients.query_client import QueryClient
-from ..clients.conversation_client import ConversationClient
-from .conversation_handler import ConversationHelper
+from common.clients.redis.cache_manager import CacheManager
+from agent_execution_service.handlers.conversation_handler import ConversationHelper
+from agent_execution_service.clients.query_client import QueryClient
+from agent_execution_service.clients.conversation_client import ConversationClient
+from query_service.models.rag_payloads import SimpleQueryPayload
 
 
 logger = logging.getLogger(__name__)
@@ -30,8 +33,8 @@ class SimpleChatHandler:
         self,
         query_client: QueryClient,
         conversation_client: ConversationClient,
-        settings,
-        redis_conn
+        redis_conn,
+        settings
     ):
         """
         Inicializa SimpleChatHandler.
@@ -39,66 +42,62 @@ class SimpleChatHandler:
         Args:
             query_client: Cliente para consultas al LLM
             conversation_client: Cliente para persistencia de conversaciones
-            settings: Configuración del servicio
             redis_conn: Conexión directa a Redis
+            settings: Configuración del servicio
         """
         self.query_client = query_client
         self.conversation_client = conversation_client
-        self.settings = settings
+        self.logger = logging.getLogger(__name__)
         
-        # Inicializar CacheManager
-        self.cache_manager = CacheManager(
+        # Initialize cache manager with proper typing
+        self.cache_manager = CacheManager[ConversationHistory](
             redis_conn=redis_conn,
             state_model=ConversationHistory,
             app_settings=settings
         )
         
-        # Inicializar ConversationHelper
+        # Initialize conversation helper
         self.conversation_helper = ConversationHelper(
             cache_manager=self.cache_manager,
             conversation_client=self.conversation_client
         )
         
-        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
-    
     async def handle_simple_chat(
         self,
         payload: Dict[str, Any],
         execution_config,
-        query_config,
-        rag_config,
-        tenant_id: uuid.UUID,
-        session_id: uuid.UUID,
-        task_id: uuid.UUID,
-        agent_id: uuid.UUID
+        query_config=None,
+        rag_config=None
     ) -> ChatResponse:
         """
-        Maneja una solicitud de chat simple con configuración explícita.
+        Maneja una conversación simple sin herramientas.
         
         Args:
             payload: Datos de la solicitud de chat
             execution_config: Configuración de ejecución
-            query_config: Configuración para Query Service
-            rag_config: Configuración para RAG
-            tenant_id: ID del tenant
-            session_id: ID de la sesión
-            task_id: ID de la tarea
-            agent_id: ID del agente
+            query_config: Configuración de consulta (opcional)
+            rag_config: Configuración RAG (opcional)
             
         Returns:
-            Respuesta del chat
+            ChatResponse: Respuesta del chat
         """
-        # Parsear ChatRequest
-        chat_request = ChatRequest.model_validate(payload)
-        chat_request.tenant_id = tenant_id
-        chat_request.session_id = session_id
-        chat_request.task_id = task_id
-        chat_request.agent_id = agent_id
-        
-        # Procesar el chat con la configuración recibida
-        return await self._process_chat(chat_request, execution_config)
-        
-    async def _process_chat(self, chat_request: ChatRequest, execution_config) -> ChatResponse:
+        try:
+            # Validar y parsear el payload
+            chat_request = ChatRequest(**payload)
+            
+            self.logger.info(
+                f"Processing simple chat for tenant {chat_request.tenant_id}, "
+                f"session {chat_request.session_id}, agent {chat_request.agent_id}"
+            )
+            
+            # Procesar el chat
+            return await self._process_chat(chat_request, execution_config, query_config, rag_config)
+            
+        except Exception as e:
+            self.logger.error(f"Error in handle_simple_chat: {str(e)}")
+            raise
+
+    async def _process_chat(self, chat_request: ChatRequest, execution_config, query_config=None, rag_config=None) -> ChatResponse:
         """
         Procesa una solicitud de chat simple.
         
@@ -156,7 +155,15 @@ class SimpleChatHandler:
             )
             
             # 5. Enviar consulta al LLM
-            query_response = await self.query_client.query_simple(payload)
+            query_response = await self.query_client.query_simple(
+                payload=payload,
+                query_config=query_config,
+                rag_config=rag_config,
+                tenant_id=chat_request.tenant_id,
+                session_id=chat_request.session_id,
+                task_id=chat_request.task_id,
+                agent_id=chat_request.agent_id
+            )
             
             # 6. Crear respuesta
             response_message = ChatMessage(

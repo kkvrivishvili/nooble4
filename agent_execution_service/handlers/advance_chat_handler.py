@@ -5,16 +5,18 @@ Maneja conversaciones complejas con tool calls y múltiples iteraciones.
 Delega la gestión de conversaciones al ConversationHelper.
 """
 import asyncio
+import json
 import logging
 import time
 import uuid
 from typing import Dict, Any, List
 
 from common.models.chat_models import ChatRequest, ChatResponse, ChatMessage, ConversationHistory
-from common.clients.redis import CacheManager
-from ..clients.query_client import QueryClient
-from ..clients.conversation_client import ConversationClient
-from .conversation_handler import ConversationHelper
+from common.clients.redis.cache_manager import CacheManager
+from agent_execution_service.handlers.conversation_handler import ConversationHelper
+from agent_execution_service.clients.query_client import QueryClient
+from agent_execution_service.clients.conversation_client import ConversationClient
+from query_service.models.rag_payloads import AdvanceQueryPayload
 
 
 logger = logging.getLogger(__name__)
@@ -32,9 +34,8 @@ class AdvanceChatHandler:
         self,
         query_client: QueryClient,
         conversation_client: ConversationClient,
-        tool_registry,
-        settings,
-        redis_conn
+        redis_conn,
+        settings
     ):
         """
         Inicializa AdvanceChatHandler.
@@ -42,23 +43,21 @@ class AdvanceChatHandler:
         Args:
             query_client: Cliente para consultas al LLM
             conversation_client: Cliente para persistencia de conversaciones
-            tool_registry: Registro de herramientas disponibles
-            settings: Configuración del servicio
             redis_conn: Conexión directa a Redis
+            settings: Configuración del servicio
         """
         self.query_client = query_client
         self.conversation_client = conversation_client
-        self.tool_registry = tool_registry
-        self.settings = settings
+        self.logger = logging.getLogger(__name__)
         
-        # Inicializar CacheManager
-        self.cache_manager = CacheManager(
+        # Initialize cache manager with proper typing
+        self.cache_manager = CacheManager[ConversationHistory](
             redis_conn=redis_conn,
             state_model=ConversationHistory,
             app_settings=settings
         )
         
-        # Inicializar ConversationHelper
+        # Initialize conversation helper
         self.conversation_helper = ConversationHelper(
             cache_manager=self.cache_manager,
             conversation_client=self.conversation_client
@@ -149,7 +148,9 @@ class AdvanceChatHandler:
             final_response, iterations_metadata = await self._execute_react_loop(
                 messages=integrated_messages,
                 chat_request=chat_request,
-                execution_config=execution_config
+                execution_config=execution_config,
+                query_config=query_config,
+                rag_config=rag_config
             )
             
             # 5. Crear respuesta final
@@ -229,7 +230,9 @@ class AdvanceChatHandler:
         self,
         messages: List[ChatMessage],
         chat_request: ChatRequest,
-        execution_config
+        execution_config,
+        query_config,
+        rag_config
     ) -> tuple[Dict[str, Any], List[Dict[str, Any]]]:
         """
         Ejecuta el loop ReAct con herramientas y múltiples iteraciones.
@@ -272,7 +275,15 @@ class AdvanceChatHandler:
                 
                 # Enviar al query service con timeout
                 query_response = await asyncio.wait_for(
-                    self.query_client.query_advance(payload),
+                    self.query_client.query_advance(
+                        payload=payload,
+                        query_config=query_config,
+                        rag_config=rag_config,
+                        tenant_id=chat_request.tenant_id,
+                        session_id=chat_request.session_id,
+                        task_id=chat_request.task_id,
+                        agent_id=chat_request.agent_id
+                    ),
                     timeout=timeout_seconds
                 )
                 
