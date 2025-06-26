@@ -42,7 +42,7 @@ class RAGHandler(BaseHandler):
             
         # Asignar los clientes recibidos como dependencias
         self.embedding_client = embedding_client
-        self.qrant_client = qrant_client
+        self.qdrant_client = qdrant_client
         
         self._logger.info("RAGHandler inicializado con inyección de clientes")
     
@@ -91,7 +91,7 @@ class RAGHandler(BaseHandler):
             )
             
             # 2. Buscar en vector store
-            search_results = await self.qrant_client.search(
+            search_results = await self.qdrant_client.search(
                 query_embedding=query_embedding,
                 collection_ids=rag_config.collection_ids,
                 top_k=rag_config.top_k,
