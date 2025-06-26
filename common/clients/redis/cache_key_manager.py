@@ -40,52 +40,30 @@ class CacheKeyManager:
             
         # Convertir el contexto a string si es una lista
         if isinstance(context, list):
-            context_str = ":".join(str(item) for item in context)
+            context_str = ":".join(context)
         else:
             context_str = str(context)
-            
+        
         return f"{self.prefix}:{self.environment}:{service}:{cache_type}:{context_str}"
-
-    # Métodos específicos para tipos comunes de caché
     
-    def get_history_key(self, tenant_id: uuid.UUID, session_id: uuid.UUID, service_name: Optional[str] = None) -> str:
+    def get_cache_key(self, cache_type: str, context: Union[str, List[str]], service_name: Optional[str] = None) -> str:
         """
-        Obtiene la clave para el historial de conversación.
-        Ej: nooble4:dev:agent_execution:history:tenant-uuid:session-uuid
-        """
-        service = service_name or self.service_name or "agent_execution"
-        return self._build_cache_key(service, "history", [str(tenant_id), str(session_id)])
-    
-    def get_config_key(self, entity_id: uuid.UUID, config_type: str, service_name: Optional[str] = None) -> str:
-        """
-        Obtiene la clave para configuraciones.
-        Ej: nooble4:dev:user_management:config:user:user-uuid
-        """
-        service = service_name or self.service_name or "user_management"
-        return self._build_cache_key(service, "config", [config_type, str(entity_id)])
-    
-    def get_embedding_key(self, document_id: str, service_name: Optional[str] = None) -> str:
-        """
-        Obtiene la clave para embeddings.
-        Ej: nooble4:dev:embedding_service:embedding:doc-123
-        """
-        service = service_name or self.service_name or "embedding_service"
-        return self._build_cache_key(service, "embedding", document_id)
-    
-    def get_custom_key(self, cache_type: str, context: Union[str, List[str]], service_name: Optional[str] = None) -> str:
-        """
-        Obtiene una clave personalizada para cualquier tipo de caché.
+        Obtiene una clave de caché genérica para cualquier tipo de datos.
         
         Args:
-            cache_type: Tipo de caché personalizado
+            cache_type: Tipo de caché (ej: "history", "config", "embedding", "session", etc.)
             context: Contexto específico (string o lista de strings)
-            service_name: Nombre del servicio (opcional)
+            service_name: Nombre del servicio (opcional, usa el predeterminado si no se proporciona)
             
         Returns:
-            La clave de caché formateada
-        """
-        service = service_name or self.service_name
-        if not service:
-            raise ValueError("Se requiere service_name para claves personalizadas")
+            Clave de caché estandarizada
             
+        Ejemplos:
+            get_cache_key("history", ["tenant-uuid", "session-uuid", "agent-uuid"])
+            -> "nooble4:dev:agent_execution:history:tenant-uuid:session-uuid:agent-uuid"
+            
+            get_cache_key("config", "user-uuid")
+            -> "nooble4:dev:agent_execution:config:user-uuid"
+        """
+        service = service_name or self.service_name or "agent_execution"
         return self._build_cache_key(service, cache_type, context)
