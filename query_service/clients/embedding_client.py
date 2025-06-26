@@ -11,7 +11,6 @@ from uuid import UUID, uuid4
 
 from common.models import DomainAction, DomainActionResponse
 from common.models.config_models import RAGConfig
-from common.models.chat_models import EmbeddingRequest
 from common.clients import BaseRedisClient
 
 class EmbeddingClient:
@@ -57,13 +56,10 @@ class EmbeddingClient:
         Returns:
             DomainActionResponse con los embeddings
         """
-        # Crear payload usando rag_config
-        embedding_request = EmbeddingRequest(
-            texts=texts,
-            model=rag_config.embedding_model.model_name,
-            dimensions=rag_config.embedding_dimensions,
-            encoding_format=rag_config.encoding_format
-        )
+        # Payload solo con los textos (datos puros)
+        payload = {
+            "texts": texts  # Solo los datos
+        }
         
         # Crear DomainAction con correlation_id para pseudo-sync
         action = DomainAction(
@@ -77,7 +73,8 @@ class EmbeddingClient:
             origin_service="query",
             correlation_id=uuid4(),  # Para pseudo-sync
             trace_id=trace_id,
-            data=embedding_request.model_dump()
+            rag_config=rag_config,  # Config en el header
+            data=payload
         )
         
         self.logger.info(

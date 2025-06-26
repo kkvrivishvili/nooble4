@@ -115,37 +115,47 @@ class EmbeddingService(BaseService):
         """
         Maneja la acción embedding.generate para múltiples textos.
         """
-        # Validar y parsear payload
-        payload = EmbeddingRequest.model_validate(action.data)
+        # Validar que tenemos rag_config
+        if not action.rag_config:
+            raise ValueError("rag_config es requerido para embedding.generate")
+        
+        # Extraer textos del payload (solo datos)
+        texts = action.data.get("texts", [])
+        if not texts:
+            raise ValueError("texts es requerido en el payload")
         
         # Convertir input a lista si es string
-        texts = [payload.input] if isinstance(payload.input, str) else payload.input
+        if isinstance(texts, str):
+            texts = [texts]
+        elif not isinstance(texts, list):
+            raise ValueError("texts debe ser una lista de strings")
+        
+        # Extraer configuración del rag_config
+        rag_config = action.rag_config
+        model = rag_config.embedding_model.model_name
+        dimensions = rag_config.embedding_dimensions
+        encoding_format = rag_config.encoding_format
         
         # Validar los textos
         validation_result = await self.validation_handler.validate_texts(
             texts=texts,
-            model=payload.model.value,
+            model=model,
             tenant_id=action.tenant_id
         )
         
         if not validation_result["is_valid"]:
             raise ValueError(f"Validación fallida: {validation_result['messages'][0]}")
         
-        # Extraer rag_config del DomainAction si existe
-        # Esto sigue el flujo arquitectónico correcto donde las configuraciones
-        # viajan explícitamente en el DomainAction
-        rag_config = action.rag_config.dict() if action.rag_config else None
-        
-        # Generar embeddings con la configuración dinámica
+        # Generar embeddings con la configuración del rag_config
         result = await self.openai_handler.generate_embeddings(
             texts=texts,
-            model=payload.model.value,
-            dimensions=payload.dimensions,
-            encoding_format=payload.encoding_format,
+            model=model,
+            dimensions=dimensions,
+            encoding_format=encoding_format,
             tenant_id=action.tenant_id,
             agent_id=action.agent_id,
             trace_id=action.trace_id,
-            rag_config=rag_config
+            rag_config=rag_config.dict() if rag_config else None
         )
         
         # Construir respuesta
@@ -164,45 +174,48 @@ class EmbeddingService(BaseService):
     
     async def _handle_generate_query(self, action: DomainAction) -> Dict[str, Any]:
         """
-        Maneja la acción embedding.generate_query para consulta única.
+        Maneja la acción embedding.generate_query para una consulta única.
         """
-        # Validar y parsear payload
-        payload = EmbeddingRequest.model_validate(action.data)
+        # Validar que tenemos rag_config
+        if not action.rag_config:
+            raise ValueError("rag_config es requerido para embedding.generate_query")
         
-        # Para query, el input debe ser un string
-        if isinstance(payload.input, list):
-            query_text = payload.input[0] if payload.input else ""
-        else:
-            query_text = payload.input
+        # Extraer query_text del payload (solo datos)
+        query_text = action.data.get("query_text", "")
+        if not query_text:
+            raise ValueError("query_text es requerido en el payload")
         
-        # Extraer configuración RAG del DomainAction
-        rag_config = action.rag_config.dict() if action.rag_config else None
+        # Extraer configuración del rag_config
+        rag_config = action.rag_config
+        model = rag_config.embedding_model.model_name
+        dimensions = rag_config.embedding_dimensions
+        encoding_format = rag_config.encoding_format
         
-        # Generar embedding con configuración dinámica
+        # Generar embedding con configuración del rag_config
         result = await self.openai_handler.generate_embeddings(
             texts=[query_text],
-            model=payload.model.value,
-            dimensions=payload.dimensions,
-            encoding_format=payload.encoding_format,
+            model=model,
+            dimensions=dimensions,
+            encoding_format=encoding_format,
             tenant_id=action.tenant_id,
             agent_id=action.agent_id,
             trace_id=action.trace_id,
-            rag_config=rag_config
+            rag_config=rag_config.dict() if rag_config else None
         )
         
-        # Para query única, retornar solo el primer embedding
-        response_data = {
-            "embedding": result["embeddings"][0] if result["embeddings"] else [],
-            "model": result["model"],
-            "dimensions": result["dimensions"],
-            "usage": {
-                "prompt_tokens": result.get("prompt_tokens", 0),
-                "completion_tokens": 0,
-                "total_tokens": result.get("total_tokens", 0)
-            }
-        }
+        # Construir respuesta
+        response = EmbeddingResponse(
+            embeddings=result["embeddings"],
+            model=result["model"],
+            dimensions=result["dimensions"],
+            usage=TokenUsage(
+                prompt_tokens=result.get("prompt_tokens", 0),
+                completion_tokens=0,  # Embeddings no tienen completion tokens
+                total_tokens=result.get("total_tokens", 0)
+            )
+        )
         
-        return response_data
+        return response.model_dump()
     
     async def _handle_batch_process(self, action: DomainAction) -> Dict[str, Any]:
         """

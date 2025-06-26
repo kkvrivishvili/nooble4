@@ -166,8 +166,7 @@ class QueryClient:
         Realiza búsqueda RAG cuando se invoca la tool "knowledge".
         """
         payload = {
-            "query_text": query_text,
-            "rag_config": rag_config
+            "query_text": query_text  # Solo datos, no configuración
         }
 
         action = DomainAction(
@@ -179,6 +178,7 @@ class QueryClient:
             task_id=task_id,
             agent_id=agent_id,
             origin_service=self.redis_client.service_name,
+            rag_config=rag_config,  # Config en el header
             data=payload
         )
 
