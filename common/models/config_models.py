@@ -193,5 +193,9 @@ class RAGConfig(BaseModel):
         ge=0,
         description="Número máximo de reintentos para la API de OpenAI (None usa el valor por defecto del servicio)"
     )
+    max_text_length: Optional[int] = Field(
+        default=None,
+        description="Longitud máxima del texto para el embedding, si se requiere truncamiento."
+    )
     
     model_config = {"extra": "forbid"}

@@ -30,24 +30,20 @@ class OpenAIHandler(BaseHandler):
         
         Args:
             app_settings: Configuración global de la aplicación
-            openai_client: Cliente para comunicación con OpenAI API
             direct_redis_conn: Conexión Redis directa (opcional)
         """
         super().__init__(app_settings, direct_redis_conn)
         
         # Validar que el cliente esté presente
-        if not openai_client:
-            raise ValueError("openai_client es requerido para OpenAIHandler")
-        
-        # Asignar el cliente recibido como dependencia
-        self.openai_client = openai_client
-        
-        # Configuración por defecto
-        self.default_model = self.app_settings.openai_default_model
-        self.default_dimensions = self.app_settings.default_dimensions_by_model.get(
-            self.default_model, 
-            1536  # Default para text-embedding-3-small
+        self.app_settings = app_settings
+        self.openai_client = OpenAIClient(
+            api_key=self.app_settings.openai_api_key,
+            timeout=self.app_settings.openai_timeout_seconds,
+            max_retries=self.app_settings.openai_max_retries,
+            base_url=self.app_settings.openai_base_url,
         )
+        
+
         
         self._logger.info("OpenAIHandler inicializado con inyección de cliente")
     
@@ -100,8 +96,8 @@ class OpenAIHandler(BaseHandler):
             request_max_retries = None
 
             if rag_config:
-                request_timeout = rag_config.get("timeout")
-                request_max_retries = rag_config.get("max_retries")
+                request_timeout = rag_config.timeout
+                request_max_retries = rag_config.max_retries
                 self._logger.debug(
                     f"Usando configuración de RAG para la solicitud: timeout={request_timeout}, max_retries={request_max_retries}"
                 )
