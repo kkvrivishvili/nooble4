@@ -5,6 +5,7 @@ Configura y ejecuta el servicio con FastAPI y el QueryWorker.
 """
 
 import asyncio
+from common.utils.logging import init_logging
 import logging
 from contextlib import asynccontextmanager
 from typing import Optional, List
@@ -220,6 +221,7 @@ async def root():
 
 
 if __name__ == "__main__":
+    init_logging(settings.log_level, settings.service_name)
     uvicorn.run(
         "query_service.main:app",
         host="0.0.0.0",

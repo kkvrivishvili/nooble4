@@ -2,6 +2,7 @@
 Punto de entrada principal para Agent Execution Service.
 """
 import asyncio
+from common.utils.logging import init_logging
 import logging
 import signal
 from contextlib import asynccontextmanager
@@ -200,6 +201,7 @@ def setup_signal_handlers():
         signal.signal(signal.SIGINT, lambda s, f: asyncio.create_task(shutdown_handler()))
 
 if __name__ == "__main__":
+    init_logging(settings.log_level, settings.service_name)
     # Configurar signal handlers
     setup_signal_handlers()
     
