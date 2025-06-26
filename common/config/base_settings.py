@@ -55,11 +55,6 @@ class CommonAppSettings(BaseSettings):
     # Groq API Settings (configurables desde .env)
     groq_api_key: str = Field(..., description="API Key para Groq (usar variable de entorno QUERY_GROQ_API_KEY)")
     
-    # Qdrant Settings
-    qdrant_url: str = Field(default="http://localhost:6333", description="URL de Qdrant")
-    qdrant_api_key: Optional[str] = Field(default=None, description="API key de Qdrant")
-
-    
     # CORS
     cors_origins: List[str] = Field(default=["*"], description="Orígenes permitidos para CORS.")
 
