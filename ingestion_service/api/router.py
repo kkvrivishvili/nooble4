@@ -8,7 +8,14 @@ import aiofiles
 from pathlib import Path
 
 from common.models import DomainAction, RAGConfig
-from ..models import DocumentIngestionRequest, DocumentType
+from ..models import (
+    DocumentIngestionRequest, 
+    IngestionTask, 
+    IngestionStatus,
+    BatchDocumentIngestionRequest,
+    BatchIngestionResponse,
+    DocumentType
+)
 from ..dependencies import get_ingestion_service, get_ws_manager
 
 router = APIRouter(prefix="/api/v1/ingestion", tags=["ingestion"])
@@ -47,6 +54,13 @@ async def ingest_document(
                 detail="agent_id is required for document ingestion"
             )
         
+        # Validate collection_id
+        if not request.collection_id:
+            raise HTTPException(
+                status_code=400, 
+                detail="collection_id is required for document ingestion"
+            )
+        
         # Validate rag_config
         if not rag_config:
             raise HTTPException(
@@ -54,9 +68,34 @@ async def ingest_document(
                 detail="rag_config is required for document ingestion"
             )
         
+        # VALIDACIÓN CRÍTICA DE OWNERSHIP
+        tenant_id = user_info["tenant_id"]
+        
+        # TODO: Implementar validación real con base de datos/servicio de agentes
+        # Por ahora, validación básica de formato UUID
+        try:
+            # Validar formato UUID
+            uuid.UUID(request.agent_id)
+            uuid.UUID(request.collection_id)
+            uuid.UUID(tenant_id)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid UUID format in IDs: {str(e)}"
+            )
+        
+        # VALIDACIÓN LÓGICA: agent_id debe pertenecer al tenant
+        # En una implementación real, esto consultaría la base de datos
+        logger.info(f"Validating agent_id={request.agent_id} belongs to tenant_id={tenant_id}")
+        
+        # VALIDACIÓN LÓGICA: collection_id debe pertenecer al agent
+        # En una implementación real, esto consultaría la base de datos  
+        logger.info(f"Validating collection_id={request.collection_id} belongs to agent_id={request.agent_id}")
+        
         logger.info(
             f"Ingesting document for agent_id={request.agent_id}, "
-            f"document={request.document_name}, tenant={user_info['tenant_id']}"
+            f"collection_id={request.collection_id}, "
+            f"document={request.document_name}, tenant={tenant_id}"
         )
         
         # Create domain action

@@ -51,7 +51,7 @@ class DocumentProcessorHandler(BaseHandler):
                     tenant_id=request.tenant_id,
                     agent_id=agent_id,
                     collection_id=request.collection_id,
-                    text=node.get_content(),
+                    content=node.get_content(),
                     chunk_index=idx,
                     metadata={
                         **request.metadata,

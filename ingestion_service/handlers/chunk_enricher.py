@@ -1,5 +1,5 @@
 import re
-from typing import List, Set
+from typing import List, Set, Dict
 from collections import Counter
 import spacy
 import nltk
@@ -39,22 +39,22 @@ class ChunkEnricherHandler(BaseHandler):
         """Enrich chunks with keywords and tags"""
         for chunk in chunks:
             # Extract keywords
-            keywords = await self._extract_keywords(chunk.text)
+            keywords = await self._extract_keywords(chunk.content)
             chunk.keywords = list(keywords)[:10]  # Top 10 keywords
             
             # Generate tags based on content analysis
-            tags = await self._generate_tags(chunk.text, chunk.metadata)
+            tags = await self._generate_tags(chunk.content, chunk.metadata)
             chunk.tags = list(tags)
             
         return chunks
     
-    async def _extract_keywords(self, text: str) -> List[str]:
-        """Extract keywords from text"""
+    async def _extract_keywords(self, content: str) -> List[str]:
+        """Extract keywords from content"""
         keywords = set()
         
         if self.use_spacy:
             # Use spaCy for better extraction
-            doc = self.nlp(text)
+            doc = self.nlp(content)
             
             # Extract named entities
             for ent in doc.ents:
@@ -68,9 +68,9 @@ class ChunkEnricherHandler(BaseHandler):
         
         # Basic keyword extraction
         # Clean and tokenize
-        text_lower = text.lower()
-        text_clean = re.sub(r'[^\w\s]', ' ', text_lower)
-        tokens = word_tokenize(text_clean) if 'word_tokenize' in globals() else text_clean.split()
+        content_lower = content.lower()
+        content_clean = re.sub(r'[^\w\s]', ' ', content_lower)
+        tokens = word_tokenize(content_clean) if 'word_tokenize' in globals() else content_clean.split()
         
         # Filter tokens
         filtered_tokens = [
@@ -84,15 +84,15 @@ class ChunkEnricherHandler(BaseHandler):
         keywords.update(common_words)
         
         # Extract technical terms (camelCase, snake_case, etc.)
-        technical_terms = re.findall(r'\b[A-Z][a-z]+(?:[A-Z][a-z]+)*\b', text)  # CamelCase
-        technical_terms += re.findall(r'\b\w+_\w+\b', text)  # snake_case
-        technical_terms += re.findall(r'\b\w+-\w+\b', text)  # kebab-case
+        technical_terms = re.findall(r'\b[A-Z][a-z]+(?:[A-Z][a-z]+)*\b', content)  # CamelCase
+        technical_terms += re.findall(r'\b\w+_\w+\b', content)  # snake_case
+        technical_terms += re.findall(r'\b\w+-\w+\b', content)  # kebab-case
         
         keywords.update([term.lower() for term in technical_terms])
         
         return sorted(list(keywords))
     
-    async def _generate_tags(self, text: str, metadata: Dict) -> Set[str]:
+    async def _generate_tags(self, content: str, metadata: Dict) -> Set[str]:
         """Generate tags based on content analysis"""
         tags = set()
         
@@ -112,9 +112,9 @@ class ChunkEnricherHandler(BaseHandler):
             'data': ['data', 'analytics', 'etl', 'pipeline', 'processing', 'ml', 'ai']
         }
         
-        text_lower = text.lower()
+        content_lower = content.lower()
         for tag, keywords in tech_keywords.items():
-            if any(keyword in text_lower for keyword in keywords):
+            if any(keyword in content_lower for keyword in keywords):
                 tags.add(tag)
         
         # Document type tags
@@ -122,11 +122,11 @@ class ChunkEnricherHandler(BaseHandler):
             tags.add(metadata['document_type'])
         
         # Language/format detection
-        if any(term in text_lower for term in ['```', 'import', 'def ', 'function']):
+        if any(term in content_lower for term in ['```', 'import', 'def ', 'function']):
             tags.add('code')
-        if any(term in text_lower for term in ['chapter', 'section', 'introduction', 'conclusion']):
+        if any(term in content_lower for term in ['chapter', 'section', 'introduction', 'conclusion']):
             tags.add('documentation')
-        if any(term in text_lower for term in ['step 1', 'how to', 'tutorial', 'guide']):
+        if any(term in content_lower for term in ['step 1', 'how to', 'tutorial', 'guide']):
             tags.add('tutorial')
             
         return tags

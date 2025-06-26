@@ -92,7 +92,7 @@ class QdrantHandler(BaseHandler):
                 "tenant_id": chunk.tenant_id,
                 "agent_id": chunk.agent_id,  # NUEVO
                 "collection_id": chunk.collection_id,
-                "text": chunk.text,
+                "content": chunk.content,  # CAMBIO CRÍTICO: text → content
                 "chunk_index": chunk.chunk_index,
                 "keywords": chunk.keywords,
                 "tags": chunk.tags,

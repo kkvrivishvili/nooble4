@@ -43,36 +43,44 @@ class QdrantClient:
         filters: Optional[Dict[str, Any]] = None
     ) -> List[RAGChunk]:
         """
-        Realiza búsqueda vectorial en las colecciones.
+        Realiza búsqueda vectorial en la colección unificada "documents".
         
         Args:
             agent_id: ID del agente - OBLIGATORIO para filtrado
+            collection_ids: IDs de colecciones para filtro virtual (no nombres físicos)
         
         Returns:
             Lista de RAGChunk directamente
         """
-        all_results = []
-        
         # Validar agent_id obligatorio
         if not agent_id:
             raise ValueError("agent_id is required for vector search")
         
-        # Construir filtro con tenant_id Y agent_id
-        qdrant_filter = Filter(
-            must=[
-                FieldCondition(
-                    key="tenant_id",
-                    match=MatchValue(value=str(tenant_id))
-                ),
-                # Filtro obligatorio por agent_id
-                FieldCondition(
-                    key="agent_id",
-                    match=MatchValue(value=str(agent_id))
-                )
-            ]
-        )
+        # Construir filtro con tenant_id, agent_id Y collection_ids virtuales
+        must_conditions = [
+            FieldCondition(
+                key="tenant_id",
+                match=MatchValue(value=str(tenant_id))
+            ),
+            # Filtro obligatorio por agent_id
+            FieldCondition(
+                key="agent_id",
+                match=MatchValue(value=str(agent_id))
+            )
+        ]
         
-        self.logger.info(f"Searching vectors for agent_id={agent_id}, tenant_id={tenant_id}")
+        # CAMBIO CRÍTICO: collection_ids como filtro virtual, no colecciones físicas
+        if collection_ids:
+            must_conditions.append(
+                FieldCondition(
+                    key="collection_id",
+                    match=MatchValue(any=collection_ids)  # Filtro virtual por collection_id
+                )
+            )
+        
+        qdrant_filter = Filter(must=must_conditions)
+        
+        self.logger.info(f"Searching vectors for agent_id={agent_id}, tenant_id={tenant_id}, collection_ids={collection_ids}")
         
         # Agregar filtros adicionales si existen
         if filters and filters.get("document_ids"):
@@ -83,36 +91,37 @@ class QdrantClient:
                 )
             )
         
-        # Buscar en cada colección
-        for collection_id in collection_ids:
-            try:
-                results = await self.client.search(
-                    collection_name=collection_id,
-                    query_vector=query_embedding,
-                    query_filter=qdrant_filter,
-                    limit=top_k,
-                    score_threshold=similarity_threshold,
-                    with_payload=True
+        # CAMBIO CRÍTICO: Buscar solo en colección unificada "documents"
+        try:
+            results = await self.client.search(
+                collection_name="documents",  # Colección única
+                query_vector=query_embedding,
+                query_filter=qdrant_filter,
+                limit=top_k,
+                score_threshold=similarity_threshold,
+                with_payload=True
+            )
+            
+            # Convertir a RAGChunk CON agent_id y collection_id del payload
+            all_results = []
+            for hit in results:
+                chunk = RAGChunk(
+                    chunk_id=str(hit.id),
+                    content=hit.payload.get("content", ""),  # Ya usa 'content' 
+                    document_id=UUID(hit.payload.get("document_id", str(UUID(int=0)))),
+                    collection_id=hit.payload.get("collection_id", ""),  # Del payload, no parámetro
+                    similarity_score=hit.score,
+                    metadata={
+                        **hit.payload.get("metadata", {}),
+                        "agent_id": hit.payload.get("agent_id", agent_id),  # Incluir agent_id
+                        "tenant_id": hit.payload.get("tenant_id", str(tenant_id))
+                    }
                 )
+                all_results.append(chunk)
                 
-                # Convertir a RAGChunk CON agent_id
-                for hit in results:
-                    chunk = RAGChunk(
-                        chunk_id=str(hit.id),
-                        content=hit.payload.get("content", ""),
-                        document_id=UUID(hit.payload.get("document_id", str(UUID(int=0)))),
-                        collection_id=collection_id,
-                        similarity_score=hit.score,
-                        metadata={
-                            **hit.payload.get("metadata", {}),
-                            "agent_id": hit.payload.get("agent_id", agent_id)  # Incluir agent_id
-                        }
-                    )
-                    all_results.append(chunk)
-                    
-            except Exception as e:
-                self.logger.error(f"Error buscando en {collection_id} para agent_id={agent_id}: {e}")
-                continue
+        except Exception as e:
+            self.logger.error(f"Error searching in documents collection for agent_id={agent_id}: {e}")
+            return []
         
         # Ordenar por score
         all_results.sort(key=lambda x: x.similarity_score, reverse=True)

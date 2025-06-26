@@ -178,7 +178,7 @@ class IngestionService(BaseService):
     ):
         """Send chunks to embedding service"""
         # Prepare texts for embedding
-        texts = [chunk.text for chunk in chunks]
+        texts = [chunk.content for chunk in chunks]  # CAMBIO CRÍTICO: text → content
         chunk_ids = [chunk.chunk_id for chunk in chunks]
         
         # NUEVO: Extraer configuración del embedding desde rag_config
