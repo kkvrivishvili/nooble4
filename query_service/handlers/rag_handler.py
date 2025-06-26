@@ -91,15 +91,27 @@ class RAGHandler(BaseHandler):
             )
             
             # 2. Buscar en vector store CON agent_id obligatorio
-            search_results = await self.qdrant_client.search(
-                query_embedding=query_embedding,
-                collection_ids=rag_config.collection_ids,
-                top_k=rag_config.top_k,
-                similarity_threshold=rag_config.similarity_threshold,
-                tenant_id=tenant_id,
-                agent_id=str(agent_id),  # NUEVO: agent_id obligatorio para filtrado
-                filters={"document_ids": rag_config.document_ids} if rag_config.document_ids else None
-            )
+            try:
+                search_results = await self.qdrant_client.search(
+                    query_embedding=query_embedding,
+                    collection_ids=rag_config.collection_ids,
+                    top_k=rag_config.top_k,
+                    similarity_threshold=rag_config.similarity_threshold,
+                    tenant_id=tenant_id,
+                    agent_id=str(agent_id),  # NUEVO: agent_id obligatorio para filtrado
+                    filters={"document_ids": rag_config.document_ids} if rag_config.document_ids else None
+                )
+            except Exception as e:
+                self._logger.error(
+                    f"Error during vector search for query_id {query_id}: {e}",
+                    extra={
+                        "query_id": query_id,
+                        "tenant_id": str(tenant_id),
+                        "agent_id": str(agent_id)
+                    },
+                    exc_info=True
+                )
+                raise ExternalServiceError(f"Failed to perform vector search in Qdrant: {e}")
             
             # 3. Convertir resultados a RAGChunk
             chunks = []
