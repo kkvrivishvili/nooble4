@@ -11,7 +11,7 @@ redis==5.0.0
 requests==2.32.4
 
 # Vector Database client
-qdrant-client==1.14.3
+qdrant-client==1.9.1
 
 # Document Processing and NLP
 llama-index-core==0.12.42
