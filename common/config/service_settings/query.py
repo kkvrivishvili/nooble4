@@ -28,5 +28,5 @@ class QueryServiceSettings(CommonAppSettings):
     search_timeout_seconds: int = Field(default=10, description="Timeout para búsquedas vectoriales")
 
     # Worker Settings
-    worker_count: int = Field(default=2, description="Número de workers para procesar queries")
+    worker_count: int = Field(default=1, description="Número de workers para procesar queries")
     worker_sleep_seconds: float = Field(1.0, description="Tiempo de espera entre polls para los workers de ejecución")

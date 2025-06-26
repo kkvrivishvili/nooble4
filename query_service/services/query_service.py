@@ -22,7 +22,7 @@ from ..handlers.advance_handler import AdvanceHandler
 from ..handlers.rag_handler import RAGHandler
 from ..clients.embedding_client import EmbeddingClient
 from ..clients.groq_client import GroqClient
-from ..clients.vector_client import VectorClient
+from ..clients.qdrant_client import QdrantClient
 
 
 class QueryService(BaseService):
@@ -47,9 +47,9 @@ class QueryService(BaseService):
         self.embedding_client = EmbeddingClient(service_redis_client)
         
         # 2. Cliente de vectores para búsqueda en Qdrant
-        self.vector_client = VectorClient(
-            base_url=str(app_settings.qdrant_url) if hasattr(app_settings, 'qdrant_url') and app_settings.qdrant_url else "http://localhost:6333",
-            timeout=app_settings.search_timeout_seconds
+        self.qdrant_client = QdrantClient(
+            url=str(app_settings.qdrant_url) if hasattr(app_settings, 'qdrant_url') and app_settings.qdrant_url else "http://localhost:6333",
+            api_key=app_settings.qdrant_api_key
         )
         
         # 3. Cliente de Groq para consultas LLM
@@ -63,7 +63,7 @@ class QueryService(BaseService):
         self.simple_handler = SimpleHandler(
             app_settings=app_settings,
             embedding_client=self.embedding_client,
-            vector_client=self.vector_client,
+            qdrant_client=self.qdrant_client,
             groq_client=self.groq_client,
             direct_redis_conn=direct_redis_conn
         )
@@ -77,7 +77,7 @@ class QueryService(BaseService):
         self.rag_handler = RAGHandler(
             app_settings=app_settings,
             embedding_client=self.embedding_client,
-            vector_client=self.vector_client,
+            qdrant_client=self.qdrant_client,
             direct_redis_conn=direct_redis_conn
         )
         
