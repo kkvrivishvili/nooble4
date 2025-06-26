@@ -13,7 +13,6 @@ from common.utils import init_logging
 from common.clients import RedisManager, BaseRedisClient
 from common.config import IngestionServiceSettings
 
-from .config import get_settings
 from .workers import IngestionWorker
 from .api import router
 from .dependencies import set_ingestion_service, set_ws_manager
@@ -33,7 +32,7 @@ async def lifespan(app: FastAPI):
     global redis_manager, redis_client, ingestion_worker, settings
     
     # Startup
-    settings = get_settings()
+    settings = IngestionServiceSettings()
     init_logging(settings.log_level, settings.service_name)
     logger = logging.getLogger(__name__)
     
@@ -136,7 +135,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, handle_shutdown)
     
     # Run the service
-    settings = get_settings()
+    settings = IngestionServiceSettings()
     
     uvicorn.run(
         "ingestion_service.main:app",

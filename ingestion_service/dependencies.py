@@ -33,10 +33,3 @@ def get_ws_manager() -> WebSocketManager:
     if _ws_manager is None:
         raise RuntimeError("WebSocketManager not initialized")
     return _ws_manager
-
-
-# ingestion_service/config/__init__.py
-"""Configuration for Ingestion Service"""
-from .settings import get_settings
-
-__all__ = ["get_settings"]
