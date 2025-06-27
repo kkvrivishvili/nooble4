@@ -3,40 +3,49 @@ networks:
     driver: bridge
 
 services:
-  redis_database:
-    networks:
-      - nooble-network
-    build:
-      context: ./redis_database
-      dockerfile: Dockerfile
+  # Redis Database
+  redis:
+    container_name: nooble4-redis
+    image: redis:7-alpine
+    command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory ${REDIS_MAX_MEMORY:-256mb} --maxmemory-policy allkeys-lru
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${REDIS_PORT}:6379"
     volumes:
       - redis_data:/data
     environment:
       - REDIS_PASSWORD=${REDIS_PASSWORD}
       - REDIS_MAX_MEMORY=${REDIS_MAX_MEMORY:-256mb}
-      - REDIS_MAX_MEMORY_POLICY=allkeys-lru
-
-  qdrant_database:
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
     networks:
       - nooble-network
-    image: qdrant/qdrant:v1.7.4
+
+  # Qdrant Vector Database
+  qdrant:
     container_name: nooble4-qdrant
+    image: qdrant/qdrant:${QDRANT_VERSION:-v1.7.4}
     ports:
-      - "${QDRANT_PORT:-6333}:6333"
-      - "${QDRANT_HTTP_PORT:-6334}:6334"
+      - "${QDRANT_PORT}:6333"
+      - "${QDRANT_HTTP_PORT}:6334"
     volumes:
       - qdrant_data:/qdrant/storage
     environment:
       - QDRANT_API_KEY=${QDRANT_API_KEY}
-      - QDRANT_ALLOW_RECOVERY_MODE=true
+      - QDRANT_ALLOW_RECOVERY_MODE=${QDRANT_ALLOW_RECOVERY_MODE:-true}
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:6333/readyz"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 20s
+    restart: unless-stopped
+    networks:
+      - nooble-network
 
   postgres:
     networks:
@@ -115,30 +124,30 @@ services:
       retries: 3
       start_period: 20s
 
-  agent_orchestrator_service:
-    networks:
-      - nooble-network
-    build:
-      context: .
-      dockerfile: ./agent_orchestrator_service/Dockerfile
-    container_name: nooble4-agent-orchestrator
-    ports:
-      - "${AGENT_ORCHESTRATOR_PORT:-8001}:8001"
-    depends_on:
-      redis_database:
-        condition: service_healthy
-    volumes:
-      - ./common:/app/common
-      - ./agent_orchestrator_service:/app
-    environment:
-      - SERVICE_NAME=agent_orchestrator
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
+  # agent_orchestrator_service:
+  #   networks:
+  #     - nooble-network
+  #   build:
+  #     context: .
+  #     dockerfile: ./agent_orchestrator_service/Dockerfile
+  #   container_name: nooble4-agent-orchestrator
+  #   ports:
+  #     - "${AGENT_ORCHESTRATOR_PORT:-8001}:8001"
+  #   depends_on:
+  #     redis_database:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./common:/app/common
+  #     - ./agent_orchestrator_service:/app
+  #   environment:
+  #     - SERVICE_NAME=agent_orchestrator
+  #     - LOG_LEVEL=${LOG_LEVEL:-INFO}
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 20s
 
   ingestion_service:
     networks:
@@ -167,30 +176,30 @@ services:
       retries: 3
       start_period: 20s
 
-  conversation_service:
-    networks:
-      - nooble-network
-    build:
-      context: .
-      dockerfile: ./conversation_service/Dockerfile
-    container_name: nooble4-conversation-service
-    ports:
-      - "${CONVERSATION_SERVICE_PORT:-8004}:8004"
-    depends_on:
-      redis_database:
-        condition: service_healthy
-    volumes:
-      - ./common:/app/common
-      - ./conversation_service:/app
-    environment:
-      - SERVICE_NAME=conversation_service
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
+  # conversation_service:
+  #   networks:
+  #     - nooble-network
+  #   build:
+  #     context: .
+  #     dockerfile: ./conversation_service/Dockerfile
+  #   container_name: nooble4-conversation-service
+  #   ports:
+  #     - "${CONVERSATION_SERVICE_PORT:-8004}:8004"
+  #   depends_on:
+  #     redis_database:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./common:/app/common
+  #     - ./conversation_service:/app
+  #   environment:
+  #     - SERVICE_NAME=conversation_service
+  #     - LOG_LEVEL=${LOG_LEVEL:-INFO}
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 20s
 
   agent_execution_service:
     networks:
@@ -207,30 +216,30 @@ services:
     env_file:
       - ./.env
 
-  agent_management_service:
-    networks:
-      - nooble-network
-    build:
-      context: .
-      dockerfile: ./agent_management_service/Dockerfile
-    container_name: nooble4-agent-management
-    ports:
-      - "${AGENT_MANAGEMENT_PORT:-8003}:8003"
-    depends_on:
-      redis_database:
-        condition: service_healthy
-    volumes:
-      - ./common:/app/common
-      - ./agent_management_service:/app
-    environment:
-      - SERVICE_NAME=agent_management
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
+  # agent_management_service:
+  #   networks:
+  #     - nooble-network
+  #   build:
+  #     context: .
+  #     dockerfile: ./agent_management_service/Dockerfile
+  #   container_name: nooble4-agent-management
+  #   ports:
+  #     - "${AGENT_MANAGEMENT_PORT:-8003}:8003"
+  #   depends_on:
+  #     redis_database:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./common:/app/common
+  #     - ./agent_management_service:/app
+  #   environment:
+  #     - SERVICE_NAME=agent_management
+  #     - LOG_LEVEL=${LOG_LEVEL:-INFO}
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 20s
 
   embedding_service:
     networks:
@@ -256,9 +265,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 20s
-
-  # Keycloak service with PostgreSQL backend
-  # Configuration moved to the more complete definition below
 
   kong-migrations:
     build:
