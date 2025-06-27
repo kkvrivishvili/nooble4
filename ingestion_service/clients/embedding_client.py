@@ -8,7 +8,7 @@ import logging
 from common.models.actions import DomainAction
 from common.clients.base_redis_client import BaseRedisClient
 from common.config.base_settings import CommonAppSettings
-from common.models.embeddings import RAGConfig
+from common.models.config_models import RAGConfig
 
 
 class EmbeddingClient:
