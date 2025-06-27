@@ -78,11 +78,12 @@ services:
   # ==================== INFRASTRUCTURE ====================
 
   keycloak:
-    image: quay.io/keycloak/keycloak:23.0.1
+    build:
+      context: ./keycloak_auth
+      dockerfile: Dockerfile
     container_name: nooble4-keycloak
     networks:
       - nooble-network
-    command: ["start-dev"]
     environment:
       - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN}
       - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
@@ -93,7 +94,7 @@ services:
       - KC_HTTP_ENABLED=true
       - KC_HOSTNAME=${KEYCLOAK_HOSTNAME}
       - KC_HOSTNAME_STRICT=false
-      - KC_HTTP_PORT=${KEYCLOAK_PORT}
+      - KC_HTTP_PORT=8080
       - KC_PROXY=edge
     ports:
       - "${KEYCLOAK_PORT}:8080"
