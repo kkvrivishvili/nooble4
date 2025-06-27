@@ -1,8 +1,7 @@
-# Use the official Konga image as a base
-FROM pantsel/konga
+# Use a specific version of Konga image that's known to work with PostgreSQL 15
+FROM pantsel/konga:0.14.9
 
-# The image is self-contained. You can add customizations below if needed in the future,
-# such as installing custom themes or plugins for Konga.
-
-# For now, we just use the base image as is, but having this file gives you
-# a place to customize it later.
+# Install a more recent version of the pg driver
+USER root
+RUN npm install pg@latest
+USER node
