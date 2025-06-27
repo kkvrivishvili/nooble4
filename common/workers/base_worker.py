@@ -165,8 +165,22 @@ class BaseWorker(ABC):
                 try:
                     handler_result = await self._handle_action(action)
 
+                    # CORRECCIÓN 5: Manejar DomainActionResponse correctamente
+                    # Normalizar handler_result para que siempre sea dict o None
+                    if isinstance(handler_result, DomainActionResponse):
+                        # Si es DomainActionResponse, extraer los datos
+                        if handler_result.success:
+                            normalized_result = handler_result.data or {}
+                        else:
+                            # Si es un error, crear una excepción para que se maneje en el catch
+                            error_msg = handler_result.error.message if handler_result.error else "Error desconocido"
+                            raise Exception(f"Handler devolvió error: {error_msg}")
+                    else:
+                        # Si es dict o None, usar tal como está
+                        normalized_result = handler_result
+
                     # Procesamiento de respuesta/callback se mantiene igual
-                    if handler_result is None and not action.callback_queue_name:
+                    if normalized_result is None and not action.callback_queue_name:
                         logger.debug(f"[{self.service_name}][{self.consumer_name}] Acción fire-and-forget {action.action_id} completada.")
                         # No hay más que hacer para fire-and-forget, se hará ACK abajo
                     else:
@@ -177,11 +191,11 @@ class BaseWorker(ABC):
                             if action.correlation_id is None:
                                 logger.error(f"[{self.service_name}][{self.consumer_name}] Error crítico: Acción {action.action_id} ({action.action_type}) requiere respuesta pseudo-síncrona pero no tiene correlation_id. No se enviará respuesta.")
                                 raise ValueError(f"Acción {action.action_id} ({action.action_type}) requiere respuesta pseudo-síncrona pero no tiene correlation_id.")
-                            response = self._create_success_response(action, handler_result or {})
+                            response = self._create_success_response(action, normalized_result or {})
                             await self._send_response(response, action.callback_queue_name)
                         elif is_async_callback:
-                            await self._send_callback(action, handler_result or {})
-                        # Si handler_result no es None pero no es ni pseudo-sync ni async_callback, es un fire-and-forget que devolvió algo. Se hace ACK.
+                            await self._send_callback(action, normalized_result or {})
+                        # Si normalized_result no es None pero no es ni pseudo-sync ni async_callback, es un fire-and-forget que devolvió algo. Se hace ACK.
 
                     # Si todo fue bien, ACK el mensaje
                     await self.async_redis_conn.xack(self.action_stream_name, self.consumer_group_name, message_id_to_ack)

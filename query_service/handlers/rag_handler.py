@@ -162,10 +162,19 @@ class RAGHandler(BaseHandler):
         if not response.success or not response.data:
             raise ExternalServiceError("Error obteniendo embedding del Embedding Service")
         
-        # El response.data debería contener una lista de embeddings para los textos
-        embeddings = response.data.get("embeddings", [])
-        if not embeddings or len(embeddings) == 0:
-            raise ExternalServiceError("No se recibió embedding del Embedding Service")
-            
-        # Retornamos el primer embedding (corresponde a la consulta)
-        return embeddings[0]
+        # CORRECCIÓN 4: Manejar la estructura correcta de respuesta de embeddings
+        embeddings_data = response.data.get("embeddings", [])
+        if not embeddings_data:
+            raise ExternalServiceError("No se recibieron embeddings del Embedding Service")
+        
+        # Manejar la estructura correcta: lista de objetos con chunk_id, embedding, error
+        first_result = embeddings_data[0]
+        if "error" in first_result and first_result["error"]:
+            raise ExternalServiceError(f"Error en embedding: {first_result['error']}")
+        
+        # Extraer el embedding del primer resultado
+        embedding = first_result.get("embedding", [])
+        if not embedding:
+            raise ExternalServiceError("No se recibió embedding válido del Embedding Service")
+        
+        return embedding
