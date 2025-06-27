@@ -16,7 +16,7 @@ class EmbeddingServiceSettings(CommonAppSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_prefix='EMBEDDING_',
+        env_prefix='ES_',
         extra='ignore',
         env_file='.env'
     )

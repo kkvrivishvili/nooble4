@@ -11,7 +11,7 @@ class QueryServiceSettings(CommonAppSettings):
     Configuración específica para Query Service.
     Hereda de CommonAppSettings y añade/sobrescribe configuraciones.
     """
-    model_config = SettingsConfigDict(extra='ignore', env_file='.env', env_prefix='QUERY_')
+    model_config = SettingsConfigDict(extra='ignore', env_file='.env', env_prefix='QS_')
 
     # service_name, environment, log_level, redis_url, database_url, http_timeout_seconds son heredados de CommonAppSettings.
 

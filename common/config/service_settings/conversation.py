@@ -12,7 +12,7 @@ class ConversationSettings(CommonAppSettings):
     """Configuración específica para Conversation Service."""
 
     model_config = SettingsConfigDict(
-        env_prefix='CONVERSATION_',
+        env_prefix='CS_',
         extra='ignore',
         env_file='.env',
         protected_namespaces=(), # Desactiva la protección de espacios de nombres

@@ -25,7 +25,7 @@ class IngestionServiceSettings(CommonAppSettings):
     """Configuración específica para Ingestion Service."""
 
     model_config = SettingsConfigDict(
-        env_prefix='INGESTION_',
+        env_prefix='IS_',
         extra='ignore',
         env_file='.env'
     )

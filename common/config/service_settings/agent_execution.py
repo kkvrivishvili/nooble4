@@ -12,7 +12,9 @@ class ExecutionServiceSettings(CommonAppSettings):
     """Configuración específica para Agent Execution Service."""
 
     model_config = SettingsConfigDict(
-        extra='ignore'
+        env_prefix='AES_',
+        extra='ignore',
+        env_file='.env'
     )
 
 # Campos específicos de ExecutionSettings o que anulan valores de CommonAppSettings.
