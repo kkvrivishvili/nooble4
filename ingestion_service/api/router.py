@@ -6,7 +6,7 @@ import uuid
 import os
 import aiofiles
 from pathlib import Path
-
+from ..utils.id_generation import generate_deterministic_id
 from common.models import DomainAction, RAGConfig
 from ..models import (
     DocumentIngestionRequest, 
@@ -96,13 +96,22 @@ async def ingest_document(
             f"document={request.document_name}, tenant={tenant_id}"
         )
         
+        # Generar ID determinístico
+        deterministic_id = str(generate_deterministic_id(
+            tenant_id=user_info["tenant_id"],
+            session_id=user_info["session_id"],
+            agent_id=request.agent_id,
+            document_id=request.document_id
+        ))
+
         # Create domain action
         action = DomainAction(
             action_type="ingestion.ingest_document",
+            task_id=deterministic_id,
+            trace_id=deterministic_id,  # Mismo ID para trazabilidad
             tenant_id=user_info["tenant_id"],
             user_id=user_info["user_id"],
             session_id=user_info["session_id"],
-            task_id=uuid.uuid4(),
             origin_service="api",
             rag_config=rag_config,
             data=request.model_dump()
@@ -215,13 +224,22 @@ async def batch_ingest_documents(
                     }
                 )
                 
+                # Generar ID determinístico para cada documento del lote
+                deterministic_id = str(generate_deterministic_id(
+                    tenant_id=user_info["tenant_id"],
+                    session_id=user_info["session_id"],
+                    agent_id=individual_request.agent_id,
+                    document_id=individual_request.document_id
+                ))
+
                 # Create domain action for individual document
                 action = DomainAction(
                     action_type="ingestion.ingest_document",
-                    tenant_id=tenant_id,
-                    user_id=request.user_id,
-                    session_id=request.session_id,
-                    task_id=uuid.uuid4(),
+                    tenant_id=user_info["tenant_id"],
+                    user_id=user_info["user_id"],
+                    session_id=user_info["session_id"],
+                    task_id=deterministic_id,
+                    trace_id=deterministic_id,
                     origin_service="api",
                     rag_config=rag_config,
                     data=individual_request.model_dump()
@@ -313,12 +331,21 @@ async def upload_document(
         )
         
         # Create domain action
+        # Generar ID determinístico para la acción de ingesta de archivo
+        deterministic_id = str(generate_deterministic_id(
+            tenant_id=user_info["tenant_id"],
+            session_id=user_info["session_id"],
+            agent_id=request.agent_id,
+            document_id=request.document_id
+        ))
+
         action = DomainAction(
             action_type="ingestion.ingest_document",
+            task_id=deterministic_id,
+            trace_id=deterministic_id,
             tenant_id=user_info["tenant_id"],
             user_id=user_info["user_id"],
             session_id=user_info["session_id"],
-            task_id=uuid.uuid4(),
             origin_service="api",
             data=request.model_dump()
         )
@@ -380,10 +407,17 @@ async def get_ingestion_status(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+from pydantic import BaseModel
+
+class DeleteDocumentRequest(BaseModel):
+    collection_id: str
+    agent_id: str
+
+
 @router.delete("/document/{document_id}")
 async def delete_document(
     document_id: str,
-    agent_id: str = Query(..., description="The ID of the agent that owns the document"),
+    request: DeleteDocumentRequest,
     user_info: dict = Depends(verify_token),
     service: IngestionService = Depends(get_ingestion_service)
 ):

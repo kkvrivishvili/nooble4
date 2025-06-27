@@ -138,6 +138,7 @@ class IngestionService(BaseService):
         task_timeout_hours = getattr(self.app_settings, 'ingestion_task_timeout_hours', 2)
 
         # Create task CON agent_id y expires_at
+        # Create task CON agent_id y expires_at
         task = IngestionTask(
             task_id=str(action.task_id),
             tenant_id=action.tenant_id,
@@ -430,30 +431,26 @@ class IngestionService(BaseService):
             "error": task.error_message
         }
     
-    async def _handle_delete_document(self, action: DomainAction) -> Dict[str, Any]:
-        """Delete a document and its chunks"""
+    async def delete_document(self, action: DomainAction) -> Dict[str, Any]:
+        """Handles a request to delete a document."""
         document_id = action.data.get("document_id")
+        collection_id = action.data.get("collection_id")
         agent_id = action.data.get("agent_id")
+        tenant_id = action.tenant_id
 
-        if not document_id or not agent_id:
-            raise ValueError("document_id and agent_id are required for deletion")
+        if not all([document_id, collection_id, tenant_id]):
+            raise ValueError("document_id, collection_id, and tenant_id are required for deletion.")
 
-        self._logger.info(
-            f"Deleting document {document_id} for agent_id={agent_id}, tenant={action.tenant_id}"
+        self._logger.info(f"Attempting to delete document {document_id} in collection {collection_id} for tenant {tenant_id}")
+
+        result = await self.qdrant_handler.delete_document(
+            tenant_id=tenant_id,
+            document_id=document_id,
+            collection_id=collection_id,
+            agent_id=agent_id
         )
 
-        deleted_count = await self.qdrant_handler.delete_document(
-            tenant_id=action.tenant_id,
-            agent_id=agent_id,
-            document_id=document_id
-        )
-
-        return {
-            "document_id": document_id,
-            "agent_id": agent_id,
-            "deleted_chunks": deleted_count,
-            "status": "deleted"
-        }
+        return {"status": "success", "result": result}
     
     async def _update_progress(
         self,

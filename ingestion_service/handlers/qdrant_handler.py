@@ -80,94 +80,115 @@ class QdrantHandler(BaseHandler):
             raise
     
     async def store_chunks(self, chunks: List[ChunkModel]) -> Dict[str, Any]:
-        """Store chunks with embeddings in Qdrant"""
+        """Store chunks with embeddings in Qdrant."""
         if not chunks:
-            return {"stored": 0, "failed": 0}
-        
+            return {"stored": 0, "failed": 0, "failed_ids": []}
+
         points = []
         failed_chunks = []
-        
+
         for chunk in chunks:
             if not chunk.embedding:
                 self._logger.warning(f"Chunk {chunk.chunk_id} has no embedding, skipping")
                 failed_chunks.append(chunk.chunk_id)
                 continue
-            
-            # Prepare payload - AHORA INCLUYE agent_id
+
             payload = {
                 "chunk_id": chunk.chunk_id,
                 "document_id": chunk.document_id,
                 "tenant_id": chunk.tenant_id,
-                "agent_id": chunk.agent_id,  # NUEVO
                 "collection_id": chunk.collection_id,
-                "content": chunk.content,  # CAMBIO CRÍTICO: text → content
+                "content": chunk.content,
                 "chunk_index": chunk.chunk_index,
                 "keywords": chunk.keywords,
                 "tags": chunk.tags,
-                "metadata": chunk.metadata,
-                "created_at": chunk.created_at.isoformat()
+                "created_at": chunk.created_at.isoformat(),
             }
-            
-            # Create point
+            # Se fusiona la metadata custom, que debe contener el agent_id
+            if chunk.metadata:
+                payload.update(chunk.metadata)
+
             point = PointStruct(
                 id=chunk.chunk_id,
                 vector=chunk.embedding,
                 payload=payload
             )
             points.append(point)
-        
-        # Batch upsert
+
         if points:
             try:
-                self.client.upsert(
+                await self.client.upsert(
                     collection_name=self.collection_name,
-                    points=points
+                    points=points,
+                    wait=True
                 )
-                self._logger.info(f"Stored {len(points)} chunks in Qdrant")
+                self._logger.info(f"Stored {len(points)} chunks in Qdrant for agent_id: {agent_id}")
             except Exception as e:
                 self._logger.error(f"Error storing chunks: {e}")
-                raise
-        
+                # If the batch fails, we consider all points in it as failed
+                failed_chunks.extend([p.id for p in points])
+
         return {
-            "stored": len(points),
+            "stored": len(points) - len(failed_chunks),
             "failed": len(failed_chunks),
-            "failed_ids": failed_chunks
+            "failed_ids": failed_chunks,
         }
     
     async def delete_document(
         self, 
-        tenant_id: str,
-        agent_id: str,  
-        document_id: str
-    ) -> int:
-        """Delete all chunks for a document"""
+        tenant_id: str, 
+        document_id: str, 
+        collection_id: str, 
+        agent_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Delete all chunks for a document, filtered by collection_id and optionally agent_id."""
         try:
-            result = self.client.delete(
-                collection_name=self.collection_name,
-                points_selector=Filter(
-                    must=[
-                        FieldCondition(
-                            key="tenant_id",
-                            match=MatchValue(value=tenant_id)
-                        ),
-                        FieldCondition(
-                            key="agent_id",  
-                            match=MatchValue(value=agent_id)
-                        ),
-                        FieldCondition(
-                            key="document_id",
-                            match=MatchValue(value=document_id)
-                        )
-                    ]
+            filters = [
+                FieldCondition(
+                    key="document_id",
+                    match=MatchValue(value=document_id)
+                ),
+                FieldCondition(
+                    key="collection_id",
+                    match=MatchValue(value=collection_id)
+                ),
+                FieldCondition(
+                    key="tenant_id",
+                    match=MatchValue(value=tenant_id)
                 )
+            ]
+
+            if agent_id:
+                filters.append(
+                    FieldCondition(
+                        key="agent_id",
+                        match=MatchValue(value=agent_id)
+                    )
+                )
+
+            result = await self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=Filter(must=must_conditions)
             )
-            
-            deleted_count = result.status
-            self._logger.info(f"Deleted {deleted_count} chunks for document {document_id} (agent: {agent_id})")
-            return deleted_count
-            
+
+            # The result object in v1.1.0+ of qdrant_client might not have a direct status count.
+            # We check the result status. Assuming result is an UpdateResult.
+            if result and result.status == "completed":
+                # Qdrant's delete doesn't return the count of deleted points directly.
+                # We log the operation's success.
+                log_message = f"Delete operation completed for document {document_id}"
+                if agent_id:
+                    log_message += f" for agent {agent_id}"
+                self._logger.info(log_message)
+                # Returning 1 to indicate success, as count is not available.
+                # A more robust implementation might need a count operation before deleting.
+                return 1 
+            else:
+                self._logger.warning(f"Delete operation for document {document_id} may not have completed successfully.")
+                return 0
+
         except Exception as e:
-            self._logger.error(f"Error deleting document: {e}")
+            self._logger.error(f"Error deleting document {document_id}: {e}")
             raise
     
     async def get_collection_stats(
