@@ -1,0 +1,125 @@
+#================================================================================
+# APPLICATION ENVIRONMENT
+#================================================================================
+environment="development"
+log_level="INFO"
+service_version="0.1.0"
+enable_telemetry=false
+
+# CORS Configuration
+CORS_ORIGINS=*  # Allow all origins in development (comma-separated list, e.g. http://localhost:3000,http://localhost:8000)
+
+#================================================================================
+# SERVICE PORTS (Host ports)
+#================================================================================
+agent_orchestrator_port=8001
+query_service_port=8000
+ingestion_service_port=8002
+agent_management_port=8003
+conversation_service_port=8004
+agent_execution_port=8005
+embedding_service_port=8006
+
+#================================================================================
+# SERVICE URLS (Internal Docker network communication)
+#================================================================================
+agent_orchestrator_url="http://agent_orchestrator_service:8001"
+query_service_url="http://query_service:8000"
+ingestion_service_url="http://ingestion_service:8002"
+agent_management_url="http://agent_management_service:8003"
+conversation_service_url="http://conversation_service:8004"
+agent_execution_url="http://agent_execution_service:8005"
+embedding_service_url="http://embedding_service:8006"
+
+#================================================================================
+# REDIS CONFIGURATION
+#================================================================================
+redis_url="redis://:redis123@redis_database:6379"
+redis_password="redis123"
+redis_decode_responses=true
+redis_socket_connect_timeout=5
+redis_socket_keepalive=true
+redis_max_connections=10
+redis_health_check_interval=30
+
+#================================================================================
+# QDRANT CONFIGURATION
+#================================================================================
+qdrant_url="http://qdrant_database:6333"
+qdrant_api_key=""
+
+#================================================================================
+# POSTGRES CONFIGURATION
+#================================================================================
+postgres_url="postgresql://postgres:postgres123@postgres_database:5432/nooble"
+
+# Variables adicionales para Docker (mayúsculas, no las lee CommonAppSettings)
+POSTGRES_HOST=postgres_database
+POSTGRES_PORT=5432
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres123
+POSTGRES_DB=nooble
+
+#================================================================================
+# API KEYS
+#================================================================================
+openai_api_key=""
+openai_base_url="https://api.openai.com/v1"
+groq_api_key="gsk_dummy_key_for_development"
+
+#================================================================================
+# CORS
+#================================================================================
+cors_origins=http://localhost:3000,http://localhost:8080,http://localhost:8000
+
+#================================================================================
+# DOCKER-ONLY VARIABLES (no las lee CommonAppSettings)
+#================================================================================
+REDIS_MAX_MEMORY="256mb"
+QDRANT_ALLOW_RECOVERY_MODE=true
+
+# Kong
+KONG_DATABASE=postgres
+KONG_PG_HOST=postgres_database
+KONG_PG_PORT=5432
+KONG_PG_USER=kong
+KONG_PG_PASSWORD=kong123
+KONG_PG_DATABASE=kong
+KONG_PROXY_PORT=8000
+KONG_PROXY_SSL_PORT=8443
+KONG_ADMIN_PORT=8001
+KONG_ADMIN_SSL_PORT=8444
+KONG_PLUGINS=bundled
+
+# Keycloak
+KEYCLOAK_ADMIN=admin
+KEYCLOAK_ADMIN_PASSWORD=admin123
+KEYCLOAK_DB=keycloak
+KEYCLOAK_DB_USER=keycloak
+KEYCLOAK_DB_PASSWORD=keycloak123
+KEYCLOAK_HOSTNAME=localhost
+KEYCLOAK_PORT=8080
+
+# PgAdmin
+PGADMIN_DEFAULT_EMAIL=admin@nooble4.com
+PGADMIN_DEFAULT_PASSWORD=admin123
+PGADMIN_PORT=5050
+
+# Otras configuraciones
+OPENAI_TIMEOUT_SECONDS=30
+OPENAI_MAX_RETRIES=3
+GROQ_BASE_URL="https://api.groq.com/openai/v1"
+GROQ_TIMEOUT_SECONDS=30
+GROQ_MAX_RETRIES=3
+JWT_SECRET_KEY="your-256-bit-secret-key-change-this-in-production"
+JWT_ALGORITHM="HS256"
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES="30"
+JWT_REFRESH_TOKEN_EXPIRE_DAYS="7"
+CORS_METHODS="GET,POST,PUT,DELETE,OPTIONS"
+CORS_HEADERS="Content-Type,Authorization"
+CORS_CREDENTIALS="true"
+WORKER_COUNT=5
+SERVICE_STARTUP_TIMEOUT=120
+HEALTHCHECK_RETRIES=3
+HEALTHCHECK_INTERVAL=30
+HEALTHCHECK_START_PERIOD=60

@@ -1,338 +1,204 @@
 version: '3.8'
 
-networks:
-  nooble-network:
-    driver: bridge
-
-volumes:
-  postgres_data:
-  redis_data:
-  qdrant_data:
-  keycloak_data:
-  pgadmin_data:
-
 services:
-  # ==================== DATABASES ====================
-  
-  postgres_database:
-    image: postgres:15-alpine
-    container_name: nooble4-postgres
-    networks:
-      - nooble-network
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    ports:
-      - "${POSTGRES_PORT}:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./postgres_database/init:/docker-entrypoint-initdb.d
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-    restart: unless-stopped
-
-  redis_database:
+  # Redis
+  redis:
     image: redis:7-alpine
-    container_name: nooble4-redis
-    networks:
-      - nooble-network
-    command: redis-server --requirepass ${redis_password} --maxmemory ${REDIS_MAX_MEMORY} --maxmemory-policy allkeys-lru
+    container_name: nooble_redis
+    command: redis-server --requirepass redis123
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${redis_password}", "ping"]
-      interval: 10s
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - nooble_network
+
+  # PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: nooble_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: nooble
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
       timeout: 5s
       retries: 5
-      start_period: 30s
-    restart: unless-stopped
-
-  qdrant_database:
-    image: qdrant/qdrant:v1.7.4
-    container_name: nooble4-qdrant
     networks:
-      - nooble-network
+      - nooble_network
+
+  # Qdrant
+  qdrant:
+    image: qdrant/qdrant:v1.7.4
+    container_name: nooble_qdrant
     ports:
       - "6333:6333"
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
-    environment:
-      - QDRANT_API_KEY=${qdrant_api_key}
-      - QDRANT_ALLOW_RECOVERY_MODE=${QDRANT_ALLOW_RECOVERY_MODE}
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/readyz"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    restart: unless-stopped
-
-  # ==================== INFRASTRUCTURE ====================
-
-  keycloak:
-    build:
-      context: ./keycloak_auth
-      dockerfile: Dockerfile
-    container_name: nooble4-keycloak
     networks:
-      - nooble-network
-    environment:
-      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN}
-      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
-      - KC_DB=postgres
-      - KC_DB_URL=jdbc:postgresql://${POSTGRES_HOST}:${POSTGRES_PORT}/${KEYCLOAK_DB}
-      - KC_DB_USERNAME=${KEYCLOAK_DB_USER}
-      - KC_DB_PASSWORD=${KEYCLOAK_DB_PASSWORD}
-      - KC_HTTP_ENABLED=true
-      - KC_HOSTNAME=${KEYCLOAK_HOSTNAME}
-      - KC_HOSTNAME_STRICT=false
-      - KC_HTTP_PORT=8080
-      - KC_PROXY=edge
-    ports:
-      - "${KEYCLOAK_PORT}:8080"
-    depends_on:
-      postgres_database:
-        condition: service_healthy
-    volumes:
-      - keycloak_data:/opt/keycloak/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/realms/master/.well-known/openid-configuration"]
-      interval: 30s
-      timeout: 20s
-      retries: 10
-      start_period: 120s
-    restart: unless-stopped
+      - nooble_network
 
-  kong-migrations:
-    build:
-      context: ./kong_gateway
-      dockerfile: kong.Dockerfile
-    container_name: nooble4-kong-migrations
-    networks:
-      - nooble-network
-    command: kong migrations bootstrap -v
-    environment:
-      - KONG_DATABASE=${KONG_DATABASE}
-      - KONG_PG_HOST=${KONG_PG_HOST}
-      - KONG_PG_PORT=${KONG_PG_PORT}
-      - KONG_PG_USER=${KONG_PG_USER}
-      - KONG_PG_PASSWORD=${KONG_PG_PASSWORD}
-      - KONG_PG_DATABASE=${KONG_PG_DATABASE}
-    depends_on:
-      postgres_database:
-        condition: service_healthy
-    restart: on-failure
-
-  kong:
-    build:
-      context: ./kong_gateway
-      dockerfile: kong.Dockerfile
-    container_name: nooble4-kong
-    networks:
-      - nooble-network
-    environment:
-      - KONG_DATABASE=${KONG_DATABASE}
-      - KONG_PG_HOST=${KONG_PG_HOST}
-      - KONG_PG_PORT=${KONG_PG_PORT}
-      - KONG_PG_USER=${KONG_PG_USER}
-      - KONG_PG_PASSWORD=${KONG_PG_PASSWORD}
-      - KONG_PG_DATABASE=${KONG_PG_DATABASE}
-      - KONG_PROXY_ACCESS_LOG=/dev/stdout
-      - KONG_ADMIN_ACCESS_LOG=/dev/stdout
-      - KONG_PROXY_ERROR_LOG=/dev/stderr
-      - KONG_ADMIN_ERROR_LOG=/dev/stderr
-      - KONG_PROXY_LISTEN=0.0.0.0:${KONG_PROXY_PORT}, 0.0.0.0:${KONG_PROXY_SSL_PORT} ssl
-      - KONG_ADMIN_LISTEN=0.0.0.0:${KONG_ADMIN_PORT}, 0.0.0.0:${KONG_ADMIN_SSL_PORT} ssl
-      - KONG_PLUGINS=${KONG_PLUGINS}
-    ports:
-      - "8081:${KONG_PROXY_PORT}"
-      - "8443:${KONG_PROXY_SSL_PORT}"
-      - "8011:${KONG_ADMIN_PORT}"
-      - "8444:${KONG_ADMIN_SSL_PORT}"
-    depends_on:
-      kong-migrations:
-        condition: service_completed_successfully
-      keycloak:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "kong", "health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    restart: unless-stopped
-
-  # Konga comentado por problemas de compatibilidad con PostgreSQL 15
-  # konga:
-  #   build:
-  #     context: ./kong_gateway
-  #     dockerfile: konga.Dockerfile
-  #   container_name: nooble4-konga
-  #   hostname: konga
-  #   networks:
-  #     - nooble-network
-  #   environment:
-  #     - NODE_ENV=${KONGA_ENV:-production}
-  #   ports:
-  #     - "${KONGA_PORT:-1337}:1337"
-  #   volumes:
-  #     - konga_data:/app/kongadata
-  #   depends_on:
-  #     postgres_database:
-  #       condition: service_healthy
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:1337/health || exit 1"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 5
-  #     start_period: 120s
-  #   restart: unless-stopped
-  #   security_opt:
-  #     - no-new-privileges:true
-  #   deploy:
-  #     resources:
-  #       limits:
-  #         cpus: '1.00'
-  #         memory: 1024M
-
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: nooble4-pgadmin
-    networks:
-      - nooble-network
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
-      PGADMIN_CONFIG_SERVER_MODE: 'False'
-      PGADMIN_LISTEN_PORT: 5050
-    ports:
-      - "${PGADMIN_PORT}:5050"
-    depends_on:
-      postgres_database:
-        condition: service_healthy
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
-      - ./pgadmin/servers.json:/pgadmin4/servers.json
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5050/misc/ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 90s
-    restart: unless-stopped
-
-  # ==================== MICROSERVICES ====================
-
+  # ==================== SERVICES ====================
+  
+  # Query Service
   query_service:
     build:
       context: .
       dockerfile: ./query_service/Dockerfile
-    container_name: nooble4-query-service
-    networks:
-      - nooble-network
-    ports:
-      - "${query_service_port}:8000"
-    depends_on:
-      redis_database:
-        condition: service_healthy
-      qdrant_database:
-        condition: service_healthy
-    env_file:
-      - ./.env
+    container_name: query_service
     environment:
-      - service_name=query_service
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
-    restart: unless-stopped
+      - ENVIRONMENT=development
+      - LOG_LEVEL=INFO
+      - SERVICE_NAME=query_service
+      - SERVICE_VERSION=1.0.0
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_PASSWORD=redis123
+      - POSTGRES_URL=postgresql://postgres:postgres@postgres:5432/nooble
+      - QDRANT_URL=http://qdrant:6333
+      - EMBEDDING_SERVICE_URL=http://embedding_service:8006
+      - PORT=8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    networks:
+      - nooble_network
 
+  # Ingestion Service
   ingestion_service:
     build:
       context: .
       dockerfile: ./ingestion_service/Dockerfile
-    container_name: nooble4-ingestion-service
-    networks:
-      - nooble-network
-    ports:
-      - "${ingestion_service_port}:8002"
-    depends_on:
-      redis_database:
-        condition: service_healthy
-      qdrant_database:
-        condition: service_healthy
-    env_file:
-      - ./.env
+    container_name: ingestion_service
     environment:
-      - service_name=ingestion_service
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
-    restart: unless-stopped
+      - ENVIRONMENT=development
+      - LOG_LEVEL=INFO
+      - SERVICE_NAME=ingestion_service
+      - SERVICE_VERSION=1.0.0
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_PASSWORD=redis123
+      - POSTGRES_URL=postgresql://postgres:postgres@postgres:5432/nooble
+      - QDRANT_URL=http://qdrant:6333
+      - PORT=8002
+    ports:
+      - "8002:8002"
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    networks:
+      - nooble_network
 
-  embedding_service:
+  # Conversation Service
+  conversation_service:
     build:
       context: .
-      dockerfile: ./embedding_service/Dockerfile
-    container_name: nooble4-embedding-service
-    networks:
-      - nooble-network
-    ports:
-      - "${embedding_service_port}:8006"
-    depends_on:
-      redis_database:
-        condition: service_healthy
-    env_file:
-      - ./.env
+      dockerfile: ./conversation_service/Dockerfile
+    container_name: conversation_service
     environment:
-      - service_name=embedding_service
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
-    restart: unless-stopped
+      - ENVIRONMENT=development
+      - LOG_LEVEL=INFO
+      - SERVICE_NAME=conversation_service
+      - SERVICE_VERSION=1.0.0
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_PASSWORD=redis123
+      - POSTGRES_URL=postgresql://postgres:postgres@postgres:5432/nooble
+      - PORT=8004
+    ports:
+      - "8004:8004"
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - nooble_network
 
+  # Agent Execution Service
   agent_execution_service:
     build:
       context: .
       dockerfile: ./agent_execution_service/Dockerfile
-    container_name: nooble4-agent-execution-service
-    networks:
-      - nooble-network
-    ports:
-      - "${agent_execution_port}:8005"
-    depends_on:
-      redis_database:
-        condition: service_healthy
-    env_file:
-      - ./.env
+    container_name: agent_execution_service
     environment:
-      - service_name=agent_execution_service
-      - CORS_ORIGINS=*  # Override any value from .env file
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
-    restart: unless-stopped
+      - ENVIRONMENT=development
+      - LOG_LEVEL=INFO
+      - SERVICE_NAME=agent_execution_service
+      - SERVICE_VERSION=1.0.0
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_PASSWORD=redis123
+      - POSTGRES_URL=postgresql://postgres:postgres@postgres:5432/nooble
+      - QDRANT_URL=http://qdrant:6333
+      - PORT=8005
+    ports:
+      - "8005:8005"
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      query_service:
+        condition: service_started
+      conversation_service:
+        condition: service_started
+    networks:
+      - nooble_network
 
-  # Servicios comentados por ahora
-  # agent_orchestrator_service:
-  # conversation_service:
-  # agent_management_service:
+  # Embedding Service
+  embedding_service:
+    build:
+      context: .
+      dockerfile: ./embedding_service/Dockerfile
+    container_name: embedding_service
+    environment:
+      - ENVIRONMENT=development
+      - LOG_LEVEL=INFO
+      - SERVICE_NAME=embedding_service
+      - SERVICE_VERSION=1.0.0
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_PASSWORD=redis123
+      - QDRANT_URL=http://qdrant:6333
+      - PORT=8006
+    ports:
+      - "8006:8006"
+    depends_on:
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    networks:
+      - nooble_network
+
+# Volumes for persistent data
+volumes:
+  redis_data:
+  postgres_data:
+  qdrant_data:
+
+# Network for all services
+networks:
+  nooble_network:
+    driver: bridge
