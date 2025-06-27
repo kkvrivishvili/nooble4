@@ -10,7 +10,6 @@ volumes:
   qdrant_data:
   keycloak_data:
   pgadmin_data:
-  konga_data:
 
 services:
   # ==================== DATABASES ====================
@@ -42,13 +41,13 @@ services:
     container_name: nooble4-redis
     networks:
       - nooble-network
-    command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory ${REDIS_MAX_MEMORY} --maxmemory-policy allkeys-lru
+    command: redis-server --requirepass ${redis_password} --maxmemory ${REDIS_MAX_MEMORY} --maxmemory-policy allkeys-lru
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${redis_password}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -66,14 +65,14 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     environment:
-      - QDRANT_API_KEY=${QDRANT_API_KEY}
+      - QDRANT_API_KEY=${qdrant_api_key}
       - QDRANT_ALLOW_RECOVERY_MODE=${QDRANT_ALLOW_RECOVERY_MODE}
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:6333/readyz"]
+      test: ["CMD", "curl", "-f", "http://localhost:6333/readyz"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 20s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   # ==================== INFRASTRUCTURE ====================
@@ -105,11 +104,11 @@ services:
     volumes:
       - keycloak_data:/opt/keycloak/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/realms/master/.well-known/openid-configuration"]
       interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
+      timeout: 20s
+      retries: 10
+      start_period: 120s
     restart: unless-stopped
 
   kong-migrations:
@@ -154,9 +153,9 @@ services:
       - KONG_ADMIN_LISTEN=0.0.0.0:${KONG_ADMIN_PORT}, 0.0.0.0:${KONG_ADMIN_SSL_PORT} ssl
       - KONG_PLUGINS=${KONG_PLUGINS}
     ports:
-      - "8081:${KONG_PROXY_PORT}"  # Kong proxy en puerto 8081 del host
+      - "8081:${KONG_PROXY_PORT}"
       - "8443:${KONG_PROXY_SSL_PORT}"
-      - "8011:${KONG_ADMIN_PORT}"  # Kong admin en puerto 8011 del host
+      - "8011:${KONG_ADMIN_PORT}"
       - "8444:${KONG_ADMIN_SSL_PORT}"
     depends_on:
       kong-migrations:
@@ -171,45 +170,38 @@ services:
       start_period: 60s
     restart: unless-stopped
 
-  konga:
-    build:
-      context: ./kong_gateway
-      dockerfile: konga.Dockerfile
-    container_name: nooble4-konga
-    hostname: konga
-    networks:
-      - nooble-network
-    # Environment variables are now defined in the Dockerfile
-    environment:
-      # Override any environment variables here if needed
-      - NODE_ENV=${KONGA_ENV:-production}
-    ports:
-      - "${KONGA_PORT:-1337}:1337"
-    volumes:
-      # Persistent storage for Konga data
-      - konga_data:/app/kongadata
-      # Mount local directory for custom configurations if needed
-      # - ./kong_gateway/config:/app/config
-    depends_on:
-      postgres_database:
-        condition: service_healthy
-      # Kong is not required for Konga to start
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:1337/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 120s
-    restart: unless-stopped
-    # Add security options
-    security_opt:
-      - no-new-privileges:true
-    # Limit resources
-    deploy:
-      resources:
-        limits:
-          cpus: '1.00'
-          memory: 1024M
+  # Konga comentado por problemas de compatibilidad con PostgreSQL 15
+  # konga:
+  #   build:
+  #     context: ./kong_gateway
+  #     dockerfile: konga.Dockerfile
+  #   container_name: nooble4-konga
+  #   hostname: konga
+  #   networks:
+  #     - nooble-network
+  #   environment:
+  #     - NODE_ENV=${KONGA_ENV:-production}
+  #   ports:
+  #     - "${KONGA_PORT:-1337}:1337"
+  #   volumes:
+  #     - konga_data:/app/kongadata
+  #   depends_on:
+  #     postgres_database:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:1337/health || exit 1"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 5
+  #     start_period: 120s
+  #   restart: unless-stopped
+  #   security_opt:
+  #     - no-new-privileges:true
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: '1.00'
+  #         memory: 1024M
 
   pgadmin:
     image: dpage/pgadmin4:latest
@@ -230,11 +222,11 @@ services:
       - pgadmin_data:/var/lib/pgadmin
       - ./pgadmin/servers.json:/pgadmin4/servers.json
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5050/misc/ping"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5050/misc/ping"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 60s
+      retries: 5
+      start_period: 90s
     restart: unless-stopped
 
   # ==================== MICROSERVICES ====================
@@ -247,7 +239,7 @@ services:
     networks:
       - nooble-network
     ports:
-      - "${QUERY_SERVICE_PORT}:8000"
+      - "${query_service_port}:8000"
     depends_on:
       redis_database:
         condition: service_healthy
@@ -256,8 +248,7 @@ services:
     env_file:
       - ./.env
     environment:
-      - SERVICE_NAME=query_service
-      - LOG_LEVEL=${LOG_LEVEL}
+      - service_name=query_service
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -274,7 +265,7 @@ services:
     networks:
       - nooble-network
     ports:
-      - "${INGESTION_SERVICE_PORT}:8002"
+      - "${ingestion_service_port}:8002"
     depends_on:
       redis_database:
         condition: service_healthy
@@ -283,8 +274,7 @@ services:
     env_file:
       - ./.env
     environment:
-      - SERVICE_NAME=ingestion_service
-      - LOG_LEVEL=${LOG_LEVEL}
+      - service_name=ingestion_service
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
       interval: 30s
@@ -301,15 +291,14 @@ services:
     networks:
       - nooble-network
     ports:
-      - "${EMBEDDING_SERVICE_PORT}:8006"
+      - "${embedding_service_port}:8006"
     depends_on:
       redis_database:
         condition: service_healthy
     env_file:
       - ./.env
     environment:
-      - SERVICE_NAME=embedding_service
-      - LOG_LEVEL=${LOG_LEVEL}
+      - service_name=embedding_service
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
       interval: 30s
@@ -326,15 +315,14 @@ services:
     networks:
       - nooble-network
     ports:
-      - "${AGENT_EXECUTION_PORT}:8005"
+      - "${agent_execution_port}:8005"
     depends_on:
       redis_database:
         condition: service_healthy
     env_file:
       - ./.env
     environment:
-      - SERVICE_NAME=agent_execution_service
-      - LOG_LEVEL=${LOG_LEVEL}
+      - service_name=agent_execution_service
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
       interval: 30s
