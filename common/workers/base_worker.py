@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import os
+import threading
 import traceback
 import uuid
 from abc import ABC, abstractmethod
@@ -89,6 +91,11 @@ class BaseWorker(ABC):
 
     async def _ensure_consumer_group_exists(self):
         """Asegura que el grupo de consumidores exista en el stream, creándolo si es necesario."""
+        logger.info(
+            f"[WORKER_INIT] Verificando grupo de consumidores. "
+            f"Stream: '{self.action_stream_name}', Grupo: '{self.consumer_group_name}'"
+        )
+        
         try:
             # MKSTREAM crea el stream si no existe
             await self.async_redis_conn.xgroup_create(
@@ -97,13 +104,23 @@ class BaseWorker(ABC):
                 id='0',  # Empezar desde el principio del stream si se crea nuevo
                 mkstream=True
             )
-            logger.info(f"[{self.service_name}] Grupo de consumidores '{self.consumer_group_name}' creado/verificado para el stream '{self.action_stream_name}'.")
+            logger.info(
+                f"[WORKER_INIT] Nuevo grupo de consumidores creado. "
+                f"Stream: '{self.action_stream_name}', Grupo: '{self.consumer_group_name}'"
+            )
         except redis.exceptions.ResponseError as e:
             if "BUSYGROUP" in str(e):
-                logger.info(f"[{self.service_name}] Grupo de consumidores '{self.consumer_group_name}' ya existe para el stream '{self.action_stream_name}'.")
+                logger.info(
+                    f"[WORKER_INIT] Grupo de consumidores ya existe. "
+                    f"Stream: '{self.action_stream_name}', Grupo: '{self.consumer_group_name}'"
+                )
             else:
-                logger.error(f"[{self.service_name}] Error al crear/verificar grupo de consumidores '{self.consumer_group_name}': {e}")
-                raise # Re-lanzar si es un error inesperado
+                logger.error(
+                    f"[WORKER_INIT] Error al crear/verificar grupo de consumidores. "
+                    f"Stream: '{self.action_stream_name}', Grupo: '{self.consumer_group_name}'. Error: {e}",
+                    exc_info=True
+                )
+                raise  # Re-lanzar si es un error inesperado
 
     async def initialize(self):
         """
@@ -111,17 +128,26 @@ class BaseWorker(ABC):
         inicializar sus componentes (como la capa de servicio) y luego llamar a
         `await super().initialize()`.
         """
-        await self._ensure_consumer_group_exists() # MODIFIED: Asegurar grupo antes de inicializar
+        logger.info(f"[WORKER_INIT] Inicializando worker {self.consumer_name} (PID: {os.getpid()}, Thread: {threading.get_ident()})")
+        
+        # Asegurar que el grupo de consumidores existe
+        await self._ensure_consumer_group_exists()
+        
         self.initialized = True
-        logger.info(f"[{self.service_name}] BaseWorker ({self.consumer_name}) inicializado. Escuchando en stream '{self.action_stream_name}', grupo '{self.consumer_group_name}'.")
+        logger.info(
+            f"[WORKER_INIT] Worker {self.consumer_name} inicializado. "
+            f"Stream: '{self.action_stream_name}', Grupo: '{self.consumer_group_name}'. "
+            f"PID: {os.getpid()}, Thread: {threading.get_ident()}"
+        )
 
     async def _process_action_loop(self):
         """Bucle principal que escucha y procesa acciones del stream Redis usando un grupo de consumidores."""
-        # El logger de inicialización ya está en el método initialize.
-        # logger.info(f"[{self.service_name}] Worker ({self.consumer_name}) iniciando. Escuchando en stream: {self.action_stream_name}, grupo: {self.consumer_group_name}")
+        logger.info(f"[WORKER_INIT] Iniciando worker {self.consumer_name} (PID: {os.getpid()}, Thread: {threading.get_ident()})")
         
         if not self.initialized:
             await self.initialize() # Esto ahora también llama a _ensure_consumer_group_exists
+            
+        logger.info(f"[WORKER_READY] Worker {self.consumer_name} listo para procesar mensajes del stream: {self.action_stream_name}, grupo: {self.consumer_group_name}")
 
         self._running = True
         message_id_to_ack = None # Para asegurar el ACK incluso si hay error post-procesamiento
