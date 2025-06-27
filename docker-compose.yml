@@ -65,7 +65,7 @@ services:
       -c 'random_page_cost=1.1'
       -c 'effective_io_concurrency=200'
       -c 'effective_cache_size=768MB'
-      -c 'log_statement=all'  # Solo para desarrollo
+      -c 'log_statement=all'
       -c 'log_connections=on'
       -c 'log_disconnections=on'
       -c 'log_duration=on'
