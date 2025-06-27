@@ -323,6 +323,7 @@ services:
       - ./.env
     environment:
       - service_name=agent_execution_service
+      - CORS_ORIGINS=*  # Override any value from .env file
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
       interval: 30s
