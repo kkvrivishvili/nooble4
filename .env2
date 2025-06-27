@@ -63,7 +63,7 @@ POSTGRES_DB=nooble
 #================================================================================
 # API KEYS
 #================================================================================
-openai_api_key=""
+openai_api_key="gsk_dummy_key_for_development"
 openai_base_url="https://api.openai.com/v1"
 groq_api_key="gsk_dummy_key_for_development"
 
