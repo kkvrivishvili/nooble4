@@ -2,6 +2,6 @@
 Servicios del Agent Orchestrator.
 """
 
-from .websocket_manager import WebSocketManager
+from .orchestration_service import OrchestrationService
 
-__all__ = ['WebSocketManager']
+__all__ = ['OrchestrationService']

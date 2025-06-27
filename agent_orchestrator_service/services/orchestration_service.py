@@ -1,153 +1,176 @@
 """
-Servicio de orquestación para manejar la lógica de negocio principal del chat.
+Servicio principal de orquestación.
 
-Este servicio encapsula las operaciones relacionadas con el procesamiento de mensajes,
-la consulta de estado de tareas y la cancelación de las mismas, delegando la 
-comunicación con otros microservicios.
+Coordina la comunicación entre WebSocket, Management Service y Execution Service.
 """
-
 import logging
-from typing import Dict, Any
-from uuid import uuid4
+from typing import Dict, Any, Optional
+from datetime import datetime
 
-from agent_orchestrator_service.models.actions_model import (
-    ChatProcessAction, ChatStatusAction, ChatCancelAction
-)
+from common.services.base_service import BaseService
+from common.models.actions import DomainAction
+from common.errors.exceptions import InvalidActionError, ExternalServiceError
+from common.clients.base_redis_client import BaseRedisClient
+from common.config.service_settings import OrchestratorSettings
 
-logger = logging.getLogger(__name__)
+from ..clients import ExecutionClient, ManagementClient
+from ..websocket import WebSocketManager
+from ..handlers import ChatHandler
+from ..models.session_models import SessionState
 
-class OrchestrationService:
-    """Servicio para manejar la lógica de negocio de orquestación de chat."""
+
+class OrchestrationService(BaseService):
+    """
+    Servicio principal de orquestación.
     
-    def __init__(self, redis_client):
+    Coordina el flujo de mensajes entre el cliente WebSocket,
+    el Management Service para configuraciones, y el Execution
+    Service para procesamiento.
+    """
+    
+    def __init__(
+        self,
+        app_settings: OrchestratorSettings,
+        service_redis_client: Optional[BaseRedisClient] = None,
+        direct_redis_conn=None
+    ):
         """
-        Inicializa el servicio con sus dependencias.
+        Inicializa el servicio.
         
         Args:
-            redis_client: Cliente de Redis para la comunicación entre servicios.
+            app_settings: Configuración del servicio
+            service_redis_client: Cliente Redis para comunicación entre servicios
+            direct_redis_conn: Conexión directa a Redis
         """
-        # En una implementación futura, este cliente podría ser un 'ChatService' más abstracto
-        self.redis_client = redis_client
-    
-    async def process_message(self, action: ChatProcessAction) -> Dict[str, Any]:
-        """
-        Procesa un mensaje de chat enviándolo al agente de ejecución.
+        super().__init__(app_settings, service_redis_client, direct_redis_conn)
         
-        Args:
-            action: Acción con los datos del mensaje a procesar.
-            
-        Returns:
-            Un diccionario con la confirmación inicial del procesamiento.
+        if not service_redis_client:
+            raise ValueError("service_redis_client es requerido para OrchestrationService")
+        
+        # Inicializar clientes
+        self.execution_client = ExecutionClient(
+            redis_client=service_redis_client,
+            settings=app_settings
+        )
+        
+        self.management_client = ManagementClient(
+            redis_client=service_redis_client,
+            settings=app_settings
+        )
+        
+        # WebSocket manager
+        self.websocket_manager = WebSocketManager()
+        
+        # Chat handler
+        self.chat_handler = ChatHandler(
+            execution_client=self.execution_client,
+            management_client=self.management_client,
+            websocket_manager=self.websocket_manager
+        )
+        
+        self._logger.info("OrchestrationService inicializado")
+    
+    async def process_action(self, action: DomainAction) -> Optional[Dict[str, Any]]:
+        """
+        Procesa una DomainAction.
+        
+        Este método es principalmente para compatibilidad con BaseService.
+        La mayor parte del procesamiento ocurre directamente a través
+        de WebSocket y el ChatHandler.
         """
         try:
-            if not action.agent_id or not action.message:
-                return {
-                    "success": False,
-                    "error": {
-                        "type": "InvalidAction",
-                        "message": "Se requieren agent_id y message"
-                    }
+            action_type = action.action_type
+            self._logger.info(
+                f"Procesando acción: {action_type}",
+                extra={
+                    "action_id": str(action.action_id),
+                    "tenant_id": str(action.tenant_id),
+                    "session_id": str(action.session_id)
                 }
+            )
             
-            task_id = action.task_id or str(uuid4())
+            # Por ahora, el orchestrator principalmente maneja WebSocket
+            # Las acciones llegarían solo para casos especiales
             
-            # Aquí iría la lógica para enviar la acción al 'agent_execution_service'
-            # usando self.redis_client. Por ahora, simulamos el envío.
-            logger.info(f"Enviando tarea {task_id} al servicio de ejecución.")
-            # await self.redis_client.send_action(...) 
-            
-            return {
-                "success": True,
-                "task_id": task_id,
-                "status": "processing"
-            }
-            
+            if action_type == "orchestrator.session.status":
+                return await self._get_session_status(action)
+            else:
+                raise InvalidActionError(f"Tipo de acción no soportado: {action_type}")
+                
+        except InvalidActionError:
+            raise
         except Exception as e:
-            logger.error(f"Error procesando mensaje de chat: {str(e)}")
-            return {
-                "success": False,
-                "error": {
-                    "type": type(e).__name__,
-                    "message": str(e)
-                }
-            }
+            self._logger.error(f"Error procesando acción: {e}", exc_info=True)
+            raise ExternalServiceError(f"Error interno: {str(e)}")
     
-    async def get_task_status(self, action: ChatStatusAction) -> Dict[str, Any]:
+    async def process_websocket_message(
+        self,
+        session_id: str,
+        message_data: Dict[str, Any]
+    ) -> None:
         """
-        Consulta el estado de una tarea de chat.
+        Procesa un mensaje recibido por WebSocket.
         
         Args:
-            action: Acción con el ID de la tarea a consultar.
-            
-        Returns:
-            Un diccionario con el estado actual de la tarea.
+            session_id: ID de la sesión
+            message_data: Datos del mensaje
         """
-        try:
-            if not action.task_id:
-                return {
-                    "success": False,
-                    "error": {
-                        "type": "InvalidAction",
-                        "message": "Se requiere task_id"
-                    }
-                }
-            
-            # Lógica para consultar el estado de la tarea en Redis o en otro servicio.
-            logger.info(f"Consultando estado de la tarea {action.task_id}.")
-            status = {"status": "unknown"} # Simulación
-            
-            return {
-                "success": True,
-                "task_id": action.task_id,
-                "status": status
-            }
-            
-        except Exception as e:
-            logger.error(f"Error obteniendo estado de tarea: {str(e)}")
-            return {
-                "success": False,
-                "error": {
-                    "type": type(e).__name__,
-                    "message": str(e)
-                }
-            }
-    
-    async def cancel_task(self, action: ChatCancelAction) -> Dict[str, Any]:
-        """
-        Cancela una tarea de chat en ejecución.
+        # Obtener estado de sesión
+        session_state = await self.websocket_manager.get_session_state(session_id)
+        if not session_state:
+            self._logger.error(f"No se encontró estado para sesión {session_id}")
+            return
         
-        Args:
-            action: Acción con el ID de la tarea a cancelar.
-            
-        Returns:
-            Un diccionario con el resultado de la operación de cancelación.
-        """
+        # Extraer mensaje
+        message = message_data.get("message", "")
+        if not message:
+            await self.chat_handler._send_error(
+                session_id,
+                "",
+                "Mensaje vacío",
+                "invalid_message"
+            )
+            return
+        
+        # Procesar mensaje
         try:
-            if not action.task_id:
-                return {
-                    "success": False,
-                    "error": {
-                        "type": "InvalidAction",
-                        "message": "Se requiere task_id"
-                    }
-                }
-            
-            # Lógica para enviar una acción de cancelación al servicio de ejecución.
-            logger.info(f"Enviando cancelación para la tarea {action.task_id}.")
-            cancelled = True # Simulación
-            
-            return {
-                "success": True,
-                "task_id": action.task_id,
-                "cancelled": cancelled
-            }
-            
+            await self.chat_handler.process_chat_message(
+                session_state=session_state,
+                message=message,
+                message_type=message_data.get("type", "text"),
+                metadata=message_data.get("metadata")
+            )
         except Exception as e:
-            logger.error(f"Error cancelando tarea: {str(e)}")
+            self._logger.error(
+                f"Error procesando mensaje WebSocket: {e}",
+                exc_info=True
+            )
+    
+    async def _get_session_status(self, action: DomainAction) -> Dict[str, Any]:
+        """Obtiene el estado de una sesión."""
+        session_id = action.data.get("session_id")
+        if not session_id:
+            raise InvalidActionError("session_id es requerido")
+        
+        session_state = await self.websocket_manager.get_session_state(session_id)
+        if not session_state:
             return {
-                "success": False,
-                "error": {
-                    "type": type(e).__name__,
-                    "message": str(e)
-                }
+                "session_id": session_id,
+                "status": "not_found"
             }
+        
+        return {
+            "session_id": session_id,
+            "status": "active",
+            "tenant_id": session_state.tenant_id,
+            "agent_id": session_state.agent_id,
+            "connection_id": session_state.connection_id,
+            "created_at": session_state.created_at.isoformat(),
+            "last_activity": session_state.last_activity.isoformat(),
+            "message_count": session_state.messages_sent + session_state.messages_received,
+            "current_task_id": session_state.current_task_id
+        }
+    
+    def get_websocket_manager(self) -> WebSocketManager:
+        """Obtiene el WebSocket manager."""
+        return self.websocket_manager

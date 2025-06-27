@@ -1,11 +1,16 @@
 """
 Handlers para Agent Orchestrator Service.
 
-Implementa handlers para Domain Actions de orquestación y WebSockets.
+Refactorizado para nueva estructura.
 """
 
-from .handlers_domain_actions import WebSocketHandler, ChatHandler
+from .chat_handler import ChatHandler
 from .callback_handler import CallbackHandler
 from .context_handler import ContextHandler, get_context_handler
 
-__all__ = ['WebSocketHandler', 'ChatHandler', 'CallbackHandler', 'ContextHandler', 'get_context_handler']
+__all__ = [
+    'ChatHandler',
+    'CallbackHandler', 
+    'ContextHandler',
+    'get_context_handler'
+]

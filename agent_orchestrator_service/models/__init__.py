@@ -1,7 +1,7 @@
 """
 Modelos del Agent Orchestrator Service.
 
-Define los modelos de Domain Actions y WebSockets para orquestación.
+Actualizado con nuevos modelos de sesión.
 """
 
 # Modelos WebSocket (necesarios para la comunicación frontend)
@@ -16,6 +16,12 @@ from .actions_model import (
     ExecutionCallbackAction, ChatSendMessageAction
 )
 
+# Modelos de sesión (NUEVO)
+from .session_models import (
+    SessionState, ConnectionInfo as SessionConnectionInfo,
+    ChatTask, ConversationContext
+)
+
 __all__ = [
     # Modelos WebSocket
     'WebSocketMessage', 'WebSocketMessageType', 'ConnectionInfo', 'ConnectionStatus',
@@ -23,5 +29,8 @@ __all__ = [
     # Domain Actions
     'WebSocketSendAction', 'WebSocketBroadcastAction',
     'ChatProcessAction', 'ChatStatusAction', 'ChatCancelAction',
-    'ExecutionCallbackAction', 'ChatSendMessageAction'
+    'ExecutionCallbackAction', 'ChatSendMessageAction',
+    
+    # Modelos de sesión
+    'SessionState', 'SessionConnectionInfo', 'ChatTask', 'ConversationContext'
 ]

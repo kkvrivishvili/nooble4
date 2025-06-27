@@ -1,215 +1,150 @@
 """
 Rutas WebSocket para comunicación en tiempo real.
 
-MODIFICADO: Integración con sistema de colas por tier y validación de headers.
+Simplificado para delegar toda la lógica al WebSocketManager y OrchestrationService.
 """
-
 import json
 import logging
-from typing import Dict, Any, Optional
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends, HTTPException
-from starlette.websockets import WebSocketState
+from typing import Optional
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
 from datetime import datetime
 
-from agent_orchestrator_service.services.websocket_manager import WebSocketManager
-from agent_orchestrator_service.models.websocket_model import WebSocketMessage, WebSocketMessageType
-from agent_orchestrator_service.handlers.context_handler import ContextHandler, get_context_handler
-from agent_orchestrator_service.config.settings import get_settings
-from common.redis_pool import get_redis_client
+from ..services.orchestration_service import OrchestrationService
+from ..websocket import WebSocketManager
+from ..models.websocket_model import WebSocketMessage, WebSocketMessageType
+from ..config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["websocket"])
 settings = get_settings()
 
-# Obtener instancia singleton de WebSocketManager
-websocket_manager = WebSocketManager()
+# Instancia global del servicio (se inicializa en main.py)
+orchestration_service: Optional[OrchestrationService] = None
 
-async def get_context_handler_dep() -> ContextHandler:
-    """Dependencia para obtener ContextHandler."""
-    redis_client = await get_redis_client()
-    return await get_context_handler(redis_client, None)
 
-@router.websocket("/ws/{session_id}")
+def get_orchestration_service() -> OrchestrationService:
+    """Obtiene la instancia del servicio de orquestación."""
+    if orchestration_service is None:
+        raise RuntimeError("OrchestrationService no inicializado")
+    return orchestration_service
+
+
+@router.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
-    session_id: str,
+    session_id: str = Query(..., description="ID de la sesión"),
     tenant_id: str = Query(..., description="ID del tenant"),
-    tenant_tier: str = Query(..., description="Tier del tenant"),
-    agent_id: Optional[str] = Query(None, description="ID del agente (opcional)"),
-    user_id: Optional[str] = Query(None, description="ID del usuario (opcional)"),
-    token: Optional[str] = Query(None, description="Token de autenticación (opcional)")
+    agent_id: str = Query(..., description="ID del agente"),
+    user_id: Optional[str] = Query(None, description="ID del usuario"),
+    token: Optional[str] = Query(None, description="Token de autenticación")
 ):
     """
-    Endpoint WebSocket para comunicación en tiempo real.
+    Endpoint WebSocket para chat en tiempo real.
     
-    MODIFICADO: Validación basada en query params que corresponden a headers.
-    
-    Args:
-        websocket: Conexión WebSocket
-        session_id: ID de la sesión
-        tenant_id: ID del tenant (requerido)
-        tenant_tier: Tier del tenant (requerido)
-        agent_id: ID del agente (opcional)
-        user_id: ID del usuario (opcional)
-        token: Token de autenticación (opcional)
+    Mantiene una conexión persistente durante toda la conversación.
     """
-    connection_id = f"{tenant_id}:{session_id}"
+    service = get_orchestration_service()
+    websocket_manager = service.get_websocket_manager()
     
     try:
         # Validar parámetros requeridos
-        if not tenant_id or not tenant_tier or not session_id:
-            await websocket.close(code=1008, reason="Missing required parameters")
-            return
-        
-        # Validar tier
-        valid_tiers = {"free", "advance", "professional", "enterprise"}
-        if tenant_tier not in valid_tiers:
-            await websocket.close(code=1008, reason=f"Invalid tier: {tenant_tier}")
+        if not all([session_id, tenant_id, agent_id]):
+            await websocket.close(code=1008, reason="Parámetros requeridos faltantes")
             return
         
         # TODO: Validar token de autenticación
-        if token and not await _validate_websocket_token(token, tenant_id, session_id):
-            await websocket.close(code=1008, reason="Invalid token")
+        if token and not await _validate_token(token, tenant_id, user_id):
+            await websocket.close(code=1008, reason="Token inválido")
             return
         
-        # Aceptar conexión
-        await websocket.accept()
-        logger.info(f"WebSocket conectado: session={session_id}, tenant={tenant_id}, tier={tenant_tier}")
-        
-        # Extraer información del cliente
-        client_info = {}
-        if "user-agent" in websocket.headers:
-            client_info["user_agent"] = websocket.headers["user-agent"]
-        
-        # Registrar conexión
+        # Conectar
         connection_id = await websocket_manager.connect(
             websocket=websocket,
             session_id=session_id,
             tenant_id=tenant_id,
-            tenant_tier=tenant_tier,  # NUEVO: Registrar tier
-            user_id=user_id,
             agent_id=agent_id,
-            user_agent=client_info.get("user_agent"),
-            ip_address=websocket.client.host if hasattr(websocket, "client") else None
+            user_id=user_id,
+            metadata={
+                "connected_from": "websocket_endpoint",
+                "user_agent": websocket.headers.get("user-agent", "unknown")
+            }
         )
         
-        # Enviar confirmación de conexión
-        ack_message = WebSocketMessage(
-            type=WebSocketMessageType.CONNECTION_ACK,
-            data={
-                "connection_id": connection_id,
-                "session_id": session_id,
-                "tenant_id": tenant_id,
-                "tenant_tier": tenant_tier,
-                "message": "Conexión establecida",
-                "server_time": datetime.utcnow().isoformat()
-            },
-            session_id=session_id,
-            tenant_id=tenant_id
+        logger.info(
+            f"Nueva conexión WebSocket: {connection_id} "
+            f"(session: {session_id}, tenant: {tenant_id}, agent: {agent_id})"
         )
         
-        await websocket_manager.send_message(connection_id, ack_message)
-        
-        # Bucle de recepción de mensajes
+        # Loop principal
         while True:
-            if websocket.client_state == WebSocketState.DISCONNECTED:
-                break
-                
+            # Recibir mensaje
+            data = await websocket.receive_text()
+            
             try:
-                # Recibir mensaje con timeout
-                data = await websocket.receive_text()
                 message_data = json.loads(data)
-                
-                # Procesar mensaje del cliente
-                await websocket_manager.handle_client_message(
-                    connection_id, 
-                    message_data,
-                    tenant_id=tenant_id,
-                    tenant_tier=tenant_tier
-                )
-                
             except json.JSONDecodeError:
-                logger.warning(f"Mensaje WebSocket inválido: {data}")
-                await websocket_manager.send_error(
-                    connection_id, 
-                    "Formato de mensaje inválido",
-                    error_code="INVALID_JSON"
+                await websocket_manager.send_to_session(
+                    session_id,
+                    WebSocketMessage(
+                        type=WebSocketMessageType.ERROR,
+                        data={
+                            "error": "Formato de mensaje inválido",
+                            "error_type": "invalid_json"
+                        }
+                    )
                 )
-                
-            except Exception as e:
-                if "code = 1000" in str(e) or "code = 1001" in str(e):
-                    # Desconexión normal
-                    break
-                logger.error(f"Error en bucle WebSocket: {str(e)}")
-                await websocket_manager.send_error(
-                    connection_id, 
-                    "Error interno",
-                    error_code="INTERNAL_ERROR"
-                )
-                break
+                continue
+            
+            # Procesar mensaje
+            processed_data = await websocket_manager.handle_client_message(
+                websocket,
+                session_id,
+                message_data
+            )
+            
+            # Si es un mensaje de chat (no de control), procesarlo
+            if processed_data:
+                await service.process_websocket_message(session_id, processed_data)
     
     except WebSocketDisconnect:
-        logger.info(f"Cliente desconectado: {tenant_id}/{session_id}")
-    
+        logger.info(f"Cliente desconectado: session_id={session_id}")
     except Exception as e:
-        logger.error(f"Error en WebSocket: {str(e)}")
-        # Intentar cerrar conexión si aún está abierta
+        logger.error(f"Error en WebSocket: {e}", exc_info=True)
         try:
-            if websocket.client_state != WebSocketState.DISCONNECTED:
-                await websocket.close(code=1011, reason="Internal error")
+            await websocket.close(code=1011, reason="Error interno del servidor")
         except:
             pass
-    
     finally:
         # Limpiar conexión
-        if connection_id:
-            await websocket_manager.disconnect(connection_id, tenant_id, session_id)
-            logger.info(f"Conexión WebSocket limpiada: {connection_id}")
+        await websocket_manager.disconnect(websocket, session_id)
+        logger.info(f"Conexión limpiada: session_id={session_id}")
+
 
 @router.get("/ws/stats")
 async def get_websocket_stats(
-    tenant_id: Optional[str] = Query(None, description="Filtrar por tenant")
+    service: OrchestrationService = Depends(get_orchestration_service)
 ):
-    """
-    Obtiene estadísticas de conexiones WebSocket.
-    
-    Args:
-        tenant_id: Filtrar estadísticas por tenant específico
-        
-    Returns:
-        Estadísticas de conexiones
-    """
-    if tenant_id:
-        return await websocket_manager.get_tenant_stats(tenant_id)
-    else:
-        return await websocket_manager.get_connection_stats()
+    """Obtiene estadísticas de conexiones WebSocket."""
+    websocket_manager = service.get_websocket_manager()
+    return websocket_manager.get_stats()
 
-@router.get("/ws/health")
-async def websocket_health():
-    """Health check específico para WebSockets."""
-    stats = await websocket_manager.get_connection_stats()
-    
-    return {
-        "status": "healthy",
-        "service": "websocket",
-        "active_connections": stats.get("total_connections", 0),
-        "active_sessions": stats.get("total_sessions", 0),
-        "timestamp": datetime.utcnow().isoformat()
-    }
 
-# Funciones auxiliares
-async def _validate_websocket_token(token: str, tenant_id: str, session_id: str) -> bool:
+async def _validate_token(token: str, tenant_id: str, user_id: Optional[str]) -> bool:
     """
-    Valida token de WebSocket.
+    Valida el token de autenticación.
     
-    TODO: Implementar validación real de JWT/token.
+    TODO: Implementar validación real con JWT.
     """
-    # Validación básica temporal
-    if token == "debug_token":
+    # Validación temporal para desarrollo
+    if token == "dev_token":
         return True
     
     # TODO: Implementar validación JWT real
-    # jwt_payload = verify_jwt(token)
-    # return jwt_payload.get("tenant_id") == tenant_id
-    
-    return True  # Temporal: permitir todas las conexiones
+    return True
+
+
+# Función para establecer el servicio (llamada desde main.py)
+def set_orchestration_service(service: OrchestrationService):
+    """Establece la instancia global del servicio."""
+    global orchestration_service
+    orchestration_service = service
