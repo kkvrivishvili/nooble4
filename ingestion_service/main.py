@@ -1,9 +1,14 @@
-"""Main entry point for Ingestion Service"""
+"""
+Punto de entrada principal para Ingestion Service.
+
+MODIFICADO: Integración completa con sistema de colas por tier.
+"""
 import asyncio
 import logging
 import signal
 import sys
 from contextlib import asynccontextmanager
+from typing import List, Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,16 +25,17 @@ from .services import IngestionService
 from .websocket import WebSocketManager
 
 # Global instances
-redis_manager: RedisManager = None
-redis_client: BaseRedisClient = None
-ingestion_worker: IngestionWorker = None
+redis_manager: Optional[RedisManager] = None
+redis_client: Optional[BaseRedisClient] = None
+ingestion_workers: List[IngestionWorker] = []
+worker_tasks: List[asyncio.Task] = []
 settings: IngestionServiceSettings = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifecycle"""
-    global redis_manager, redis_client, ingestion_worker, settings
+    global redis_manager, redis_client, ingestion_workers, worker_tasks, settings
     
     # Startup
     settings = IngestionServiceSettings()
@@ -61,16 +67,24 @@ async def lifespan(app: FastAPI):
         )
         set_ingestion_service(ingestion_service)
         
-        # Initialize and start worker
+        # Initialize and start multiple workers
         if settings.auto_start_workers:
-            ingestion_worker = IngestionWorker(
-                app_settings=settings,
-                async_redis_conn=redis_conn,
-                redis_client=redis_client
-            )
-            await ingestion_worker.initialize()
-            await ingestion_worker.start()
-            logger.info("Ingestion worker started")
+            num_workers = settings.worker_count
+            
+            for i in range(num_workers):
+                worker = IngestionWorker(
+                    app_settings=settings,
+                    async_redis_conn=redis_conn,
+                    redis_client=redis_client,
+                    consumer_id_suffix=f"worker-{i}"  # Unique suffix for each worker
+                )
+                await worker.initialize()
+                task = asyncio.create_task(worker.run())
+                ingestion_workers.append(worker)
+                worker_tasks.append(task)
+                logger.info(f"Started ingestion worker {i+1}/{num_workers}")
+            
+            logger.info(f"Started {num_workers} ingestion workers")
         
         yield
         
@@ -79,15 +93,25 @@ async def lifespan(app: FastAPI):
         raise
     finally:
         # Shutdown
-        logger.info("Shutting down...")
+        logger.info("Shutting down ingestion service...")
         
-        if ingestion_worker:
-            await ingestion_worker.stop()
+        # Stop all workers
+        for worker in ingestion_workers:
+            await worker.stop()
         
+        # Cancel all worker tasks
+        for task in worker_tasks:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        
+        # Close Redis manager
         if redis_manager:
             await redis_manager.close()
         
-        logger.info("Shutdown complete")
+        logger.info("Ingestion service shutdown complete")
 
 
 # Create FastAPI app
