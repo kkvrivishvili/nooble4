@@ -10,6 +10,7 @@ volumes:
   qdrant_data:
   keycloak_data:
   pgadmin_data:
+  konga_data:
 
 services:
   # ==================== DATABASES ====================
@@ -175,27 +176,40 @@ services:
       context: ./kong_gateway
       dockerfile: konga.Dockerfile
     container_name: nooble4-konga
+    hostname: konga
     networks:
       - nooble-network
+    # Environment variables are now defined in the Dockerfile
     environment:
-      - NODE_ENV=${KONGA_ENV}
-      - TOKEN_SECRET=${KONGA_TOKEN_SECRET}
-      - DB_ADAPTER=postgres
-      - DB_URI=${KONGA_DATABASE_URI}
+      # Override any environment variables here if needed
+      - NODE_ENV=${KONGA_ENV:-production}
     ports:
-      - "${KONGA_PORT}:1337"
+      - "${KONGA_PORT:-1337}:1337"
+    volumes:
+      # Persistent storage for Konga data
+      - konga_data:/app/kongadata
+      # Mount local directory for custom configurations if needed
+      # - ./kong_gateway/config:/app/config
     depends_on:
-      kong:
-        condition: service_healthy
       postgres_database:
         condition: service_healthy
+      # Kong is not required for Konga to start
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:1337"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:1337/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 120s
     restart: unless-stopped
+    # Add security options
+    security_opt:
+      - no-new-privileges:true
+    # Limit resources
+    deploy:
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: 1024M
 
   pgadmin:
     image: dpage/pgadmin4:latest
