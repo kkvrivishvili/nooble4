@@ -26,7 +26,7 @@ class EmbeddingServiceSettings(CommonAppSettings):
     service_version: str = Field("1.0.0", description="Versión del servicio de embeddings.")
    
     # --- Configuración de Colas y Workers ---
-    worker_count: int = Field(default=1, description="Número de workers para procesar embeddings.")
+    worker_count: int = Field(default=5, description="Número de workers para procesar embeddings.")
     callback_queue_prefix: str = Field("embedding", description="Prefijo para colas de callback.")
     worker_sleep_seconds: float = Field(0.1, description="Tiempo de espera para workers de procesamiento.")
 

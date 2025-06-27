@@ -53,7 +53,7 @@ class IngestionServiceSettings(CommonAppSettings):
     ingestion_actions_queue_name: str = Field(default="ingestion:actions", description="Cola para acciones de dominio entrantes para Ingestion")
 
     # Workers y procesamiento
-    worker_count: int = Field(default=2, description="Número de workers de ingestión")
+    worker_count: int = Field(default=5,description="Número de workers de ingestión")
     max_concurrent_tasks: int = Field(default=5, description="Máximo de tareas de ingestión concurrentes")
     job_timeout_seconds: int = Field(default=3600, description="Timeout de trabajos de ingestión (segundos)")
     redis_lock_timeout_seconds: int = Field(default=600, description="Timeout de bloqueos Redis para ingestión")

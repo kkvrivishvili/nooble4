@@ -25,7 +25,7 @@ class QueryServiceSettings(CommonAppSettings):
     embedding_service_timeout: int = Field(default=30, description="Timeout para comunicación con Embedding Service")
     
     # Worker Settings
-    worker_count: int = Field(default=1, description="Número de workers para procesar queries")
+    worker_count: int = Field(default=5,description="Número de workers para procesar queries")
     worker_sleep_seconds: float = Field(1.0, description="Tiempo de espera entre polls para los workers de ejecución")
 
     
