@@ -1,8 +1,6 @@
 import asyncio
-import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
-import uuid
 
 from qdrant_client import AsyncQdrantClient
 
@@ -20,6 +18,7 @@ from ..handlers import (
     DocumentProcessorHandler, ChunkEnricherHandler, QdrantHandler
 )
 from ..websocket.manager import WebSocketManager
+from ..clients import EmbeddingClient
 
 
 class IngestionService(BaseService):
@@ -54,6 +53,12 @@ class IngestionService(BaseService):
             redis_conn=direct_redis_conn,
             state_model=IngestionTask,
             app_settings=app_settings
+        )
+        
+        # Initialize embedding client
+        self.embedding_client = EmbeddingClient(
+            app_settings=app_settings,
+            redis_client=service_redis_client
         )
         
         # WebSocket manager for progress updates
@@ -211,7 +216,7 @@ class IngestionService(BaseService):
         original_action: DomainAction
     ):
         """Send chunks to embedding service"""
-        # CORRECCIÓN 6: Usar CacheManager para almacenar chunks temporalmente
+        # Almacenar chunks temporalmente en Redis
         for chunk in chunks:
             await self.chunk_cache_manager.save(
                 cache_type="chunk",
@@ -220,43 +225,34 @@ class IngestionService(BaseService):
                 ttl=3600  # TTL de 1 hora
             )
         
-        # Prepare texts for embedding
-        texts = [chunk.content for chunk in chunks]  # CAMBIO CRÍTICO: text → content
+        # Preparar datos para la generación de embeddings
+        texts = [chunk.content for chunk in chunks]
         chunk_ids = [chunk.chunk_id for chunk in chunks]
         
-        # NUEVO: Extraer configuración del embedding desde rag_config
+        # Extraer modelo de embedding desde rag_config
         embedding_model = original_action.rag_config.embedding_model
         
         self._logger.info(
-            f"Sending {len(chunks)} chunks for embedding using model={embedding_model} for agent_id={task.agent_id}"
+            f"Enviando {len(chunks)} chunks para embedding con model={embedding_model} para agent_id={task.agent_id}"
         )
         
-        # CORRECCIÓN 2: Corregir action_type (sin punto extra)
-        embedding_action = DomainAction(
-            action_type="embedding.batch_process",
-            tenant_id=task.tenant_id,
-            session_id=task.session_id,
-            task_id=uuid.UUID(task.task_id),
-            user_id=task.user_id,
-            origin_service=self.service_name,
-            trace_id=original_action.trace_id,
+        # Utilizar el cliente de embedding para enviar los textos
+        metadata = {
+            "batch_index": chunks[0].chunk_index if chunks else 0,
+            "batch_size": len(chunks),
+            "agent_id": task.agent_id,
+            "tenant_id": task.tenant_id
+        }
+        
+        # Llamar al cliente de embedding encapsulado
+        await self.embedding_client.batch_process(
+            texts=texts,
+            chunk_ids=chunk_ids,
+            agent_id=task.agent_id,
+            model=embedding_model,
             rag_config=original_action.rag_config,
-            data={
-                "texts": texts,
-                "chunk_ids": chunk_ids,
-                "agent_id": task.agent_id,
-                "model": embedding_model  # CORRECCIÓN 3: Agregar model al payload
-            },
-            metadata={
-                "batch_index": chunks[0].chunk_index,
-                "batch_size": len(chunks),
-                "agent_id": task.agent_id
-            }
-        )
-        
-        await self.service_redis_client.send_action_async_with_callback(
-            embedding_action,
-            callback_event_name="ingestion.embedding_result"
+            trace_id=original_action.trace_id,
+            metadata=metadata
         )
     
     async def _handle_embedding_result(self, action: DomainAction) -> None:
