@@ -16,6 +16,7 @@ from ..models import (
     BatchDocumentIngestionRequest
 )
 from ..dependencies import get_ingestion_service, get_ws_manager
+from ..services.ingestion_service import IngestionService
 
 router = APIRouter(prefix="/api/v1/ingestion", tags=["ingestion"])
 security = HTTPBearer()

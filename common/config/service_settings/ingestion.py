@@ -30,6 +30,9 @@ class IngestionServiceSettings(CommonAppSettings):
         env_file='.env'
     )
 
+    # Override service_name with default value
+    service_name: str = Field(default="ingestion_service", description="Nombre del servicio de ingestión")
+
     # Configuración del servidor (ya en CommonAppSettings, pero puede sobreescribirse si es necesario)
     # host: str = Field(default="0.0.0.0", description="Host del servidor")
     # port: int = Field(default=8000, description="Puerto del servidor")

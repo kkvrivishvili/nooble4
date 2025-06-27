@@ -34,20 +34,19 @@ class IngestionService(BaseService):
         super().__init__(app_settings, service_redis_client, direct_redis_conn)
         
         # Initialize handlers
-        self.document_processor = DocumentProcessorHandler()
-        self.chunk_enricher = ChunkEnricherHandler()
+        self.document_processor = DocumentProcessorHandler(app_settings)
+        self.chunk_enricher = ChunkEnricherHandler(app_settings)
         
         # Initialize Qdrant client
         self.qdrant_client = AsyncQdrantClient(
-            host=app_settings.qdrant_host,
-            port=app_settings.qdrant_port,
+            url=app_settings.qdrant_url,
             timeout=30.0
         )
         
         # Initialize Qdrant handler
         self.qdrant_handler = QdrantHandler(
-            qdrant_client=self.qdrant_client,
-            logger=self._logger
+            app_settings=app_settings,
+            qdrant_client=self.qdrant_client
         )
         
         # Redis state manager for tasks
@@ -69,6 +68,28 @@ class IngestionService(BaseService):
         )
         
         self._logger.info("IngestionService initialized")
+    
+    async def initialize(self):
+        """Initialize the service and all its components"""
+        # Initialize Qdrant handler
+        await self.qdrant_handler.initialize()
+        
+        # Initialize cache managers
+        from ingestion_service.models import ChunkModel
+        self.chunk_cache_manager = CacheManager(
+            redis_conn=self.direct_redis_conn,
+            state_model=ChunkModel,
+            app_settings=self.app_settings
+        )
+        
+        from ingestion_service.models import IngestionTask
+        self.task_cache_manager = CacheManager(
+            redis_conn=self.direct_redis_conn,
+            state_model=IngestionTask,
+            app_settings=self.app_settings
+        )
+        
+        self._logger.info("IngestionService initialized successfully")
     
     async def process_action(self, action: DomainAction) -> Optional[Dict[str, Any]]:
         """Process incoming domain actions"""
@@ -529,10 +550,3 @@ class IngestionService(BaseService):
         self._logger.info("Scheduling background tasks...")
         asyncio.create_task(self._task_sweeper_loop())
         self._logger.info("Task sweeper has been scheduled.")
-
-
-# ingestion_service/workers/__init__.py
-"""Workers for Ingestion Service"""
-
-
-__all__ = ["IngestionWorker"]

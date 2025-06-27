@@ -10,7 +10,6 @@ __version__ = "1.0.0"
 
 # Importaciones desde los submódulos
 from .api import router
-from .config import get_settings
 from .handlers import DocumentProcessorHandler, ChunkEnricherHandler, QdrantHandler
 from .models import (
     DocumentIngestionRequest,
@@ -27,9 +26,6 @@ from .workers import IngestionWorker
 __all__ = [
     # API
     "router",
-    
-    # Configuración
-    "get_settings",
     
     # Handlers
     "DocumentProcessorHandler",

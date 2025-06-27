@@ -27,16 +27,21 @@ class QdrantHandler(BaseHandler):
         self.collection_name = collection_name
         self.client = qdrant_client  
         self.vector_size = 1536  # Default for OpenAI embeddings
+        self._initialized = False
         
-        # Ensure collection exists
-        self._ensure_collection()
+    async def initialize(self):
+        """Initialize the handler and ensure collection exists"""
+        if not self._initialized:
+            await self._ensure_collection()
+            self._initialized = True
     
-    def _ensure_collection(self):
+    async def _ensure_collection(self):
         """Ensure the collection exists with proper configuration"""
         try:
-            collections = self.client.get_collections().collections
+            collections_response = await self.client.get_collections()
+            collections = collections_response.collections
             if not any(c.name == self.collection_name for c in collections):
-                self.client.create_collection(
+                await self.client.create_collection(
                     collection_name=self.collection_name,
                     vectors_config=VectorParams(
                         size=self.vector_size,
@@ -45,30 +50,33 @@ class QdrantHandler(BaseHandler):
                 )
                 
                 # Create payload indices for efficient filtering
-                self.client.create_payload_index(
+                await self.client.create_payload_index(
                     collection_name=self.collection_name,
                     field_name="tenant_id",
                     field_type="keyword"
                 )
-                self.client.create_payload_index(
+                await self.client.create_payload_index(
                     collection_name=self.collection_name,
                     field_name="agent_id",
                     field_type="keyword"
                 )
-                self.client.create_payload_index(
+                await self.client.create_payload_index(
                     collection_name=self.collection_name,
                     field_name="collection_id", 
                     field_type="keyword"
                 )
-                self.client.create_payload_index(
+                await self.client.create_payload_index(
                     collection_name=self.collection_name,
                     field_name="document_id",
                     field_type="keyword"
                 )
                 
-                self._logger.info(f"Created Qdrant collection: {self.collection_name}")
+                self._logger.info(f"Collection '{self.collection_name}' created with indices")
+            else:
+                self._logger.info(f"Collection '{self.collection_name}' already exists")
+                
         except Exception as e:
-            self._logger.error(f"Error ensuring collection: {e}")
+            self._logger.error(f"Error ensuring collection '{self.collection_name}': {e}")
             raise
     
     async def store_chunks(self, chunks: List[ChunkModel]) -> Dict[str, Any]:

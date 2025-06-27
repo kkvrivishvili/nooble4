@@ -37,6 +37,9 @@ class IngestionWorker(BaseWorker):
             direct_redis_conn=self.async_redis_conn
         )
         
+        # Initialize the service components (including QdrantHandler)
+        await self.ingestion_service.initialize()
+        
         self._logger.info("IngestionWorker initialized successfully")
     
     async def _handle_action(self, action: DomainAction) -> Optional[Dict[str, Any]]:
