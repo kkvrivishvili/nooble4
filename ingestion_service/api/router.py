@@ -11,7 +11,9 @@ from common.models import DomainAction, RAGConfig
 from ..models import (
     DocumentIngestionRequest, 
     IngestionTask, 
-    IngestionStatus
+    IngestionStatus,
+    BatchIngestionResponse,
+    BatchDocumentIngestionRequest
 )
 from ..dependencies import get_ingestion_service, get_ws_manager
 
