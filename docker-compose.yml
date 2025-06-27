@@ -1,73 +1,33 @@
+version: '3.8'
+
 networks:
   nooble-network:
     driver: bridge
 
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+  keycloak_data:
+  pgadmin_data:
+
 services:
-  # Redis Database
-  redis:
-    container_name: nooble4-redis
-    image: redis:7-alpine
-    command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory ${REDIS_MAX_MEMORY:-256mb} --maxmemory-policy allkeys-lru
-    ports:
-      - "${REDIS_PORT}:6379"
-    volumes:
-      - redis_data:/data
-    environment:
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
-      - REDIS_MAX_MEMORY=${REDIS_MAX_MEMORY:-256mb}
-    healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    restart: unless-stopped
-    networks:
-      - nooble-network
-
-  # Qdrant Vector Database
-  qdrant:
-    container_name: nooble4-qdrant
-    image: qdrant/qdrant:${QDRANT_VERSION:-v1.7.4}
-    ports:
-      - "${QDRANT_PORT}:6333"
-      - "${QDRANT_HTTP_PORT}:6334"
-    volumes:
-      - qdrant_data:/qdrant/storage
-    environment:
-      - QDRANT_API_KEY=${QDRANT_API_KEY}
-      - QDRANT_ALLOW_RECOVERY_MODE=${QDRANT_ALLOW_RECOVERY_MODE:-true}
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:6333/readyz"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
-    restart: unless-stopped
-    networks:
-      - nooble-network
-
-  postgres:
-    networks:
-      - nooble-network
+  # ==================== DATABASES ====================
+  
+  postgres_database:
     image: postgres:15-alpine
     container_name: nooble4-postgres
+    networks:
+      - nooble-network
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-      # Configuración de autenticación - en desarrollo permitir todo localmente
-      POSTGRES_HOST_AUTH_METHOD: trust
-      # Usuario y contraseña para Kong
-      KONG_PG_USER: ${KONG_PG_USER}
-      KONG_PG_PASSWORD: ${KONG_PG_PASSWORD}
-      KONG_PG_DATABASE: ${KONG_PG_DATABASE}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres_database/init:/docker-entrypoint-initdb.d
-      - ./postgres_database/pg_hba.conf:/etc/postgresql/pg_hba.conf
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -75,262 +35,139 @@ services:
       retries: 10
       start_period: 30s
     restart: unless-stopped
-    # Configuración de rendimiento para desarrollo
-    command: >
-      postgres 
-      -c 'max_connections=1000' 
-      -c 'shared_buffers=256MB' 
-      -c 'work_mem=16MB'
-      -c 'maintenance_work_mem=64MB'
-      -c 'wal_buffers=7864kB'
-      -c 'checkpoint_completion_target=0.9'
-      -c 'default_statistics_target=100'
-      -c 'random_page_cost=1.1'
-      -c 'effective_io_concurrency=200'
-      -c 'effective_cache_size=768MB'
-      -c 'log_statement=all'
-      -c 'log_connections=on'
-      -c 'log_disconnections=on'
-      -c 'log_duration=on'
-      -c 'log_min_duration_statement=0'
-      -c 'log_line_prefix=''%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h '''
 
-  query_service:
+  redis_database:
+    image: redis:7-alpine
+    container_name: nooble4-redis
     networks:
       - nooble-network
-    build:
-      context: .
-      dockerfile: ./query_service/Dockerfile
-    container_name: nooble4-query-service
+    command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory ${REDIS_MAX_MEMORY} --maxmemory-policy allkeys-lru
     ports:
-      - "${QUERY_SERVICE_PORT:-8000}:8000"
-    depends_on:
-      redis_database:
-        condition: service_healthy
-      qdrant_database:
-        condition: service_healthy
+      - "6379:6379"
     volumes:
-      - ./common:/app/common
-      - ./query_service:/app
-    env_file:
-      - ./.env
-    environment:
-      - SERVICE_NAME=query_service
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - redis_data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  qdrant_database:
+    image: qdrant/qdrant:v1.7.4
+    container_name: nooble4-qdrant
+    networks:
+      - nooble-network
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT_API_KEY=${QDRANT_API_KEY}
+      - QDRANT_ALLOW_RECOVERY_MODE=${QDRANT_ALLOW_RECOVERY_MODE}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:6333/readyz"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 20s
+    restart: unless-stopped
 
-  # agent_orchestrator_service:
-  #   networks:
-  #     - nooble-network
-  #   build:
-  #     context: .
-  #     dockerfile: ./agent_orchestrator_service/Dockerfile
-  #   container_name: nooble4-agent-orchestrator
-  #   ports:
-  #     - "${AGENT_ORCHESTRATOR_PORT:-8001}:8001"
-  #   depends_on:
-  #     redis_database:
-  #       condition: service_healthy
-  #   volumes:
-  #     - ./common:/app/common
-  #     - ./agent_orchestrator_service:/app
-  #   environment:
-  #     - SERVICE_NAME=agent_orchestrator
-  #     - LOG_LEVEL=${LOG_LEVEL:-INFO}
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
-  #     start_period: 20s
+  # ==================== INFRASTRUCTURE ====================
 
-  ingestion_service:
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0.1
+    container_name: nooble4-keycloak
     networks:
       - nooble-network
-    build:
-      context: .
-      dockerfile: ./ingestion_service/Dockerfile
-    container_name: nooble4-ingestion-service
+    command: ["start-dev"]
+    environment:
+      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN}
+      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
+      - KC_DB=postgres
+      - KC_DB_URL=jdbc:postgresql://${POSTGRES_HOST}:${POSTGRES_PORT}/${KEYCLOAK_DB}
+      - KC_DB_USERNAME=${KEYCLOAK_DB_USER}
+      - KC_DB_PASSWORD=${KEYCLOAK_DB_PASSWORD}
+      - KC_HTTP_ENABLED=true
+      - KC_HOSTNAME=${KEYCLOAK_HOSTNAME}
+      - KC_HOSTNAME_STRICT=false
+      - KC_HTTP_PORT=${KEYCLOAK_PORT}
+      - KC_PROXY=edge
     ports:
-      - "${INGESTION_SERVICE_PORT:-8002}:8002"
+      - "${KEYCLOAK_PORT}:8080"
     depends_on:
-      redis_database:
-        condition: service_healthy
-      qdrant_database:
+      postgres_database:
         condition: service_healthy
     volumes:
-      - ./common:/app/common
-      - ./ingestion_service:/app
-    environment:
-      - SERVICE_NAME=ingestion_service
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - keycloak_data:/opt/keycloak/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 20s
-
-  # conversation_service:
-  #   networks:
-  #     - nooble-network
-  #   build:
-  #     context: .
-  #     dockerfile: ./conversation_service/Dockerfile
-  #   container_name: nooble4-conversation-service
-  #   ports:
-  #     - "${CONVERSATION_SERVICE_PORT:-8004}:8004"
-  #   depends_on:
-  #     redis_database:
-  #       condition: service_healthy
-  #   volumes:
-  #     - ./common:/app/common
-  #     - ./conversation_service:/app
-  #   environment:
-  #     - SERVICE_NAME=conversation_service
-  #     - LOG_LEVEL=${LOG_LEVEL:-INFO}
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
-  #     start_period: 20s
-
-  agent_execution_service:
-    networks:
-      - nooble-network
-    build:
-      context: .
-      dockerfile: ./agent_execution_service/Dockerfile
-    ports:
-      - "8005:8005"
-    depends_on:
-      - redis_database
-    volumes:
-      - ./common:/app/common
-    env_file:
-      - ./.env
-
-  # agent_management_service:
-  #   networks:
-  #     - nooble-network
-  #   build:
-  #     context: .
-  #     dockerfile: ./agent_management_service/Dockerfile
-  #   container_name: nooble4-agent-management
-  #   ports:
-  #     - "${AGENT_MANAGEMENT_PORT:-8003}:8003"
-  #   depends_on:
-  #     redis_database:
-  #       condition: service_healthy
-  #   volumes:
-  #     - ./common:/app/common
-  #     - ./agent_management_service:/app
-  #   environment:
-  #     - SERVICE_NAME=agent_management
-  #     - LOG_LEVEL=${LOG_LEVEL:-INFO}
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
-  #     start_period: 20s
-
-  embedding_service:
-    networks:
-      - nooble-network
-    build:
-      context: .
-      dockerfile: ./embedding_service/Dockerfile
-    container_name: nooble4-embedding-service
-    ports:
-      - "${EMBEDDING_SERVICE_PORT:-8006}:8006"
-    depends_on:
-      redis_database:
-        condition: service_healthy
-    volumes:
-      - ./common:/app/common
-      - ./embedding_service:/app
-    environment:
-      - SERVICE_NAME=embedding_service
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
 
   kong-migrations:
     build:
       context: ./kong_gateway
       dockerfile: kong.Dockerfile
     container_name: nooble4-kong-migrations
-    command: kong migrations bootstrap -v
-    environment:
-      - KONG_DATABASE=postgres
-      - KONG_PG_HOST=${POSTGRES_HOST:-postgres}
-      - KONG_PG_PORT=${POSTGRES_PORT:-5432}
-      - KONG_PG_USER=${KONG_PG_USER:-kong}
-      - KONG_PG_PASSWORD=${KONG_PG_PASSWORD:-kong}
-      - KONG_PG_DATABASE=${KONG_PG_DATABASE:-kong}
-      - KONG_PG_SSL=off
-      - KONG_PG_SSL_VERIFY=false
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: on-failure
     networks:
       - nooble-network
+    command: kong migrations bootstrap -v
+    environment:
+      - KONG_DATABASE=${KONG_DATABASE}
+      - KONG_PG_HOST=${KONG_PG_HOST}
+      - KONG_PG_PORT=${KONG_PG_PORT}
+      - KONG_PG_USER=${KONG_PG_USER}
+      - KONG_PG_PASSWORD=${KONG_PG_PASSWORD}
+      - KONG_PG_DATABASE=${KONG_PG_DATABASE}
+    depends_on:
+      postgres_database:
+        condition: service_healthy
+    restart: on-failure
 
   kong:
     build:
       context: ./kong_gateway
       dockerfile: kong.Dockerfile
     container_name: nooble4-kong
+    networks:
+      - nooble-network
     environment:
-      - KONG_DATABASE=postgres
-      - KONG_PG_HOST=${POSTGRES_HOST:-postgres}
-      - KONG_PG_PORT=${POSTGRES_PORT:-5432}
-      - KONG_PG_USER=${KONG_PG_USER:-kong}
-      - KONG_PG_PASSWORD=${KONG_PG_PASSWORD:-kong}
-      - KONG_PG_DATABASE=${KONG_PG_DATABASE:-kong}
-      - KONG_PG_SSL=off
-      - KONG_PG_SSL_VERIFY=false
+      - KONG_DATABASE=${KONG_DATABASE}
+      - KONG_PG_HOST=${KONG_PG_HOST}
+      - KONG_PG_PORT=${KONG_PG_PORT}
+      - KONG_PG_USER=${KONG_PG_USER}
+      - KONG_PG_PASSWORD=${KONG_PG_PASSWORD}
+      - KONG_PG_DATABASE=${KONG_PG_DATABASE}
       - KONG_PROXY_ACCESS_LOG=/dev/stdout
       - KONG_ADMIN_ACCESS_LOG=/dev/stdout
       - KONG_PROXY_ERROR_LOG=/dev/stderr
       - KONG_ADMIN_ERROR_LOG=/dev/stderr
-      - KONG_PROXY_LISTEN=0.0.0.0:${KONG_PROXY_PORT:-8000}, 0.0.0.0:${KONG_PROXY_SSL_PORT:-8443} ssl
-      - KONG_ADMIN_LISTEN=0.0.0.0:${KONG_ADMIN_PORT:-8001}, 0.0.0.0:${KONG_ADMIN_SSL_PORT:-8444} ssl
-      - KONG_ADMIN_GUI_AUTH=basic-auth
-      - KONG_ENFORCE_RBAC=on
-      - KONG_ADMIN_GUI_SESSION_CONF={}
-      - KONG_PLUGINS=bundled,keycloak
-      - KONG_NGINX_DAEMON=off
+      - KONG_PROXY_LISTEN=0.0.0.0:${KONG_PROXY_PORT}, 0.0.0.0:${KONG_PROXY_SSL_PORT} ssl
+      - KONG_ADMIN_LISTEN=0.0.0.0:${KONG_ADMIN_PORT}, 0.0.0.0:${KONG_ADMIN_SSL_PORT} ssl
+      - KONG_PLUGINS=${KONG_PLUGINS}
     ports:
-      - "${KONG_PROXY_PORT:-8000}:8000"
-      - "${KONG_PROXY_SSL_PORT:-8443}:8443"
-      - "${KONG_ADMIN_PORT:-8001}:8001"
-      - "${KONG_ADMIN_SSL_PORT:-8444}:8444"
+      - "8081:${KONG_PROXY_PORT}"  # Kong proxy en puerto 8081 del host
+      - "8443:${KONG_PROXY_SSL_PORT}"
+      - "8011:${KONG_ADMIN_PORT}"  # Kong admin en puerto 8011 del host
+      - "8444:${KONG_ADMIN_SSL_PORT}"
     depends_on:
       kong-migrations:
         condition: service_completed_successfully
       keycloak:
         condition: service_healthy
-    networks:
-      - nooble-network
     healthcheck:
       test: ["CMD", "kong", "health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
+    restart: unless-stopped
 
   konga:
     build:
@@ -339,61 +176,25 @@ services:
     container_name: nooble4-konga
     networks:
       - nooble-network
+    environment:
+      - NODE_ENV=${KONGA_ENV}
+      - TOKEN_SECRET=${KONGA_TOKEN_SECRET}
+      - DB_ADAPTER=postgres
+      - DB_URI=${KONGA_DATABASE_URI}
+    ports:
+      - "${KONGA_PORT}:1337"
     depends_on:
       kong:
         condition: service_healthy
-      postgres:
+      postgres_database:
         condition: service_healthy
-    environment:
-      - NODE_ENV=development
-      - KONGA_KONG_URL=${KONGA_KONG_URL:-http://kong:8001}
-      - KONGA_DATABASE_URI=postgresql://${KONGA_DB_USER:-konga}:${KONGA_DB_PASSWORD:-konga}@${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${KONGA_DB_DATABASE:-konga}
-      - KONGA_HOOK_TIMEOUT=120000
-      - KONGA_HOOK_RETRY=5
-      - KONGA_ADMIN_EMAIL=${KONGA_ADMIN_EMAIL:-admin@nooble4.local}
-      - KONGA_ADMIN_PASSWORD=${KONGA_ADMIN_PASSWORD:-admin1234}
-    ports:
-      - "1337:1337"
-    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:1337"]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 60s
-
-  keycloak:
-    networks:
-      - nooble-network
-    image: quay.io/keycloak/keycloak:23.0.1
-    container_name: nooble4-keycloak
-    command: ["start-dev"]
-    environment:
-      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN:-admin}
-      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-admin}
-      - KC_DB=postgres
-      - KC_DB_URL=jdbc:postgresql://${POSTGRES_HOST:-postgres}:${POSTGRES_PORT:-5432}/${KEYCLOAK_DB:-keycloak}
-      - KC_DB_USERNAME=${KEYCLOAK_DB_USER:-${POSTGRES_USER:-postgres}}
-      - KC_DB_PASSWORD=${KEYCLOAK_DB_PASSWORD:-${POSTGRES_PASSWORD:-postgres}}
-      - KC_HTTP_ENABLED=true
-      - KC_HOSTNAME=${KEYCLOAK_HOSTNAME:-keycloak}
-      - KC_HTTP_PORT=${KEYCLOAK_PORT:-8080}
-      - KC_HTTP_RELATIVE_PATH=/
-      - KC_PROXY=edge
-      - KC_HOSTNAME_STRICT=false
-    ports:
-      - "${KEYCLOAK_PORT:-8080}:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - keycloak_data:/opt/keycloak/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+    restart: unless-stopped
 
   pgadmin:
     image: dpage/pgadmin4:latest
@@ -401,14 +202,14 @@ services:
     networks:
       - nooble-network
     environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@nooble4.local}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
       PGADMIN_CONFIG_SERVER_MODE: 'False'
-      PGADMIN_LISTEN_PORT: ${PGADMIN_PORT:-5050}
+      PGADMIN_LISTEN_PORT: 5050
     ports:
-      - "${PGADMIN_PORT:-5050}:5050"
+      - "${PGADMIN_PORT}:5050"
     depends_on:
-      postgres:
+      postgres_database:
         condition: service_healthy
     volumes:
       - pgadmin_data:/var/lib/pgadmin
@@ -419,10 +220,115 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    restart: unless-stopped
 
-volumes:
-  redis_data:
-  qdrant_data:
-  postgres_data:
-  keycloak_data:
-  pgadmin_data:
+  # ==================== MICROSERVICES ====================
+
+  query_service:
+    build:
+      context: .
+      dockerfile: ./query_service/Dockerfile
+    container_name: nooble4-query-service
+    networks:
+      - nooble-network
+    ports:
+      - "${QUERY_SERVICE_PORT}:8000"
+    depends_on:
+      redis_database:
+        condition: service_healthy
+      qdrant_database:
+        condition: service_healthy
+    env_file:
+      - ./.env
+    environment:
+      - SERVICE_NAME=query_service
+      - LOG_LEVEL=${LOG_LEVEL}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  ingestion_service:
+    build:
+      context: .
+      dockerfile: ./ingestion_service/Dockerfile
+    container_name: nooble4-ingestion-service
+    networks:
+      - nooble-network
+    ports:
+      - "${INGESTION_SERVICE_PORT}:8002"
+    depends_on:
+      redis_database:
+        condition: service_healthy
+      qdrant_database:
+        condition: service_healthy
+    env_file:
+      - ./.env
+    environment:
+      - SERVICE_NAME=ingestion_service
+      - LOG_LEVEL=${LOG_LEVEL}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  embedding_service:
+    build:
+      context: .
+      dockerfile: ./embedding_service/Dockerfile
+    container_name: nooble4-embedding-service
+    networks:
+      - nooble-network
+    ports:
+      - "${EMBEDDING_SERVICE_PORT}:8006"
+    depends_on:
+      redis_database:
+        condition: service_healthy
+    env_file:
+      - ./.env
+    environment:
+      - SERVICE_NAME=embedding_service
+      - LOG_LEVEL=${LOG_LEVEL}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  agent_execution_service:
+    build:
+      context: .
+      dockerfile: ./agent_execution_service/Dockerfile
+    container_name: nooble4-agent-execution-service
+    networks:
+      - nooble-network
+    ports:
+      - "${AGENT_EXECUTION_PORT}:8005"
+    depends_on:
+      redis_database:
+        condition: service_healthy
+    env_file:
+      - ./.env
+    environment:
+      - SERVICE_NAME=agent_execution_service
+      - LOG_LEVEL=${LOG_LEVEL}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  # Servicios comentados por ahora
+  # agent_orchestrator_service:
+  # conversation_service:
+  # agent_management_service:
