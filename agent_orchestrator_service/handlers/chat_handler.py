@@ -7,16 +7,14 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 
 from common.errors.exceptions import ValidationError, ExternalServiceError
-from ..models.session_models import SessionState, ChatTask, ConversationContext
+from ..models.session_models import SessionState, ChatTask
 from ..models.websocket_model import WebSocketMessage, WebSocketMessageType
 from ..clients import ExecutionClient, ManagementClient
 from ..websocket import WebSocketManager
 
 
 class ChatHandler:
-    """
-    Handler para procesar mensajes de chat y coordinar con otros servicios.
-    """
+    """Handler para procesar mensajes de chat y coordinar con otros servicios."""
     
     def __init__(
         self,
@@ -24,14 +22,6 @@ class ChatHandler:
         management_client: ManagementClient,
         websocket_manager: WebSocketManager
     ):
-        """
-        Inicializa el handler.
-        
-        Args:
-            execution_client: Cliente para Execution Service
-            management_client: Cliente para Management Service
-            websocket_manager: Manager de WebSockets
-        """
         self.execution_client = execution_client
         self.management_client = management_client
         self.websocket_manager = websocket_manager
@@ -39,7 +29,7 @@ class ChatHandler:
         
         # Cache de configuraciones por agente (TTL de 5 minutos)
         self._config_cache = {}
-        self._cache_ttl = 300  # 5 minutos
+        self._cache_ttl = 300
     
     async def process_chat_message(
         self,
@@ -48,18 +38,7 @@ class ChatHandler:
         message_type: str = "text",
         metadata: Optional[Dict[str, Any]] = None
     ) -> ChatTask:
-        """
-        Procesa un mensaje de chat completo.
-        
-        Args:
-            session_state: Estado de la sesión
-            message: Mensaje del usuario
-            message_type: Tipo de mensaje
-            metadata: Metadata adicional
-            
-        Returns:
-            ChatTask con el resultado
-        """
+        """Procesa un mensaje de chat completo."""
         # Crear nueva tarea
         task = ChatTask(
             session_id=session_state.session_id,
@@ -91,6 +70,7 @@ class ChatHandler:
                 session_state.tenant_id,
                 session_state.agent_id,
                 session_state.session_id,
+                task.task_id,  # Usar task_id específico
                 session_state.user_id
             )
             
@@ -128,8 +108,8 @@ class ChatHandler:
             task.response = response.get("message", {}).get("content", "")
             task.status = "completed"
             task.completed_at = datetime.utcnow()
-            task.execution_time_ms = response.get("execution_time_ms")
-            task.tokens_used = response.get("usage", {})
+            task.execution_time_ms = response.get("metadata", {}).get("execution_time_seconds", 0) * 1000
+            task.tokens_used = response.get("metadata", {}).get("tokens_used", {})
             
             # 7. Enviar respuesta por WebSocket
             await self._send_chat_response(
@@ -189,6 +169,7 @@ class ChatHandler:
         tenant_id: str,
         agent_id: str,
         session_id: str,
+        task_id: str,
         user_id: Optional[str]
     ):
         """Obtiene configuraciones del agente con cache."""
@@ -206,6 +187,7 @@ class ChatHandler:
             tenant_id=tenant_id,
             agent_id=agent_id,
             session_id=session_id,
+            task_id=task_id,
             user_id=user_id
         )
         

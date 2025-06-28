@@ -56,12 +56,13 @@ async def lifespan(app: FastAPI):
             direct_redis_conn=redis_conn
         )
         
-        # Establecer servicio en routers
-        set_chat_service(orchestration_service)
-        set_ws_service(orchestration_service)
+        # NUEVO: Usar dependencies pattern
+        from .dependencies import set_orchestration_service, set_ws_manager
+        set_orchestration_service(orchestration_service)
+        set_ws_manager(orchestration_service.get_websocket_manager())
         
-        # Crear e iniciar workers (solo para acciones especiales)
-        worker_count = 1  # Solo necesitamos un worker mínimo
+        # Crear e iniciar workers
+        worker_count = 1
         for i in range(worker_count):
             worker = OrchestratorWorker(
                 app_settings=settings,
@@ -95,20 +96,6 @@ async def lifespan(app: FastAPI):
         if redis_manager:
             await redis_manager.close()
             logger.info("Conexiones Redis cerradas")
-
-
-async def _cleanup_inactive_sessions():
-    """Tarea periódica para limpiar sesiones inactivas."""
-    while True:
-        try:
-            await asyncio.sleep(300)  # Cada 5 minutos
-            if orchestration_service:
-                websocket_manager = orchestration_service.get_websocket_manager()
-                await websocket_manager.cleanup_inactive_sessions(inactive_minutes=30)
-        except asyncio.CancelledError:
-            break
-        except Exception as e:
-            logger.error(f"Error en limpieza de sesiones: {e}")
 
 
 # Crear aplicación

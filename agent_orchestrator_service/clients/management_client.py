@@ -21,13 +21,6 @@ class ManagementClient:
         redis_client: BaseRedisClient,
         settings: OrchestratorSettings
     ):
-        """
-        Inicializa el cliente.
-        
-        Args:
-            redis_client: Cliente Redis base para comunicación
-            settings: Configuración del servicio
-        """
         if not redis_client:
             raise ValueError("redis_client es requerido")
         if not settings:
@@ -42,33 +35,20 @@ class ManagementClient:
         tenant_id: str,
         agent_id: str,
         session_id: str,
+        task_id: str,
         user_id: Optional[str] = None,
         timeout: Optional[int] = None
     ) -> Tuple[ExecutionConfig, QueryConfig, RAGConfig]:
         """
         Obtiene las configuraciones del agente desde Management Service.
-        
-        Args:
-            tenant_id: ID del tenant
-            agent_id: ID del agente
-            session_id: ID de la sesión
-            user_id: ID del usuario (opcional)
-            timeout: Timeout personalizado
-            
-        Returns:
-            Tupla con (ExecutionConfig, QueryConfig, RAGConfig)
-            
-        Raises:
-            ExternalServiceError: Si falla la comunicación o el agente no existe
         """
-        # Crear DomainAction para solicitar configuraciones
         action = DomainAction(
             action_id=uuid.uuid4(),
             action_type="management.agent.get_config",
             timestamp=datetime.utcnow(),
             tenant_id=uuid.UUID(tenant_id),
             session_id=uuid.UUID(session_id),
-            task_id=uuid.uuid4(),  # Task temporal para esta consulta
+            task_id=uuid.UUID(task_id),
             agent_id=uuid.UUID(agent_id),
             user_id=uuid.UUID(user_id) if user_id else None,
             origin_service=self.redis_client.service_name,
@@ -81,7 +61,6 @@ class ManagementClient:
         actual_timeout = timeout if timeout is not None else self.default_timeout
         
         try:
-            # Enviar y esperar respuesta
             response = await self.redis_client.send_action_pseudo_sync(
                 action,
                 timeout=actual_timeout
@@ -97,16 +76,13 @@ class ManagementClient:
                 })
                 raise ExternalServiceError(error_message, error_detail=error_detail)
             
-            # Extraer y validar configuraciones
             config_data = response.data
             
-            # Validar que existan las configuraciones
             if not all(k in config_data for k in ["execution_config", "query_config", "rag_config"]):
                 raise ExternalServiceError(
                     "Respuesta incompleta del Management Service: faltan configuraciones"
                 )
             
-            # Parsear configuraciones usando modelos Pydantic
             execution_config = ExecutionConfig(**config_data["execution_config"])
             query_config = QueryConfig(**config_data["query_config"])
             rag_config = RAGConfig(**config_data["rag_config"])
@@ -130,35 +106,3 @@ class ManagementClient:
         except Exception as e:
             self._logger.error(f"Error obteniendo configuraciones: {e}", exc_info=True)
             raise ExternalServiceError(f"Error comunicándose con Management Service: {str(e)}")
-    
-    async def validate_agent_access(
-        self,
-        tenant_id: str,
-        agent_id: str,
-        user_id: Optional[str] = None,
-        timeout: Optional[int] = None
-    ) -> bool:
-        """
-        Valida que el tenant tiene acceso al agente.
-        
-        Args:
-            tenant_id: ID del tenant
-            agent_id: ID del agente
-            user_id: ID del usuario (opcional)
-            timeout: Timeout personalizado
-            
-        Returns:
-            True si tiene acceso, False en caso contrario
-        """
-        try:
-            # Intentar obtener configuraciones como forma de validación
-            await self.get_agent_configurations(
-                tenant_id=tenant_id,
-                agent_id=agent_id,
-                session_id=str(uuid.uuid4()),  # Session temporal
-                user_id=user_id,
-                timeout=timeout
-            )
-            return True
-        except ExternalServiceError:
-            return False

@@ -4,6 +4,7 @@ Cliente para comunicación con Agent Execution Service.
 import logging
 import uuid
 from typing import Dict, Any, Optional
+from datetime import datetime
 
 from common.models.actions import DomainAction
 from common.models.config_models import ExecutionConfig, QueryConfig, RAGConfig
@@ -20,13 +21,6 @@ class ExecutionClient:
         redis_client: BaseRedisClient,
         settings: OrchestratorSettings
     ):
-        """
-        Inicializa el cliente.
-        
-        Args:
-            redis_client: Cliente Redis base para comunicación
-            settings: Configuración del servicio
-        """
         if not redis_client:
             raise ValueError("redis_client es requerido")
         if not settings:
@@ -51,30 +45,9 @@ class ExecutionClient:
         mode: str = "simple",
         timeout: Optional[int] = None
     ) -> Dict[str, Any]:
-        """
-        Envía un mensaje de chat al Execution Service.
+        """Envía un mensaje de chat al Execution Service."""
         
-        Args:
-            message: Mensaje del usuario
-            conversation_id: ID de la conversación
-            session_id: ID de la sesión WebSocket
-            task_id: ID único de la tarea
-            tenant_id: ID del tenant
-            agent_id: ID del agente
-            user_id: ID del usuario (opcional)
-            execution_config: Configuración de ejecución
-            query_config: Configuración de query
-            rag_config: Configuración RAG
-            mode: Modo de chat ("simple" o "advance")
-            timeout: Timeout personalizado
-            
-        Returns:
-            Respuesta del Execution Service
-        """
-        # Determinar action_type según modo
-        action_type = f"execution.chat.{mode}"
-        
-        # Preparar payload del chat
+        # ✅ CORRECTO: Solo datos de chat en payload
         chat_payload = {
             "messages": [
                 {
@@ -85,31 +58,33 @@ class ExecutionClient:
             "conversation_id": conversation_id,
             "metadata": {
                 "source": "websocket",
-                "session_id": session_id
+                "mode": mode
             }
         }
         
-        # Crear DomainAction con configuraciones
+        # ✅ CORRECTO: Contexto va en DomainAction header
         action = DomainAction(
             action_id=uuid.uuid4(),
-            action_type=action_type,
+            action_type=f"execution.chat.{mode}",
             timestamp=datetime.utcnow(),
+            # ✅ Contexto en header:
             tenant_id=uuid.UUID(tenant_id),
             session_id=uuid.UUID(session_id),
             task_id=uuid.UUID(task_id),
             agent_id=uuid.UUID(agent_id),
             user_id=uuid.UUID(user_id) if user_id else None,
             origin_service=self.redis_client.service_name,
+            # ✅ Configuraciones en header:
             execution_config=execution_config,
             query_config=query_config,
             rag_config=rag_config,
+            # ✅ Solo datos de chat en payload:
             data=chat_payload
         )
         
         actual_timeout = timeout if timeout is not None else self.default_timeout
         
         try:
-            # Enviar y esperar respuesta
             response = await self.redis_client.send_action_pseudo_sync(
                 action,
                 timeout=actual_timeout
