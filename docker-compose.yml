@@ -183,8 +183,8 @@ services:
     build:
       context: .
       dockerfile: ./query_service/Dockerfile
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     depends_on:
       redis_database:
         condition: service_healthy
@@ -192,14 +192,6 @@ services:
         condition: service_healthy
       postgres_database:
         condition: service_healthy
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.query.rule=PathPrefix(`/query`)"
-      - "traefik.http.routers.query.entrypoints=websecure"
-      - "traefik.http.routers.query.tls=true"
-      - "traefik.http.routers.query.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.query.middlewares=auth-forward,strip-query"
-      - "traefik.http.services.query.loadbalancer.server.port=8000"
     volumes:
       - ./common:/app/common:ro
     env_file:
@@ -284,21 +276,13 @@ services:
     build:
       context: .
       dockerfile: ./conversation_service/Dockerfile
-    ports:
-      - "8004:8004"
+    expose:
+      - "8004"
     depends_on:
       redis_database:
         condition: service_healthy
       postgres_database:
         condition: service_healthy
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.conversation.rule=PathPrefix(`/conversation`)"
-      - "traefik.http.routers.conversation.entrypoints=websecure"
-      - "traefik.http.routers.conversation.tls=true"
-      - "traefik.http.routers.conversation.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.conversation.middlewares=auth-forward,strip-conversation"
-      - "traefik.http.services.conversation.loadbalancer.server.port=8004"
     volumes:
       - ./common:/app/common:ro
     env_file:
@@ -316,21 +300,13 @@ services:
     build:
       context: .
       dockerfile: ./agent_execution_service/Dockerfile
-    ports:
-      - "8005:8005"
+    expose:
+      - "8005"
     depends_on:
       redis_database:
         condition: service_healthy
       postgres_database:
         condition: service_healthy
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.execution.rule=PathPrefix(`/execution`)"
-      - "traefik.http.routers.execution.entrypoints=websecure"
-      - "traefik.http.routers.execution.tls=true"
-      - "traefik.http.routers.execution.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.execution.middlewares=auth-forward,strip-execution"
-      - "traefik.http.services.execution.loadbalancer.server.port=8005"
     volumes:
       - ./common:/app/common:ro
     env_file:
@@ -348,19 +324,11 @@ services:
     build:
       context: .
       dockerfile: ./embedding_service/Dockerfile
-    ports:
-      - "8006:8006"
+    expose:
+      - "8006"
     depends_on:
       redis_database:
         condition: service_healthy
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.embedding.rule=PathPrefix(`/embedding`)"
-      - "traefik.http.routers.embedding.entrypoints=websecure"
-      - "traefik.http.routers.embedding.tls=true"
-      - "traefik.http.routers.embedding.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.embedding.middlewares=auth-forward,strip-embedding"
-      - "traefik.http.services.embedding.loadbalancer.server.port=8006"
     volumes:
       - ./common:/app/common:ro
     env_file:
@@ -372,37 +340,30 @@ services:
       timeout: 10s
       retries: 5
 
-  agent_management_service:
-    networks:
-      - nooble-network
-    build:
-      context: .
-      dockerfile: ./agent_management_service/Dockerfile
-    ports:
-      - "8003:8003"
-    depends_on:
-      redis_database:
-        condition: service_healthy
-      postgres_database:
-        condition: service_healthy
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.management.rule=PathPrefix(`/management`)"
-      - "traefik.http.routers.management.entrypoints=websecure"
-      - "traefik.http.routers.management.tls=true"
-      - "traefik.http.routers.management.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.management.middlewares=auth-forward,strip-management"
-      - "traefik.http.services.management.loadbalancer.server.port=8003"
-    volumes:
-      - ./common:/app/common:ro
-    env_file:
-      - ./.env
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+  # agent_management_service has been renamed to user_management_service but is not ready yet
+  # user_management_service:
+  #   networks:
+  #     - nooble-network
+  #   build:
+  #     context: .
+  #     dockerfile: ./user_management_service/Dockerfile
+  #   expose:
+  #     - "8003"
+  #   depends_on:
+  #     redis_database:
+  #       condition: service_healthy
+  #     postgres_database:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./common:/app/common:ro
+  #   env_file:
+  #     - ./.env
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 5
 
 # ===========================================
 # Herramientas de Monitoreo (Opcional)
