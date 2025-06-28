@@ -98,6 +98,19 @@ async def lifespan(app: FastAPI):
             logger.info("Conexiones Redis cerradas")
 
 
+async def _cleanup_inactive_sessions():
+    """Tarea periódica para limpiar sesiones inactivas."""
+    while True:
+        try:
+            await asyncio.sleep(300)  # Cada 5 minutos
+            if orchestration_service:
+                cleaned = await orchestration_service.cleanup_inactive_sessions()
+                if cleaned > 0:
+                    logger.info(f"Limpiadas {cleaned} sesiones inactivas")
+        except Exception as e:
+            logger.error(f"Error en limpieza de sesiones: {e}")
+
+
 # Crear aplicación
 app = FastAPI(
     title="Agent Orchestrator Service",
