@@ -1,0 +1,6 @@
+http:
+  middlewares:
+    auth-forward:
+      forwardAuth:
+        address: "http://forwardauth:8080/auth"
+        trustForwardHeader: true

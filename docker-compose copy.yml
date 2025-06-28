@@ -1,14 +1,6 @@
-version: "3.8"
-
 networks:
   nooble-network:
     driver: bridge
-
-volumes:
-  redis_data:
-  qdrant_data:
-  postgres_data:
-  authentik_data:
 
 services:
   redis_database:
@@ -59,11 +51,6 @@ services:
     depends_on:
       - redis_database
       - qdrant_database
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.query.rule=PathPrefix(`/query`)"
-      - "traefik.http.routers.query.entrypoints=web"
-      - "traefik.http.routers.query.middlewares=auth-forward"
     volumes:
       - ./common:/app/common
     env_file:
@@ -145,55 +132,9 @@ services:
     env_file:
       - ./.env
 
-  traefik:
-    image: traefik:v3.0
-    container_name: traefik
-    networks:
-      - nooble-network
-    ports:
-      - "80:80"
-      - "8082:8080" # Dashboard
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./traefik_gateway/traefik.yml:/etc/traefik/traefik.yml
-      - ./traefik_gateway/dynamic.yml:/etc/traefik/dynamic.yml
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(`localhost`) && PathPrefix(`/dashboard`)"
-      - "traefik.http.routers.api.service=api@internal"
-      - "traefik.http.routers.api.entrypoints=web"
+  
 
-  forwardauth:
-    build:
-      context: ./forward_auth_service
-      dockerfile: Dockerfile
-    container_name: forward-auth
-    networks:
-      - nooble-network
-    environment:
-      JWT_SECRET: ${JWT_SECRET}
-      REDIS_URL: redis://redis_database:6379/0
-      QUOTA_LIMIT: 1000
-    expose:
-      - "8080"
-
-  authentik:
-    build:
-      context: ./authentik_auth
-      dockerfile: Dockerfile
-    container_name: authentik
-    networks:
-      - nooble-network
-    ports:
-      - "9000:9000"
-    volumes:
-      - ./authentik_auth/config:/data
-    environment:
-      AUTHENTIK_REDIS__HOST: redis_database
-      AUTHENTIK_POSTGRESQL__HOST: postgres
-      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER}
-      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD}
-      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB}
-      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
-      AUTHENTIK_BOOTSTRAP_EMAIL: "admin@nooble.local"
-      AUTHENTIK_BOOTSTRAP_PASSWORD: "changeme"
+volumes:
+  redis_data:
+  qdrant_data:
+  postgres_data:
