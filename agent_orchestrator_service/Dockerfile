@@ -4,21 +4,30 @@ FROM python:3.12-slim
 # Set the working directory in the container
 WORKDIR /app
 
-# Copy the .env file to the working directory
-COPY .env .
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
 
-# Copy the dependencies file to the working directory
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy only requirements first to leverage Docker cache
 COPY agent_orchestrator_service/requirements.txt .
 
-# Install any needed packages specified in requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application's code to the working directory
-COPY . .
+# Copy the application code
+COPY agent_orchestrator_service /app/agent_orchestrator_service
+COPY common /app/common
+COPY .env /app/
 
 # Expose the port the app runs on
 EXPOSE 8001
 
-# Define the command to run the application
-# We use main:app because the uvicorn.run call in main.py uses "main:app"
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8001"]
+# Command to run the application
+CMD ["uvicorn", "agent_orchestrator_service.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
