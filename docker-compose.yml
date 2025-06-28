@@ -13,21 +13,24 @@ services:
   # ===========================================
   
   redis_database:
+    image: redis:7-alpine
+    container_name: redis_database
     networks:
       - nooble-network
-    build:
-      context: ./redis_database
-      dockerfile: Dockerfile
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
     ports:
       - "6379:6379"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
     volumes:
       - redis_data:/data
-    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "sh", "-c", "redis-cli -a ${REDIS_PASSWORD} ping"]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
 
   qdrant_database:
     networks:
@@ -55,29 +58,36 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-nooble}
+      # Custom data directory to avoid conflicts
+      PGDATA: /var/lib/postgresql/data/pgdata
+      # Add these environment variables for the initialization script
+      POSTGRES_INITDB_ARGS: "--data-checksums --encoding=UTF8"
+      POSTGRES_INITDB_WALDIR: /var/lib/postgresql/data/pg_wal
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres_database/init:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${AUTHENTIK_POSTGRESQL_NAME:-authentik}"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 60s
     ports:
       - "5432:5432"
     networks:
       - nooble-network
+    # Add restart policy
+    restart: unless-stopped
 
   # ===========================================
   # Servicios de Autenticación (Configuración Simplificada)
   # ===========================================
 
-  # Servicio de Authentik
-  authentik:
-    build: 
-      context: ./authentik_auth
-      dockerfile: Dockerfile
-    container_name: authentik
+  # Authentik Server
+  authentik_server:
+    image: ghcr.io/goauthentik/server:2024.6.1
+    container_name: authentik_server
+    command: server
     networks:
       - nooble-network
     depends_on:
@@ -86,7 +96,7 @@ services:
       redis_database:
         condition: service_healthy
     environment:
-      # Configuración de la base de datos PostgreSQL
+      # PostgreSQL Configuration
       AUTHENTIK_POSTGRESQL__HOST: postgres_database
       AUTHENTIK_POSTGRESQL__NAME: ${AUTHENTIK_POSTGRESQL_NAME:-authentik}
       AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_POSTGRESQL_USER:-authentik_user}
@@ -94,38 +104,42 @@ services:
       AUTHENTIK_POSTGRESQL__PORT: 5432
       AUTHENTIK_POSTGRESQL__SSLMODE: disable
       
-      # Configuración de Redis
+      # Redis Configuration
       AUTHENTIK_REDIS__HOST: redis_database
       AUTHENTIK_REDIS__PORT: 6379
       AUTHENTIK_REDIS__DB: 0
+      AUTHENTIK_REDIS__PASSWORD: ${REDIS_PASSWORD}
       
-      # Configuración del servidor
+      # Server Configuration
       AUTHENTIK_LISTEN__HTTP: 0.0.0.0:9000
-      AUTHENTIK_SERVER__EXTERNAL_SCHEME: https
-      AUTHENTIK_SERVER__EXTERNAL_HOSTNAME: ${AUTH_DOMAIN:-auth.localhost}
+      AUTHENTIK_SERVER__EXTERNAL_SCHEME: http
+      AUTHENTIK_SERVER__EXTERNAL_HOSTNAME: ${AUTH_DOMAIN:-localhost}
       
-      # Configuración de seguridad
+      # Security Configuration
       AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-insecure-secret-key-change-this}
       AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:-ChangeMe123!}
       AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL:-admin@example.com}
-      AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN:-}
       
-      # Nivel de registro
+      # Logging
       AUTHENTIK_LOG_LEVEL: debug
       AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      
+      # Disable email verification for initial setup
+      AUTHENTIK_EMAIL__ENABLED: "false"
     
-    # Volúmenes para persistencia
+    # Volumes for persistence
     volumes:
       - authentik_data:/data
-      # Configuración YAML montada como volumen de solo lectura
-      - ./authentik_auth/config/configuration.yml:/authentik/config/config.yml:ro
+      - ./authentik_auth/media:/media
+      - ./authentik_auth/custom-templates:/templates
     
-    # Configuración de red y salud
+    # Health check configuration
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/-/health/"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
+      start_period: 60s
     
     restart: unless-stopped
     
@@ -134,10 +148,54 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.authentik.rule=Host(`${AUTH_DOMAIN:-auth.localhost}`)"
       - "traefik.http.routers.authentik.entrypoints=websecure"
-      - "traefik.http.routers.authentik.tls=true"
-      - "traefik.http.routers.authentik.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.authentik.tls.certresolver=myresolver"
       - "traefik.http.services.authentik.loadbalancer.server.port=9000"
-      - "traefik.http.routers.authentik.middlewares=auth-forward@file"
+      - "traefik.docker.network=nooble4_nooble-network"
+
+  # Authentik Worker
+  authentik_worker:
+    image: ghcr.io/goauthentik/server:2024.6.1
+    container_name: authentik_worker
+    command: worker
+    networks:
+      - nooble-network
+    depends_on:
+      postgres_database:
+        condition: service_healthy
+      redis_database:
+        condition: service_healthy
+      authentik_server:
+        condition: service_healthy
+    environment:
+      # PostgreSQL Configuration
+      AUTHENTIK_POSTGRESQL__HOST: postgres_database
+      AUTHENTIK_POSTGRESQL__NAME: ${AUTHENTIK_POSTGRESQL_NAME:-authentik}
+      AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_POSTGRESQL_USER:-authentik_user}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_POSTGRESQL_PASSWORD:-authentik_pass}
+      AUTHENTIK_POSTGRESQL__PORT: 5432
+      AUTHENTIK_POSTGRESQL__SSLMODE: disable
+      
+      # Redis Configuration
+      AUTHENTIK_REDIS__HOST: redis_database
+      AUTHENTIK_REDIS__PORT: 6379
+      AUTHENTIK_REDIS__DB: 0
+      AUTHENTIK_REDIS__PASSWORD: ${REDIS_PASSWORD}
+      
+      # Security Configuration
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-insecure-secret-key-change-this}
+      
+      # Logging
+      AUTHENTIK_LOG_LEVEL: debug
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+    
+    # Volumes
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./authentik_auth/media:/media
+      - ./authentik_auth/certs:/certs
+      - ./authentik_auth/custom-templates:/templates
+    
+    restart: unless-stopped
 
   forwardauth:
     image: thomseddon/traefik-forward-auth:2  # Imagen ligera para autenticación
@@ -159,7 +217,7 @@ services:
     expose:
       - "4181"
     depends_on:
-      - authentik
+      - authentik_server
     restart: unless-stopped
 
   # ===========================================
