@@ -1,6 +1,311 @@
 http:
+  # Middlewares
   middlewares:
+    # Forward Authentication Middleware
     auth-forward:
       forwardAuth:
         address: "http://forwardauth:8080/auth"
         trustForwardHeader: true
+        authResponseHeaders:
+          - "X-User-ID"
+          - "X-Tenant-ID"
+          - "X-Forwarded-User"
+    
+    # Rate Limiting
+    rate-limit:
+      rateLimit:
+        average: 100
+        period: 1m
+        burst: 50
+    
+    # CORS Headers
+    cors-headers:
+      headers:
+        accessControlAllowMethods:
+          - "GET"
+          - "POST"
+          - "PUT"
+          - "DELETE"
+          - "OPTIONS"
+        accessControlAllowHeaders:
+          - "*"
+        accessControlAllowOriginList:
+          - "*"
+        accessControlMaxAge: 100
+        addVaryHeader: true
+    
+    # Security Headers
+    security-headers:
+      headers:
+        frameDeny: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        referrerPolicy: "same-origin"
+        customResponseHeaders:
+          X-Content-Type-Options: "nosniff"
+          X-Frame-Options: "DENY"
+          X-XSS-Protection: "1; mode=block"
+    
+    # Request ID
+    request-id:
+      plugin:
+        requestId:
+          headerName: "X-Request-ID"
+    
+    # Strip Prefix for services
+    strip-query:
+      stripPrefix:
+        prefixes:
+          - "/query"
+    
+    strip-orchestrator:
+      stripPrefix:
+        prefixes:
+          - "/orchestrator"
+    
+    strip-ingestion:
+      stripPrefix:
+        prefixes:
+          - "/ingestion"
+    
+    strip-conversation:
+      stripPrefix:
+        prefixes:
+          - "/conversation"
+    
+    strip-execution:
+      stripPrefix:
+        prefixes:
+          - "/execution"
+    
+    strip-embedding:
+      stripPrefix:
+        prefixes:
+          - "/embedding"
+    
+    strip-management:
+      stripPrefix:
+        prefixes:
+          - "/management"
+
+  # Routers
+  routers:
+    # Query Service
+    query-service:
+      rule: "PathPrefix(`/query`)"
+      service: query-service
+      middlewares:
+        - auth-forward
+        - cors-headers
+        - security-headers
+        - rate-limit
+        - strip-query
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+    
+    # Agent Orchestrator
+    orchestrator-service:
+      rule: "PathPrefix(`/orchestrator`)"
+      service: orchestrator-service
+      middlewares:
+        - auth-forward
+        - cors-headers
+        - security-headers
+        - rate-limit
+        - strip-orchestrator
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+    
+    # Ingestion Service
+    ingestion-service:
+      rule: "PathPrefix(`/ingestion`)"
+      service: ingestion-service
+      middlewares:
+        - auth-forward
+        - cors-headers
+        - security-headers
+        - rate-limit
+        - strip-ingestion
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+    
+    # Conversation Service (WebSocket support)
+    conversation-service:
+      rule: "PathPrefix(`/conversation`)"
+      service: conversation-service
+      middlewares:
+        - auth-forward
+        - cors-headers
+        - security-headers
+        - strip-conversation
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+    
+    # Agent Execution
+    execution-service:
+      rule: "PathPrefix(`/execution`)"
+      service: execution-service
+      middlewares:
+        - auth-forward
+        - cors-headers
+        - security-headers
+        - rate-limit
+        - strip-execution
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+    
+    # Embedding Service
+    embedding-service:
+      rule: "PathPrefix(`/embedding`)"
+      service: embedding-service
+      middlewares:
+        - auth-forward
+        - cors-headers
+        - security-headers
+        - rate-limit
+        - strip-embedding
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+    
+    # Agent Management
+    management-service:
+      rule: "PathPrefix(`/management`)"
+      service: management-service
+      middlewares:
+        - auth-forward
+        - cors-headers
+        - security-headers
+        - rate-limit
+        - strip-management
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+    
+    # Authentik
+    authentik:
+      rule: "Host(`auth.nooble.local`)"
+      service: authentik
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+    
+    # Traefik Dashboard (protegido)
+    dashboard:
+      rule: "(Host(`traefik.nooble.local`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`)))"
+      service: api@internal
+      middlewares:
+        - auth-forward
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+
+  # Services
+  services:
+    query-service:
+      loadBalancer:
+        servers:
+          - url: "http://query_service:8000"
+        healthCheck:
+          path: "/health"
+          interval: "10s"
+          timeout: "3s"
+    
+    orchestrator-service:
+      loadBalancer:
+        servers:
+          - url: "http://agent_orchestrator_service:8001"
+        healthCheck:
+          path: "/health"
+          interval: "10s"
+          timeout: "3s"
+    
+    ingestion-service:
+      loadBalancer:
+        servers:
+          - url: "http://ingestion_service:8002"
+        healthCheck:
+          path: "/health"
+          interval: "10s"
+          timeout: "3s"
+    
+    conversation-service:
+      loadBalancer:
+        servers:
+          - url: "http://conversation_service:8004"
+        healthCheck:
+          path: "/health"
+          interval: "10s"
+          timeout: "3s"
+    
+    execution-service:
+      loadBalancer:
+        servers:
+          - url: "http://agent_execution_service:8005"
+        healthCheck:
+          path: "/health"
+          interval: "10s"
+          timeout: "3s"
+    
+    embedding-service:
+      loadBalancer:
+        servers:
+          - url: "http://embedding_service:8006"
+        healthCheck:
+          path: "/health"
+          interval: "10s"
+          timeout: "3s"
+    
+    management-service:
+      loadBalancer:
+        servers:
+          - url: "http://agent_management_service:8003"
+        healthCheck:
+          path: "/health"
+          interval: "10s"
+          timeout: "3s"
+    
+    authentik:
+      loadBalancer:
+        servers:
+          - url: "http://authentik:9000"
+
+# TCP (para servicios que requieran TCP directo)
+tcp:
+  routers:
+    postgres:
+      rule: "HostSNI(`*`)"
+      service: postgres
+      entryPoints:
+        - postgres
+    
+    redis:
+      rule: "HostSNI(`*`)"
+      service: redis
+      entryPoints:
+        - redis
+  
+  services:
+    postgres:
+      loadBalancer:
+        servers:
+          - address: "postgres_database:5432"
+    
+    redis:
+      loadBalancer:
+        servers:
+          - address: "redis_database:6379"

@@ -1,0 +1,239 @@
+# Blueprint de configuración para Nooble
+# Este archivo configura automáticamente Authentik con los flows, aplicaciones y políticas necesarias
+version: 1
+metadata:
+  name: nooble-setup
+  labels:
+    blueprints.goauthentik.io/description: "Configuración inicial para Nooble Platform"
+    blueprints.goauthentik.io/system: "true"
+
+entries:
+  # Crear grupo de administradores
+  - model: authentik_core.group
+    id: nooble-admins
+    attrs:
+      name: "Nooble Administrators"
+      is_superuser: false
+    identifiers:
+      name: "Nooble Administrators"
+
+  # Crear grupo de usuarios
+  - model: authentik_core.group
+    id: nooble-users
+    attrs:
+      name: "Nooble Users"
+    identifiers:
+      name: "Nooble Users"
+
+  # Crear certificado para firma de tokens (auto-generado)
+  - model: authentik_crypto.certificatekeypair
+    id: nooble-jwt-cert
+    attrs:
+      name: "Nooble JWT Certificate"
+      # Authentik generará automáticamente el certificado si no se proporciona
+    identifiers:
+      name: "Nooble JWT Certificate"
+
+  # Crear scope mapping para tenant_id
+  - model: authentik_providers_oauth2.scopemapping
+    id: scope-tenant-id
+    attrs:
+      name: "Tenant ID"
+      scope_name: "tenant_id"
+      description: "Maps the user's tenant ID"
+      expression: |
+        # Python expression para mapear tenant_id
+        return {
+            "tenant_id": request.user.attributes.get("tenant_id", "default")
+        }
+    identifiers:
+      scope_name: "tenant_id"
+
+  # Crear scope mapping para roles
+  - model: authentik_providers_oauth2.scopemapping
+    id: scope-roles
+    attrs:
+      name: "User Roles"
+      scope_name: "roles"
+      description: "Maps the user's roles"
+      expression: |
+        # Python expression para mapear roles
+        return {
+            "roles": [group.name for group in request.user.ak_groups.all()]
+        }
+    identifiers:
+      scope_name: "roles"
+
+  # Crear proveedor OAuth2 para la aplicación principal
+  - model: authentik_providers_oauth2.oauth2provider
+    id: nooble-oauth-provider
+    attrs:
+      name: "Nooble Platform OAuth"
+      authorization_flow: !Find [authentik_flows.flow, [slug, "default-authorization-flow"]]
+      client_type: "confidential"
+      client_id: "nooble-platform"
+      client_secret: "your-secure-client-secret-here"
+      redirect_uris: |
+        https://nooble.local/auth/callback
+        https://app.nooble.local/auth/callback
+        http://localhost:3000/auth/callback
+      signing_key: !KeyOf nooble-jwt-cert
+      token_validity: "hours=8"
+      refresh_token_validity: "days=30"
+      sub_mode: "user_uuid"
+      include_claims_in_id_token: true
+      issuer_mode: "per_provider"
+      property_mappings:
+        - !KeyOf scope-tenant-id
+        - !KeyOf scope-roles
+    identifiers:
+      name: "Nooble Platform OAuth"
+
+  # Política de acceso para administradores
+  - model: authentik_policies_expression.expressionpolicy
+    id: policy-admin-access
+    attrs:
+      name: "Admin Access Policy"
+      expression: |
+        return request.user.ak_groups.filter(name="Nooble Administrators").exists()
+    identifiers:
+      name: "Admin Access Policy"
+
+  # Política de acceso para usuarios
+  - model: authentik_policies_expression.expressionpolicy
+    id: policy-user-access
+    attrs:
+      name: "User Access Policy"
+      expression: |
+        return request.user.ak_groups.filter(name__in=["Nooble Users", "Nooble Administrators"]).exists()
+    identifiers:
+      name: "User Access Policy"
+
+  # Política de rate limiting
+  - model: authentik_policies_reputation.reputationpolicy
+    id: policy-rate-limit
+    attrs:
+      name: "Rate Limiting Policy"
+      check_ip: true
+      check_username: true
+      threshold: 10
+    identifiers:
+      name: "Rate Limiting Policy"
+
+  # Crear aplicación para Nooble
+  - model: authentik_core.application
+    id: nooble-app
+    attrs:
+      name: "Nooble Platform"
+      slug: "nooble-platform"
+      provider: !KeyOf nooble-oauth-provider
+      meta_launch_url: "https://app.nooble.local"
+      meta_description: "Nooble AI Platform"
+      meta_publisher: "Nooble Inc."
+      policy_engine_mode: "all"
+    identifiers:
+      slug: "nooble-platform"
+
+  # Binding de políticas a la aplicación
+  - model: authentik_policies.policybinding
+    attrs:
+      policy: !KeyOf policy-user-access
+      target: !KeyOf nooble-app
+      order: 10
+      enabled: true
+    identifiers:
+      policy: !KeyOf policy-user-access
+      target: !KeyOf nooble-app
+
+  # Binding de política de rate limiting
+  - model: authentik_policies.policybinding
+    attrs:
+      policy: !KeyOf policy-rate-limit
+      target: !KeyOf nooble-app
+      order: 5
+      enabled: true
+    identifiers:
+      policy: !KeyOf policy-rate-limit
+      target: !KeyOf nooble-app
+
+  # Crear flow personalizado de autenticación
+  - model: authentik_flows.flow
+    id: flow-nooble-authentication
+    attrs:
+      name: "Nooble Authentication"
+      title: "Welcome to Nooble"
+      slug: "nooble-authentication"
+      designation: "authentication"
+      authentication: "require_unauthenticated"
+      background: "/static/dist/assets/images/flow-background.jpg"
+      layout: "stacked"
+    identifiers:
+      slug: "nooble-authentication"
+
+  # Stage de identificación
+  - model: authentik_stages_identification.identificationstage
+    id: stage-identification
+    attrs:
+      name: "nooble-identification"
+      user_fields:
+        - "username"
+        - "email"
+      password_stage: !Find [authentik_stages_password.passwordstage, [name, "default-authentication-password"]]
+      case_insensitive_matching: true
+      show_matched_user: true
+      enrollment_flow: !Find [authentik_flows.flow, [slug, "default-enrollment-flow"]]
+      recovery_flow: !Find [authentik_flows.flow, [slug, "default-recovery-flow"]]
+    identifiers:
+      name: "nooble-identification"
+
+  # Binding del stage al flow
+  - model: authentik_flows.flowstagebinding
+    attrs:
+      target: !KeyOf flow-nooble-authentication
+      stage: !KeyOf stage-identification
+      order: 10
+      evaluate_on_plan: true
+      re_evaluate_policies: false
+    identifiers:
+      target: !KeyOf flow-nooble-authentication
+      stage: !KeyOf stage-identification
+      order: 10
+
+  # Crear outpost para forward auth
+  - model: authentik_outposts.outpost
+    id: outpost-forward-auth
+    attrs:
+      name: "Nooble Forward Auth"
+      type: "proxy"
+      providers:
+        - !KeyOf nooble-oauth-provider
+      config:
+        authentik_host: "https://auth.nooble.local"
+        authentik_host_insecure: false
+        authentik_host_browser: ""
+        log_level: "info"
+        object_naming_template: "ak-outpost-%(name)s"
+        docker_network: null
+        docker_map_ports: true
+        docker_labels: null
+        container_image: null
+    identifiers:
+      name: "Nooble Forward Auth"
+
+  # Crear tenant predeterminado (para testing)
+  - model: authentik_tenants.tenant
+    id: default-tenant
+    attrs:
+      domain: "nooble.local"
+      default: true
+      branding_title: "Nooble Platform"
+      branding_logo: "/static/dist/assets/images/logo.svg"
+      branding_favicon: "/static/dist/assets/images/favicon.ico"
+      flow_authentication: !KeyOf flow-nooble-authentication
+      flow_invalidation: !Find [authentik_flows.flow, [slug, "default-invalidation-flow"]]
+      flow_recovery: !Find [authentik_flows.flow, [slug, "default-recovery-flow"]]
+      flow_enrollment: !Find [authentik_flows.flow, [slug, "default-enrollment-flow"]]
+      flow_user_settings: !Find [authentik_flows.flow, [slug, "default-user-settings-flow"]]
+      attributes: {}
+    identifiers:
+      domain: "nooble.local"

@@ -1,0 +1,177 @@
+# Configuración de Authentik
+# Este archivo debe estar en /authentik/config/configuration.yml
+
+# Configuración de PostgreSQL
+postgresql:
+  host: postgres_database
+  port: 5432
+  name: authentik
+  user: authentik_user
+  password: authentik_pass
+
+# Configuración de Redis
+redis:
+  host: redis_database
+  port: 6379
+  password: ""
+  tls: false
+  tls_reqs: "none"
+
+# Configuración de errores y logs
+error_reporting:
+  enabled: false
+  environment: "production"
+  send_pii: false
+
+# Configuración de email (ajustar según tu proveedor)
+email:
+  host: "smtp.gmail.com"
+  port: 587
+  username: "nooble-notifications@example.com"
+  password: "your-email-password"
+  use_tls: true
+  use_ssl: false
+  timeout: 10
+  from: "Nooble Auth <nooble-auth@example.com>"
+
+# Configuración de medios y archivos estáticos
+media:
+  backend: "file"
+  file:
+    path: "/media"
+
+# Configuración de outposts
+outposts:
+  # Docker socket para crear outposts automáticamente
+  docker_socket: "unix:///var/run/docker.sock"
+  docker_network: "nooble-network"
+  
+  # Configuración del outpost integrado
+  builtin:
+    enabled: true
+
+# Configuración de seguridad
+security:
+  # Duración de las sesiones
+  session_cookie_age: 604800  # 7 días en segundos
+  
+  # Configuración CSRF
+  csrf_cookie_secure: true
+  csrf_cookie_httponly: true
+  
+  # Configuración de cookies
+  cookie_domain: ".nooble.local"
+  
+  # Headers de seguridad
+  secure_proxy_ssl_header: ["HTTP_X_FORWARDED_PROTO", "https"]
+
+# Configuración de la interfaz web
+web:
+  # URL pública de Authentik
+  external_url: "https://auth.nooble.local"
+  
+  # Configuración de CORS
+  cors_allowed_origins:
+    - "https://nooble.local"
+    - "https://app.nooble.local"
+    - "http://localhost:3000"  # Para desarrollo
+
+# Configuración de autenticación
+authentication:
+  # Duración del token
+  token_expiry: 3600  # 1 hora
+  
+  # Configuración de contraseñas
+  password_min_length: 8
+  password_required_uppercase: true
+  password_required_lowercase: true
+  password_required_numeric: true
+  password_required_special: true
+
+# Configuración de logging
+logging:
+  level: "INFO"
+  
+  # Handlers de logging
+  handlers:
+    console:
+      class: "logging.StreamHandler"
+      formatter: "json"
+    
+    file:
+      class: "logging.handlers.RotatingFileHandler"
+      filename: "/var/log/authentik/authentik.log"
+      maxBytes: 10485760  # 10MB
+      backupCount: 5
+      formatter: "json"
+
+# Configuración de flows predeterminados
+flows:
+  # Flow de autenticación predeterminado
+  default_authentication: "default-authentication-flow"
+  
+  # Flow de invalidación predeterminado
+  default_invalidation: "default-invalidation-flow"
+  
+  # Flow de recuperación de contraseña
+  default_recovery: "default-recovery-flow"
+  
+  # Flow de registro de usuarios
+  default_enrollment: "default-enrollment-flow"
+  
+  # Flow de configuración de usuario
+  default_user_settings: "default-user-settings-flow"
+
+# Configuración de blueprints (plantillas de configuración)
+blueprints:
+  # Ruta donde se encuentran los blueprints personalizados
+  paths:
+    - "/blueprints/custom"
+    - "/blueprints/default"
+
+# Configuración de workers
+workers:
+  # Número de workers web
+  web: 4
+  
+  # Configuración de Celery
+  celery:
+    # Número de workers de Celery
+    worker_concurrency: 2
+    
+    # Configuración de beat (tareas programadas)
+    beat_schedule:
+      # Limpieza de tokens expirados
+      clean_expired_tokens:
+        task: "authentik.core.tasks.clean_expired_tokens"
+        schedule: 3600  # Cada hora
+      
+      # Limpieza de sesiones expiradas
+      clean_expired_sessions:
+        task: "authentik.core.tasks.clean_expired_sessions"
+        schedule: 86400  # Cada día
+
+# Configuración de métricas
+metrics:
+  enabled: true
+  port: 9300
+
+# Configuración de avatares
+avatars:
+  # Fuentes de avatares
+  sources:
+    - gravatar
+    - initials
+
+# Footer personalizado (opcional)
+footer_links:
+  - name: "Documentation"
+    href: "https://docs.nooble.com"
+  - name: "Support"
+    href: "https://support.nooble.com"
+
+# Configuración de la marca
+branding:
+  title: "Nooble Authentication"
+  logo: "/static/dist/assets/icons/icon.svg"
+  favicon: "/static/dist/assets/icons/icon.png"

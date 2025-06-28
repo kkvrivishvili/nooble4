@@ -1,0 +1,172 @@
+#================================================================================
+# ENTORNO DE APLICACIÓN
+#================================================================================
+ENVIRONMENT="development" # Opciones: development, staging, production
+LOG_LEVEL="INFO"        # Opciones: DEBUG, INFO, WARNING, ERROR, CRITICAL
+ENABLE_TELEMETRY=False
+
+#================================================================================
+# CONFIGURACIÓN DE PUERTOS DE SERVICIOS
+#================================================================================
+AGENT_ORCHESTRATOR_PORT=8001
+QUERY_SERVICE_PORT=8000
+INGESTION_SERVICE_PORT=8002
+AGENT_MANAGEMENT_PORT=8003
+CONVERSATION_SERVICE_PORT=8004
+AGENT_EXECUTION_PORT=8005
+EMBEDDING_SERVICE_PORT=8006
+
+#================================================================================
+# URLS PARA COMUNICACIÓN ENTRE SERVICIOS (DENTRO DE DOCKER)
+# Usar los nombres de servicio definidos en docker-compose.yml
+#================================================================================
+AGENT_ORCHESTRATOR_URL="http://agent_orchestrator_service:8001"
+QUERY_SERVICE_URL="http://query_service:8000"
+INGESTION_SERVICE_URL="http://ingestion_service:8002"
+AGENT_MANAGEMENT_URL="http://agent_management_service:8003"
+CONVERSATION_SERVICE_URL="http://conversation_service:8004"
+AGENT_EXECUTION_URL="http://agent_execution_service:8005"
+EMBEDDING_SERVICE_URL="http://embedding_service:8006"
+
+#================================================================================
+# CONFIGURACIÓN DE REDIS
+#================================================================================
+REDIS_URL="redis://redis_database:6379"
+REDIS_PASSWORD=
+REDIS_DECODE_RESPONSES=True
+REDIS_SOCKET_CONNECT_TIMEOUT=5
+REDIS_SOCKET_KEEPALIVE=True
+REDIS_MAX_CONNECTIONS=50
+REDIS_HEALTH_CHECK_INTERVAL=30
+
+#================================================================================
+# CONFIGURACIÓN DE QDRANT
+#================================================================================
+QDRANT_URL="http://qdrant_database:6333"
+QDRANT_API_KEY=
+
+#================================================================================
+# CONFIGURACIÓN DE POSTGRES
+#================================================================================
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=secure_postgres_password_here
+POSTGRES_DB=nooble
+POSTGRES_HOST=postgres_database
+POSTGRES_PORT=5432
+POSTGRES_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+
+# URLs específicas para cada servicio (opcional, si quieren usar diferentes DBs)
+QUERY_POSTGRES_URL="postgresql://query_service:query_service_pass@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+ORCHESTRATOR_POSTGRES_URL="postgresql://orchestrator_service:orchestrator_pass@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+INGESTION_POSTGRES_URL="postgresql://ingestion_service:ingestion_pass@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+CONVERSATION_POSTGRES_URL="postgresql://conversation_service:conversation_pass@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+EXECUTION_POSTGRES_URL="postgresql://execution_service:execution_pass@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+EMBEDDING_POSTGRES_URL="postgresql://embedding_service:embedding_pass@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+MANAGEMENT_POSTGRES_URL="postgresql://management_service:management_pass@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+
+#================================================================================
+# CONFIGURACIÓN DE APIS EXTERNAS
+#================================================================================
+# OpenAI
+OPENAI_API_KEY="TU_API_KEY_DE_OPENAI"
+OPENAI_BASE_URL=
+
+# Groq
+GROQ_API_KEY="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"
+
+#================================================================================
+# CONFIGURACIÓN DE CORS
+#================================================================================
+CORS_ORIGINS='["*"]' # Lista separada por comas, ej: "http://localhost:3000,https://mi-app.com"
+
+#================================================================================
+# CONFIGURACIÓN DE AUTHENTIK
+#================================================================================
+AUTHENTIK_SECRET_KEY="your-very-secure-secret-key-at-least-50-chars-long-change-this"
+AUTHENTIK_ERROR_REPORTING__ENABLED=false
+AUTHENTIK_REDIS__HOST=redis_database
+AUTHENTIK_REDIS__PORT=6379
+AUTHENTIK_POSTGRESQL__HOST=postgres_database
+AUTHENTIK_POSTGRESQL__PORT=5432
+AUTHENTIK_POSTGRESQL__NAME=authentik
+AUTHENTIK_POSTGRESQL__USER=authentik_user
+AUTHENTIK_POSTGRESQL__PASSWORD=authentik_pass
+AUTHENTIK_BOOTSTRAP_PASSWORD=changeme123!
+AUTHENTIK_BOOTSTRAP_TOKEN=your-bootstrap-token-here
+AUTHENTIK_BOOTSTRAP_EMAIL=admin@nooble.local
+AUTHENTIK_LOG_LEVEL=INFO
+
+# URLs públicas
+AUTHENTIK_URL=http://authentik:9000
+AUTHENTIK_PUBLIC_URL=https://auth.nooble.local
+
+#================================================================================
+# CONFIGURACIÓN DE FORWARD AUTH SERVICE
+#================================================================================
+JWT_SECRET="your-jwt-secret-key-must-be-very-secure-and-long"
+JWT_ALGORITHM=HS256
+FORWARD_AUTH_REDIS_URL="redis://redis_database:6379/1"
+FORWARD_AUTH_AUTHENTIK_URL="http://authentik:9000"
+QUOTA_LIMIT=1000
+RATE_LIMIT_WINDOW=3600
+CACHE_TTL=300
+
+#================================================================================
+# CONFIGURACIÓN DE TRAEFIK
+#================================================================================
+TRAEFIK_LOG_LEVEL=INFO
+TRAEFIK_ACCESS_LOG=true
+TRAEFIK_API_DASHBOARD=true
+TRAEFIK_PROVIDERS_DOCKER=true
+TRAEFIK_PROVIDERS_DOCKER_NETWORK=nooble-network
+TRAEFIK_ENTRYPOINTS_WEB_ADDRESS=:80
+TRAEFIK_ENTRYPOINTS_WEBSECURE_ADDRESS=:443
+
+# Certificados SSL (para producción)
+ACME_EMAIL=admin@nooble.com
+TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_EMAIL=${ACME_EMAIL}
+TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_STORAGE=/etc/traefik/acme/acme.json
+TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_HTTPCHALLENGE_ENTRYPOINT=web
+# Para desarrollo/staging usar el servidor de staging de Let's Encrypt
+TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_CASERVER=https://acme-staging-v02.api.letsencrypt.org/directory
+
+#================================================================================
+# CONFIGURACIÓN DE DOMINIOS
+#================================================================================
+# Dominios base para los servicios
+BASE_DOMAIN=nooble.local
+AUTH_DOMAIN=auth.${BASE_DOMAIN}
+APP_DOMAIN=app.${BASE_DOMAIN}
+API_DOMAIN=api.${BASE_DOMAIN}
+TRAEFIK_DOMAIN=traefik.${BASE_DOMAIN}
+
+#================================================================================
+# CONFIGURACIÓN DE SEGURIDAD
+#================================================================================
+# Cookies y sesiones
+SESSION_SECRET=your-session-secret-key-change-this
+COOKIE_SECURE=true
+COOKIE_HTTPONLY=true
+COOKIE_SAMESITE=lax
+SESSION_LIFETIME=86400
+
+# CSRF
+CSRF_SECRET=your-csrf-secret-key-change-this
+CSRF_COOKIE_NAME=csrf_token
+
+#================================================================================
+# CONFIGURACIÓN DE MONITOREO
+#================================================================================
+ENABLE_METRICS=true
+METRICS_PORT=9090
+ENABLE_TRACING=false
+JAEGER_AGENT_HOST=localhost
+JAEGER_AGENT_PORT=6831
+
+#================================================================================
+# CONFIGURACIÓN DE RESPALDO Y MANTENIMIENTO
+#================================================================================
+BACKUP_ENABLED=true
+BACKUP_SCHEDULE="0 2 * * *"  # 2 AM todos los días
+BACKUP_RETENTION_DAYS=30
+MAINTENANCE_MODE=false

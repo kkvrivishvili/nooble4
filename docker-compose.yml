@@ -3,14 +3,15 @@ version: "3.8"
 networks:
   nooble-network:
     driver: bridge
-
-volumes:
-  redis_data:
-  qdrant_data:
-  postgres_data:
-  authentik_data:
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
 
 services:
+  # ===========================================
+  # Bases de Datos
+  # ===========================================
+  
   redis_database:
     networks:
       - nooble-network
@@ -21,6 +22,12 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   qdrant_database:
     networks:
@@ -31,11 +38,20 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
+      - ./qdrant_database/config/config.yaml:/qdrant/config/config.yaml
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  postgres:
+  postgres_database:
     networks:
       - nooble-network
-    image: postgres:15-alpine
+    build:
+      context: ./postgres_database
+      dockerfile: Dockerfile
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -47,135 +63,16 @@ services:
       - ./postgres_database/init:/docker-entrypoint-initdb.d
     env_file:
       - ./.env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  query_service:
-    networks:
-      - nooble-network
-    build:
-      context: .
-      dockerfile: ./query_service/Dockerfile
-    ports:
-      - "8000:8000"
-    depends_on:
-      - redis_database
-      - qdrant_database
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.query.rule=PathPrefix(`/query`)"
-      - "traefik.http.routers.query.entrypoints=web"
-      - "traefik.http.routers.query.middlewares=auth-forward"
-    volumes:
-      - ./common:/app/common
-    env_file:
-      - ./.env
-
-  agent_orchestrator_service:
-    networks:
-      - nooble-network
-    build:
-      context: .
-      dockerfile: ./agent_orchestrator_service/Dockerfile
-    ports:
-      - "8001:8001"
-    depends_on:
-      - redis_database
-    volumes:
-      - ./common:/app/common
-    env_file:
-      - ./.env
-
-  ingestion_service:
-    networks:
-      - nooble-network
-    build:
-      context: .
-      dockerfile: ./ingestion_service/Dockerfile
-    ports:
-      - "8002:8002"
-    depends_on:
-      - redis_database
-      - qdrant_database
-    volumes:
-      - ./common:/app/common
-    env_file:
-      - ./.env
-
-  conversation_service:
-    networks:
-      - nooble-network
-    build:
-      context: .
-      dockerfile: ./conversation_service/Dockerfile
-    ports:
-      - "8004:8004"
-    depends_on:
-      - redis_database
-    volumes:
-      - ./common:/app/common
-    env_file:
-      - ./.env
-
-  agent_execution_service:
-    networks:
-      - nooble-network
-    build:
-      context: .
-      dockerfile: ./agent_execution_service/Dockerfile
-    ports:
-      - "8005:8005"
-    depends_on:
-      - redis_database
-    volumes:
-      - ./common:/app/common
-    env_file:
-      - ./.env
-
-  embedding_service:
-    networks:
-      - nooble-network
-    build:
-      context: .
-      dockerfile: ./embedding_service/Dockerfile
-    ports:
-      - "8006:8006"
-    depends_on:
-      - redis_database
-    volumes:
-      - ./common:/app/common
-    env_file:
-      - ./.env
-
-  traefik:
-    image: traefik:v3.0
-    container_name: traefik
-    networks:
-      - nooble-network
-    ports:
-      - "80:80"
-      - "8082:8080" # Dashboard
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./traefik_gateway/traefik.yml:/etc/traefik/traefik.yml
-      - ./traefik_gateway/dynamic.yml:/etc/traefik/dynamic.yml
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.api.rule=Host(`localhost`) && PathPrefix(`/dashboard`)"
-      - "traefik.http.routers.api.service=api@internal"
-      - "traefik.http.routers.api.entrypoints=web"
-
-  forwardauth:
-    build:
-      context: ./forward_auth_service
-      dockerfile: Dockerfile
-    container_name: forward-auth
-    networks:
-      - nooble-network
-    environment:
-      JWT_SECRET: ${JWT_SECRET}
-      REDIS_URL: redis://redis_database:6379/0
-      QUOTA_LIMIT: 1000
-    expose:
-      - "8080"
+  # ===========================================
+  # Servicios de Autenticación
+  # ===========================================
 
   authentik:
     build:
@@ -186,14 +83,415 @@ services:
       - nooble-network
     ports:
       - "9000:9000"
+      - "9300:9300"  # Métricas
     volumes:
-      - ./authentik_auth/config:/data
+      - authentik_data:/data
+      - ./authentik_auth/config:/config
+      - ./authentik_auth/blueprints:/blueprints/custom
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       AUTHENTIK_REDIS__HOST: redis_database
-      AUTHENTIK_POSTGRESQL__HOST: postgres
+      AUTHENTIK_POSTGRESQL__HOST: postgres_database
       AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER}
       AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD}
-      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB}
+      AUTHENTIK_POSTGRESQL__NAME: authentik
       AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
-      AUTHENTIK_BOOTSTRAP_EMAIL: "admin@nooble.local"
-      AUTHENTIK_BOOTSTRAP_PASSWORD: "changeme"
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD}
+      AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN}
+      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL}
+      AUTHENTIK_LOG_LEVEL: ${AUTHENTIK_LOG_LEVEL}
+    depends_on:
+      postgres_database:
+        condition: service_healthy
+      redis_database:
+        condition: service_healthy
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.authentik.rule=Host(`${AUTH_DOMAIN}`)"
+      - "traefik.http.routers.authentik.entrypoints=websecure"
+      - "traefik.http.routers.authentik.tls=true"
+      - "traefik.http.routers.authentik.tls.certresolver=letsencrypt"
+      - "traefik.http.services.authentik.loadbalancer.server.port=9000"
+
+  forwardauth:
+    build:
+      context: ./forward_auth_service
+      dockerfile: Dockerfile
+    container_name: forward-auth
+    networks:
+      - nooble-network
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      REDIS_URL: ${FORWARD_AUTH_REDIS_URL}
+      AUTHENTIK_URL: ${AUTHENTIK_URL}
+      QUOTA_LIMIT: ${QUOTA_LIMIT}
+      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW}
+      CACHE_TTL: ${CACHE_TTL}
+    expose:
+      - "8080"
+    depends_on:
+      - redis_database
+      - authentik
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================================
+  # API Gateway
+  # ===========================================
+
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik
+    networks:
+      - nooble-network
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8082:8082" # Dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik_gateway/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik_gateway/dynamic.yml:/etc/traefik/dynamic/dynamic.yml:ro
+      - traefik_data:/var/log/traefik
+      - traefik_acme:/etc/traefik/acme
+    environment:
+      - TRAEFIK_LOG_LEVEL=${TRAEFIK_LOG_LEVEL}
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`${TRAEFIK_DOMAIN}`)"
+      - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.traefik-dashboard.tls=true"
+      - "traefik.http.routers.traefik-dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik-dashboard.service=api@internal"
+      - "traefik.http.routers.traefik-dashboard.middlewares=auth-forward"
+    restart: unless-stopped
+    depends_on:
+      - forwardauth
+
+  # ===========================================
+  # Microservicios de la Aplicación
+  # ===========================================
+
+  query_service:
+    networks:
+      - nooble-network
+    build:
+      context: .
+      dockerfile: ./query_service/Dockerfile
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis_database:
+        condition: service_healthy
+      qdrant_database:
+        condition: service_healthy
+      postgres_database:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.query.rule=PathPrefix(`/query`)"
+      - "traefik.http.routers.query.entrypoints=websecure"
+      - "traefik.http.routers.query.tls=true"
+      - "traefik.http.routers.query.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.query.middlewares=auth-forward,strip-query"
+      - "traefik.http.services.query.loadbalancer.server.port=8000"
+    volumes:
+      - ./common:/app/common:ro
+    env_file:
+      - ./.env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  agent_orchestrator_service:
+    networks:
+      - nooble-network
+    build:
+      context: .
+      dockerfile: ./agent_orchestrator_service/Dockerfile
+    ports:
+      - "8001:8001"
+    depends_on:
+      redis_database:
+        condition: service_healthy
+      postgres_database:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.orchestrator.rule=PathPrefix(`/orchestrator`)"
+      - "traefik.http.routers.orchestrator.entrypoints=websecure"
+      - "traefik.http.routers.orchestrator.tls=true"
+      - "traefik.http.routers.orchestrator.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.orchestrator.middlewares=auth-forward,strip-orchestrator"
+      - "traefik.http.services.orchestrator.loadbalancer.server.port=8001"
+    volumes:
+      - ./common:/app/common:ro
+    env_file:
+      - ./.env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  ingestion_service:
+    networks:
+      - nooble-network
+    build:
+      context: .
+      dockerfile: ./ingestion_service/Dockerfile
+    ports:
+      - "8002:8002"
+    depends_on:
+      redis_database:
+        condition: service_healthy
+      qdrant_database:
+        condition: service_healthy
+      postgres_database:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ingestion.rule=PathPrefix(`/ingestion`)"
+      - "traefik.http.routers.ingestion.entrypoints=websecure"
+      - "traefik.http.routers.ingestion.tls=true"
+      - "traefik.http.routers.ingestion.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.ingestion.middlewares=auth-forward,strip-ingestion"
+      - "traefik.http.services.ingestion.loadbalancer.server.port=8002"
+    volumes:
+      - ./common:/app/common:ro
+      - ./ingestion_data:/tmp/nooble4_ingestion_storage
+    env_file:
+      - ./.env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  conversation_service:
+    networks:
+      - nooble-network
+    build:
+      context: .
+      dockerfile: ./conversation_service/Dockerfile
+    ports:
+      - "8004:8004"
+    depends_on:
+      redis_database:
+        condition: service_healthy
+      postgres_database:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.conversation.rule=PathPrefix(`/conversation`)"
+      - "traefik.http.routers.conversation.entrypoints=websecure"
+      - "traefik.http.routers.conversation.tls=true"
+      - "traefik.http.routers.conversation.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.conversation.middlewares=auth-forward,strip-conversation"
+      - "traefik.http.services.conversation.loadbalancer.server.port=8004"
+    volumes:
+      - ./common:/app/common:ro
+    env_file:
+      - ./.env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  agent_execution_service:
+    networks:
+      - nooble-network
+    build:
+      context: .
+      dockerfile: ./agent_execution_service/Dockerfile
+    ports:
+      - "8005:8005"
+    depends_on:
+      redis_database:
+        condition: service_healthy
+      postgres_database:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.execution.rule=PathPrefix(`/execution`)"
+      - "traefik.http.routers.execution.entrypoints=websecure"
+      - "traefik.http.routers.execution.tls=true"
+      - "traefik.http.routers.execution.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.execution.middlewares=auth-forward,strip-execution"
+      - "traefik.http.services.execution.loadbalancer.server.port=8005"
+    volumes:
+      - ./common:/app/common:ro
+    env_file:
+      - ./.env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  embedding_service:
+    networks:
+      - nooble-network
+    build:
+      context: .
+      dockerfile: ./embedding_service/Dockerfile
+    ports:
+      - "8006:8006"
+    depends_on:
+      redis_database:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.embedding.rule=PathPrefix(`/embedding`)"
+      - "traefik.http.routers.embedding.entrypoints=websecure"
+      - "traefik.http.routers.embedding.tls=true"
+      - "traefik.http.routers.embedding.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.embedding.middlewares=auth-forward,strip-embedding"
+      - "traefik.http.services.embedding.loadbalancer.server.port=8006"
+    volumes:
+      - ./common:/app/common:ro
+    env_file:
+      - ./.env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  agent_management_service:
+    networks:
+      - nooble-network
+    build:
+      context: .
+      dockerfile: ./agent_management_service/Dockerfile
+    ports:
+      - "8003:8003"
+    depends_on:
+      redis_database:
+        condition: service_healthy
+      postgres_database:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.management.rule=PathPrefix(`/management`)"
+      - "traefik.http.routers.management.entrypoints=websecure"
+      - "traefik.http.routers.management.tls=true"
+      - "traefik.http.routers.management.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.management.middlewares=auth-forward,strip-management"
+      - "traefik.http.services.management.loadbalancer.server.port=8003"
+    volumes:
+      - ./common:/app/common:ro
+    env_file:
+      - ./.env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+# ===========================================
+# Herramientas de Monitoreo (Opcional)
+# ===========================================
+
+  # Prometheus para métricas
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: prometheus
+    networks:
+      - nooble-network
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    profiles: ["monitoring"]
+
+  # Grafana para visualización
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: grafana
+    networks:
+      - nooble-network
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SERVER_ROOT_URL=https://grafana.${BASE_DOMAIN}
+      - GF_INSTALL_PLUGINS=redis-datasource
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.${BASE_DOMAIN}`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls=true"
+      - "traefik.http.routers.grafana.tls.certresolver=letsencrypt"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+
+  # Jaeger para tracing distribuido
+  jaeger:
+    image: jaegertracing/all-in-one:1.47
+    container_name: jaeger
+    networks:
+      - nooble-network
+    ports:
+      - "5775:5775/udp"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "5778:5778"
+      - "16686:16686"
+      - "14268:14268"
+      - "14250:14250"
+      - "9411:9411"
+    environment:
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+      - COLLECTOR_OTLP_ENABLED=true
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.jaeger.rule=Host(`jaeger.${BASE_DOMAIN}`)"
+      - "traefik.http.routers.jaeger.entrypoints=websecure"
+      - "traefik.http.routers.jaeger.tls=true"
+      - "traefik.http.routers.jaeger.tls.certresolver=letsencrypt"
+      - "traefik.http.services.jaeger.loadbalancer.server.port=16686"
+      - "traefik.http.routers.jaeger.middlewares=auth-forward"
+
+# ===========================================
+# Volúmenes adicionales para monitoreo
+# ===========================================
+volumes:
+  prometheus_data:
+  grafana_data:
+  redis_data:
+  qdrant_data:
+  postgres_data:
+  authentik_data:
+  traefik_data:
+  traefik_acme:
