@@ -50,3 +50,10 @@ Thumbs.db
 .env.development.local
 .env.test.local
 .env.production.local
+
+
+node_modules/
+.git
+.github
+.vscode
+*.md
