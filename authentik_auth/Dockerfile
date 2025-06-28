@@ -1,9 +1,9 @@
 # authentik_auth/Dockerfile
 
-FROM ghcr.io/goauthentik/server:2025.6
+# Usar la última versión estable de Authentik
+FROM ghcr.io/goauthentik/server:latest
 
-# Copiamos configuración si es necesario
-# (puede estar vacía inicialmente)
-COPY config/ /config/
+# Copiar configuración YAML
+COPY config/ /authentik/config/
 
-# Punto de entrada por defecto (no lo cambiamos)
+# Mantener el punto de entrada por defecto

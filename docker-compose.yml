@@ -47,66 +47,97 @@ services:
       retries: 5
 
   postgres_database:
-    networks:
-      - nooble-network
     build:
       context: ./postgres_database
       dockerfile: Dockerfile
+    container_name: postgres_database
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-nooble}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres_database/init:/docker-entrypoint-initdb.d
-    env_file:
-      - ./.env
-    restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
+    ports:
+      - "5432:5432"
+    networks:
+      - nooble-network
 
   # ===========================================
   # Servicios de Autenticación (Configuración Simplificada)
   # ===========================================
 
+  # Servicio de Authentik
   authentik:
-    image: ghcr.io/goauthentik/server:2024.4.1  # Usamos la imagen directamente
+    build: 
+      context: ./authentik_auth
+      dockerfile: Dockerfile
     container_name: authentik
     networks:
       - nooble-network
-    ports:
-      - "9000:9000"
-    volumes:
-      - authentik_data:/data
-      - ./authentik_auth/config/configuration.yml:/authentik/config/config.yml:ro
-    environment:
-      AUTHENTIK_REDIS__HOST: redis_database
-      AUTHENTIK_POSTGRESQL__HOST: postgres_database
-      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER}
-      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD}
-      AUTHENTIK_POSTGRESQL__NAME: authentik
-      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
-      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD}
-      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL}
-      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
     depends_on:
       postgres_database:
         condition: service_healthy
       redis_database:
         condition: service_healthy
+    environment:
+      # Configuración de la base de datos PostgreSQL
+      AUTHENTIK_POSTGRESQL__HOST: postgres_database
+      AUTHENTIK_POSTGRESQL__NAME: ${AUTHENTIK_POSTGRESQL_NAME:-authentik}
+      AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_POSTGRESQL_USER:-authentik_user}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_POSTGRESQL_PASSWORD:-authentik_pass}
+      AUTHENTIK_POSTGRESQL__PORT: 5432
+      AUTHENTIK_POSTGRESQL__SSLMODE: disable
+      
+      # Configuración de Redis
+      AUTHENTIK_REDIS__HOST: redis_database
+      AUTHENTIK_REDIS__PORT: 6379
+      AUTHENTIK_REDIS__DB: 0
+      
+      # Configuración del servidor
+      AUTHENTIK_LISTEN__HTTP: 0.0.0.0:9000
+      AUTHENTIK_SERVER__EXTERNAL_SCHEME: https
+      AUTHENTIK_SERVER__EXTERNAL_HOSTNAME: ${AUTH_DOMAIN:-auth.localhost}
+      
+      # Configuración de seguridad
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY:-insecure-secret-key-change-this}
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD:-ChangeMe123!}
+      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL:-admin@example.com}
+      AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN:-}
+      
+      # Nivel de registro
+      AUTHENTIK_LOG_LEVEL: debug
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+    
+    # Volúmenes para persistencia
+    volumes:
+      - authentik_data:/data
+      # Configuración YAML montada como volumen de solo lectura
+      - ./authentik_auth/config/configuration.yml:/authentik/config/config.yml:ro
+    
+    # Configuración de red y salud
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/-/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    
     restart: unless-stopped
+    
+    # Configuración de Traefik
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.authentik.rule=Host(`${AUTH_DOMAIN}`)"
+      - "traefik.http.routers.authentik.rule=Host(`${AUTH_DOMAIN:-auth.localhost}`)"
       - "traefik.http.routers.authentik.entrypoints=websecure"
       - "traefik.http.routers.authentik.tls=true"
       - "traefik.http.routers.authentik.tls.certresolver=letsencrypt"
       - "traefik.http.services.authentik.loadbalancer.server.port=9000"
+      - "traefik.http.routers.authentik.middlewares=auth-forward@file"
 
   forwardauth:
     image: thomseddon/traefik-forward-auth:2  # Imagen ligera para autenticación

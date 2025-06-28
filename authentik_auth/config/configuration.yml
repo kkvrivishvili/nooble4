@@ -3,48 +3,66 @@
 
 # Configuración de PostgreSQL
 postgresql:
-  host: postgres_database
-  port: 5432
-  name: authentik
-  user: authentik_user
-  password: authentik_pass
+  host: ${AUTHENTIK_POSTGRESQL__HOST:-postgres_database}
+  port: ${AUTHENTIK_POSTGRESQL__PORT:-5432}
+  name: ${AUTHENTIK_POSTGRESQL__NAME:-authentik}
+  user: ${AUTHENTIK_POSTGRESQL__USER:-authentik_user}
+  password: ${AUTHENTIK_POSTGRESQL__PASSWORD:-authentik_pass}
+  sslmode: ${AUTHENTIK_POSTGRESQL_SSLMODE:-disable}
 
 # Configuración de Redis
 redis:
-  host: redis_database
-  port: 6379
-  password: ""
-  tls: false
-  tls_reqs: "none"
+  host: ${AUTHENTIK_REDIS__HOST:-redis_database}
+  port: ${AUTHENTIK_REDIS__PORT:-6379}
+  password: ${AUTHENTIK_REDIS__PASSWORD:-}
+  db: ${AUTHENTIK_REDIS__DB:-0}
+  tls: ${AUTHENTIK_REDIS__TLS:false}
+  tls_reqs: ${AUTHENTIK_REDIS__TLS_REQS:verify-full}
+
+# Configuración del servidor web
+server:
+  port: ${AUTHENTIK_PORT_HTTP:-9000}
+  port_https: ${AUTHENTIK_PORT_HTTPS:-9443}
+  listen: ${AUTHENTIK_LISTEN:-0.0.0.0}
+  domain: ${AUTHENTIK_SERVER__EXTERNAL_HOSTNAME:-localhost}
+  external_scheme: ${AUTHENTIK_SERVER__EXTERNAL_SCHEME:-https}
+  insecure: ${AUTHENTIK_INSECURE:-false}
 
 # Configuración de errores y logs
 error_reporting:
-  enabled: false
-  environment: "production"
-  send_pii: false
+  enabled: ${AUTHENTIK_ERROR_REPORTING__ENABLED:-false}
+  environment: ${AUTHENTIK_ENV:-production}
+  send_pii: ${AUTHENTIK_ERROR_REPORTING_SEND_PII:-false}
 
 # Configuración de email (ajustar según tu proveedor)
 email:
-  host: "smtp.gmail.com"
-  port: 587
-  username: "nooble-notifications@example.com"
-  password: "your-email-password"
-  use_tls: true
-  use_ssl: false
-  timeout: 10
-  from: "Nooble Auth <nooble-auth@example.com>"
+  host: ${AUTHENTIK_EMAIL__HOST:-smtp.gmail.com}
+  port: ${AUTHENTIK_EMAIL__PORT:-587}
+  username: ${AUTHENTIK_EMAIL__USER:-}
+  password: ${AUTHENTIK_EMAIL__PASSWORD:-}
+  use_tls: ${AUTHENTIK_EMAIL__USE_TLS:-true}
+  use_ssl: ${AUTHENTIK_EMAIL__USE_SSL:-false}
+  timeout: ${AUTHENTIK_EMAIL__TIMEOUT:-10}
+  from: ${AUTHENTIK_EMAIL__FROM:-authentik@localhost}
 
 # Configuración de medios y archivos estáticos
 media:
-  backend: "file"
+  backend: ${AUTHENTIK_MEDIA_BACKEND:-file}
   file:
-    path: "/media"
+    path: ${AUTHENTIK_MEDIA_FILE_PATH:-/media}
+  s3:
+    access_key_id: ${AUTHENTIK_MEDIA_S3_ACCESS_KEY_ID:-}
+    secret_access_key: ${AUTHENTIK_MEDIA_S3_SECRET_ACCESS_KEY:-}
+    bucket_name: ${AUTHENTIK_MEDIA_S3_BUCKET_NAME:-}
+    region: ${AUTHENTIK_MEDIA_S3_REGION:-us-east-1}
+    custom_domain: ${AUTHENTIK_MEDIA_S3_CUSTOM_DOMAIN:-}
+    endpoint: ${AUTHENTIK_MEDIA_S3_ENDPOINT:-}
 
 # Configuración de outposts
 outposts:
   # Docker socket para crear outposts automáticamente
-  docker_socket: "unix:///var/run/docker.sock"
-  docker_network: "nooble-network"
+  docker_socket: ${AUTHENTIK_OUTPOSTS_DOCKER_SOCKET:-unix:///var/run/docker.sock}
+  docker_network: ${AUTHENTIK_OUTPOSTS_DOCKER_NETWORK:-nooble-network}
   
   # Configuración del outpost integrado
   builtin:

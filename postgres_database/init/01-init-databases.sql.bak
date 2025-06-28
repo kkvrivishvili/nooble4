@@ -1,58 +1,25 @@
 -- Script de inicialización para PostgreSQL
 -- Este script crea las bases de datos y esquemas necesarios para todos los servicios
 
--- Crear usuarios para cada servicio (si no existen)
-DO $$
-BEGIN
-    -- Verificar y crear usuario nooble_admin si no existe
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'nooble_admin') THEN
-        CREATE USER nooble_admin WITH PASSWORD 'nooble_admin_pass' SUPERUSER;
-    END IF;
-    
-    -- Verificar y crear usuarios de servicio si no existen
-    PERFORM dblink_exec('dbname=postgres', $$
-        DO $$
-        BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'query_service') THEN
-                CREATE USER query_service WITH PASSWORD 'query_service_pass';
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'orchestrator_service') THEN
-                CREATE USER orchestrator_service WITH PASSWORD 'orchestrator_pass';
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ingestion_service') THEN
-                CREATE USER ingestion_service WITH PASSWORD 'ingestion_pass';
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'conversation_service') THEN
-                CREATE USER conversation_service WITH PASSWORD 'conversation_pass';
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'execution_service') THEN
-                CREATE USER execution_service WITH PASSWORD 'execution_pass';
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'embedding_service') THEN
-                CREATE USER embedding_service WITH PASSWORD 'embedding_pass';
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'management_service') THEN
-                CREATE USER management_service WITH PASSWORD 'management_pass';
-            END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authentik_user') THEN
-                CREATE USER authentik_user WITH PASSWORD 'authentik_pass';
-            END IF;
-        END
-        $$;
-    $$);
-END
-$$;
+-- Crear usuarios para cada servicio
+CREATE USER nooble_admin WITH PASSWORD 'nooble_admin_pass' SUPERUSER;
+CREATE USER query_service WITH PASSWORD 'query_service_pass';
+CREATE USER orchestrator_service WITH PASSWORD 'orchestrator_pass';
+CREATE USER ingestion_service WITH PASSWORD 'ingestion_pass';
+CREATE USER conversation_service WITH PASSWORD 'conversation_pass';
+CREATE USER execution_service WITH PASSWORD 'execution_pass';
+CREATE USER embedding_service WITH PASSWORD 'embedding_pass';
+CREATE USER management_service WITH PASSWORD 'management_pass';
+CREATE USER authentik_user WITH PASSWORD 'authentik_pass';
 
--- Crear base de datos para Authentik si no existe
-SELECT 'CREATE DATABASE authentik OWNER nooble_admin'
-WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'authentik')\gexec
+-- Crear base de datos para Authentik
+CREATE DATABASE authentik OWNER nooble_admin;
 
 -- Otorgar permisos al usuario de Authentik
 GRANT ALL PRIVILEGES ON DATABASE authentik TO authentik_user;
 
--- Crear base de datos principal si no existe
-SELECT 'CREATE DATABASE nooble OWNER nooble_admin'
-WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'nooble')\gexec
+-- Crear base de datos principal
+CREATE DATABASE nooble OWNER nooble_admin;
 
 -- Conectar a la base de datos nooble
 \c nooble;
