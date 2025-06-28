@@ -104,6 +104,11 @@ services:
         condition: service_healthy
       postgres_database:
         condition: service_healthy
+    environment:
+      - REDIS_HOST=redis_database
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_DB=0
     volumes:
       - ./common:/app/common:ro
     env_file:
@@ -123,6 +128,11 @@ services:
       dockerfile: ./agent_orchestrator_service/Dockerfile
     ports:
       - "8001:8001"
+    environment:
+      - REDIS_HOST=redis_database
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_DB=1
     depends_on:
       redis_database:
         condition: service_healthy
@@ -155,6 +165,11 @@ services:
       dockerfile: ./ingestion_service/Dockerfile
     ports:
       - "8002:8002"
+    environment:
+      - REDIS_HOST=redis_database
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_DB=2
     depends_on:
       redis_database:
         condition: service_healthy
@@ -190,6 +205,11 @@ services:
       dockerfile: ./conversation_service/Dockerfile
     expose:
       - "8004"
+    environment:
+      - REDIS_HOST=redis_database
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_DB=3
     depends_on:
       redis_database:
         condition: service_healthy
@@ -214,6 +234,11 @@ services:
       dockerfile: ./agent_execution_service/Dockerfile
     expose:
       - "8005"
+    environment:
+      - REDIS_HOST=redis_database
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_DB=4
     depends_on:
       redis_database:
         condition: service_healthy
@@ -238,6 +263,11 @@ services:
       dockerfile: ./embedding_service/Dockerfile
     expose:
       - "8006"
+    environment:
+      - REDIS_HOST=redis_database
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_DB=5
     depends_on:
       redis_database:
         condition: service_healthy
@@ -360,9 +390,7 @@ services:
 # Volúmenes adicionales para monitoreo
 # ===========================================
 volumes:
-  prometheus_data:
-  grafana_data:
+
   redis_data:
   qdrant_data:
   postgres_data:
-  authentik_data:
