@@ -71,24 +71,19 @@ services:
       retries: 5
 
   # ===========================================
-  # Servicios de Autenticación
+  # Servicios de Autenticación (Configuración Simplificada)
   # ===========================================
 
   authentik:
-    build:
-      context: ./authentik_auth
-      dockerfile: Dockerfile
+    image: ghcr.io/goauthentik/server:2024.4.1  # Usamos la imagen directamente
     container_name: authentik
     networks:
       - nooble-network
     ports:
       - "9000:9000"
-      - "9300:9300"  # Métricas
     volumes:
       - authentik_data:/data
-      - ./authentik_auth/config:/config
-      - ./authentik_auth/blueprints:/blueprints/custom
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ./authentik_auth/config/configuration.yml:/authentik/config/config.yml:ro
     environment:
       AUTHENTIK_REDIS__HOST: redis_database
       AUTHENTIK_POSTGRESQL__HOST: postgres_database
@@ -97,9 +92,8 @@ services:
       AUTHENTIK_POSTGRESQL__NAME: authentik
       AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
       AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD}
-      AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN}
       AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL}
-      AUTHENTIK_LOG_LEVEL: ${AUTHENTIK_LOG_LEVEL}
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
     depends_on:
       postgres_database:
         condition: service_healthy
@@ -115,30 +109,27 @@ services:
       - "traefik.http.services.authentik.loadbalancer.server.port=9000"
 
   forwardauth:
-    build:
-      context: ./forward_auth_service
-      dockerfile: Dockerfile
+    image: thomseddon/traefik-forward-auth:2  # Imagen ligera para autenticación
     container_name: forward-auth
     networks:
       - nooble-network
     environment:
-      JWT_SECRET: ${JWT_SECRET}
-      REDIS_URL: ${FORWARD_AUTH_REDIS_URL}
-      AUTHENTIK_URL: ${AUTHENTIK_URL}
-      QUOTA_LIMIT: ${QUOTA_LIMIT}
-      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW}
-      CACHE_TTL: ${CACHE_TTL}
+      CLIENT_ID: ${AUTHENTIK_CLIENT_ID}
+      CLIENT_SECRET: ${AUTHENTIK_CLIENT_SECRET}
+      SECRET: ${JWT_SECRET}
+      AUTH_HOST: ${AUTH_DOMAIN}
+      COOKIE_DOMAIN: ${AUTH_DOMAIN}
+      PROVIDERS_URI: https://${AUTH_DOMAIN}/application/o/authorize/
+      PROVIDERS_URI_API: https://${AUTH_DOMAIN}/application/o/token/
+      PROVIDERS_URI_LOGOUT: https://${AUTH_DOMAIN}/application/o/revoke_token/
+      PROVIDERS_PROVIDER: oidc
+      LOG_LEVEL: info
+      LOG_FORMAT: text
     expose:
-      - "8080"
+      - "4181"
     depends_on:
-      - redis_database
       - authentik
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   # ===========================================
   # API Gateway

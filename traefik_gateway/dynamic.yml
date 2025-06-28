@@ -1,15 +1,14 @@
 http:
   # Middlewares
   middlewares:
-    # Forward Authentication Middleware
+    # Forward Authentication Middleware (simplificado)
     auth-forward:
       forwardAuth:
-        address: "http://forwardauth:8080/auth"
+        address: "http://forwardauth:4181"  # Puerto actualizado para thomseddon/traefik-forward-auth
         trustForwardHeader: true
         authResponseHeaders:
-          - "X-User-ID"
-          - "X-Tenant-ID"
           - "X-Forwarded-User"
+          - "X-Forwarded-Email"
     
     # Rate Limiting
     rate-limit:
