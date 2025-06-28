@@ -7,8 +7,8 @@ websockets==12.0
 python-dotenv==1.0.1
 httpx==0.28.1
 python-multipart==0.0.20
+pydantic-settings==2.7.1
 
-# NUEVO: Dependencias para el sistema de colas
 
 # Testing
 pytest==8.3.5
