@@ -12,6 +12,50 @@ services:
   # Bases de Datos
   # ===========================================
   
+  postgres_database:
+    build:
+      context: ./postgres_database
+      dockerfile: Dockerfile
+    container_name: postgres_database
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-nooble_db}
+      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_INITDB_ARGS: "--data-checksums --encoding=UTF8"
+      POSTGRES_INITDB_WALDIR: /var/lib/postgresql/data/pg_wal
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres_database/init:/docker-entrypoint-initdb.d
+    networks:
+      - nooble-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-nooble_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@nooble.ai}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - nooble-network
+    restart: unless-stopped
+    depends_on:
+      - postgres_database
+  
   redis_database:
     image: redis:7-alpine
     container_name: redis_database
@@ -84,35 +128,7 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  postgres_database:
-    build:
-      context: ./postgres_database
-      dockerfile: Dockerfile
-    container_name: postgres_database
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-nooble}
-      # Custom data directory to avoid conflicts
-      PGDATA: /var/lib/postgresql/data/pgdata
-      # Add these environment variables for the initialization script
-      POSTGRES_INITDB_ARGS: "--data-checksums --encoding=UTF8"
-      POSTGRES_INITDB_WALDIR: /var/lib/postgresql/data/pg_wal
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./postgres_database/init:/docker-entrypoint-initdb.d
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${AUTHENTIK_POSTGRESQL_NAME:-authentik}"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 60s
-    ports:
-      - "5432:5432"
-    networks:
-      - nooble-network
-    # Add restart policy
-    restart: unless-stopped
+  
 
   # ===========================================
   # Servicios de Autenticación
@@ -494,11 +510,20 @@ services:
 # Volúmenes persistentes
 # ===========================================
 volumes:
-  # Redis
   redis_data:
-    name: nooble_redis_data
-  
-  # Qdrant
+  qdrant_data:
+  authentik_redis:
+  authentik_data:
+  authentik_certs:
+  authentik_media:
+  authentik_custom_templates:
+  grafana_data:
+  prometheus_data:
+  loki_data:
+  tempo_data:
+  postgres_data:
+    name: nooble_postgres_data
+  pgadmin_data:
   qdrant_storage:
     name: nooble_qdrant_storage
     driver: local
@@ -506,7 +531,6 @@ volumes:
       type: none
       o: bind
       device: ${PWD}/qdrant_database/storage
-  
   qdrant_snapshots:
     name: nooble_qdrant_snapshots
     driver: local
@@ -514,7 +538,3 @@ volumes:
       type: none
       o: bind
       device: ${PWD}/qdrant_database/snapshots
-  
-  # PostgreSQL
-  postgres_data:
-    name: nooble_postgres_data
