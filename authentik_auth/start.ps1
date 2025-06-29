@@ -12,5 +12,14 @@ if (-not $env:AUTHENTIK_SECRET_KEY) {
     ) -replace '=', ''
 }
 
-# Start Authentik server
-/authentik/entrypoint.sh server
+# Get command (server/worker)
+$command = $args[0]
+
+if ($command -eq "server") {
+    /authentik/entrypoint.sh server
+} elseif ($command -eq "worker") {
+    /authentik/entrypoint.sh worker
+} else {
+    Write-Error "Unknown command: $command"
+    exit 1
+}
