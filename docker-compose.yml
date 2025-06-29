@@ -223,9 +223,6 @@ services:
       - ./authentik_auth/policies:/etc/authentik/policies
 
   # ===========================================
-  # Servicios de la Aplicación
-
-  # ===========================================
   # Microservicios de la Aplicación
   # ===========================================
 
