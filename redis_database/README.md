@@ -1,1 +1,0 @@
-En esta carpeta deberia ir la imagen de docker con redis. y los archivos de configuracion
