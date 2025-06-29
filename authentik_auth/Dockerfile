@@ -2,7 +2,8 @@
 FROM ghcr.io/goauthentik/server:2025.6.0
 
 # Copy startup script
-COPY start.ps1 /start.ps1
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
 
 # Switch to root to create directories with proper permissions
 USER root
@@ -32,5 +33,5 @@ USER 1000
 # Expose ports
 EXPOSE 9000 9443 5558
 
-# Set entrypoint to PowerShell
-ENTRYPOINT ["pwsh", "-Command", "/start.ps1"]
+# Set entrypoint to bash
+ENTRYPOINT ["/bin/bash", "/start.sh"]
