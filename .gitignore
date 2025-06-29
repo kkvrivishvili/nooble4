@@ -141,6 +141,11 @@ coverage/
 *.temp
 .history/
 
+# Qdrant
+qdrant_database/storage/**
+qdrant_database/snapshots/**
+qdrant_database/config/local.yaml
+
 # Informational - Custom
 .projectoverview
 .profilessprint
@@ -149,4 +154,3 @@ coverage/
 .prompts
 .magiclinksprint
 sprints/
-

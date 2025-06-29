@@ -1,32 +1,30 @@
-# Qdrant Configuration
+# Qdrant Configuration - Base Configuration (Versioned)
 # Environment variables take precedence over these values
 
 # Server configuration
 service:
   host: 0.0.0.0
-  # Using direct values since Qdrant doesn't support env var interpolation in YAML for numbers
   http_port: 6333
   grpc_port: 6334
   max_request_size_mb: 32
-  enable_cors: true
+  enable_metrics: true
+  metrics_address: "0.0.0.0:9090"
+  enable_cors: false  # Override in local.yaml if needed
 
-# Logging configuration
+# Logging configuration - can be overridden in local.yaml
 log_level: INFO
 
 # Storage configuration
 storage:
-  # Storage path is set via environment variable
-  storage_path: ${QDRANT_STORAGE_PATH:-/qdrant/storage}
-  snapshots_path: ${QDRANT_STORAGE_PATH:-/qdrant/storage}/snapshots
-  
-  # Store payload on disk to save RAM (slower but uses less memory)
-  on_disk_payload: true
+  storage_path: /qdrant/storage
+  snapshots_path: /qdrant/snapshots
+  on_disk_payload: true  # Saves RAM by storing payload on disk
   
   # WAL configuration
   wal:
     wal_capacity_mb: 32
     wal_segments_ahead: 0
-    recover_virtual_consistency: ${QDRANT_ALLOW_RECOVERY:-true}
+    recover_virtual_consistency: true
 
 # Performance tuning
 performance:
@@ -41,45 +39,32 @@ optimizers:
   default_segment_number: 2
   flush_interval_sec: 5
   max_optimization_threads: 2
+  memmap_threshold_kb: 1024
+  indexing_threshold_kb: 20000
   
-  # HNSW index configuration
-  hnsw_index:
-    m: 16
-    ef_construct: 100
-    full_scan_threshold_kb: 10000
-    max_indexing_threads: 0
+  # HNSW index configuration (for vector search)
+  hnsw_config:
+    m: 16                # Number of connections per node (16-64)
+    ef_construct: 100    # Size of the dynamic list (100-400)
+    full_scan_threshold: 10000  # Threshold for sequential scan
+    max_indexing_threads: 0  # 0 = auto
     on_disk: false
 
 # Default collection configuration
 collection:
   vectors:
-    # Whether vectors should be stored on disk (saves RAM but slower)
-    on_disk: null
+    size: 1536  # Default for OpenAI embeddings
+    distance: Cosine
+    on_disk: false  # Store vectors in memory for better performance
   
-  # Default quantization configuration
-  quantization:
-    # Options: "scalar", "product", or null to disable
-    quantization: null
-  # Habilitar HTTPS. Requiere configuración de TLS.
-  # enable_tls: false
-  # Clave de API para acceso. Si se establece, todas las peticiones deben incluirla.
-  # Se recomienda usar junto con TLS.
-  # api_key: "your-secret-api-key"
+  # Shard configuration (for distributed mode)
+  shard_number: 1
+  replication_factor: 1
+  write_consistency_factor: 1
 
-# Configuración de clúster. Habilitar para modo distribuido.
+# Cluster configuration (disabled in single-node setup)
 cluster:
   enabled: false
-  # p2p:
-  #   port: 6335
-  #   enable_tls: false
-  # consensus:
-  #   tick_period_ms: 100
 
-# Deshabilitar telemetría anónima.
+# Telemetry (anonymous usage statistics)
 telemetry_disabled: false
-
-# Configuración de TLS. Requerida si service.enable_tls o cluster.p2p.enable_tls es true.
-# tls:
-#   cert: ./tls/cert.pem
-#   key: ./tls/key.pem
-#   ca_cert: ./tls/cacert.pem

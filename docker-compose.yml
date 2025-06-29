@@ -33,29 +33,56 @@ services:
     restart: unless-stopped
 
   qdrant_database:
+    container_name: qdrant_database
+    image: qdrant/qdrant:v1.7.4
     networks:
       - nooble-network
-    image: qdrant/qdrant:v1.7.4
+    
+    # Ports mapping
     ports:
-      - "${QDRANT_HTTP_PORT:-6333}:6333"
-      - "${QDRANT_GRPC_PORT:-6334}:6334"
+      - "${QDRANT_HTTP_PORT:-6333}:6333"  # HTTP API
+      - "${QDRANT_GRPC_PORT:-6334}:6334"  # gRPC API
+      - "9090:9090"  # Metrics endpoint
+    
+    # Environment configuration
     env_file:
-      - ./qdrant_database/.env
-    environment:
-      - QDRANT_HOST=${QDRANT_HOST:-0.0.0.0}
-      - QDRANT_HTTP_PORT=${QDRANT_HTTP_PORT:-6333}
-      - QDRANT_GRPC_PORT=${QDRANT_GRPC_PORT:-6334}
-      - QDRANT_STORAGE_PATH=/qdrant/storage
+      - ./.env  # Main environment file
+      - ./qdrant_database/.env  # Qdrant-specific overrides
+    
+    # Volume mounts
     volumes:
-      - qdrant_data:/qdrant/storage
-      - ./qdrant_database/config:/qdrant/config
-    restart: unless-stopped
+      - qdrant_storage:/qdrant/storage  # Persistent storage
+      - qdrant_snapshots:/qdrant/snapshots  # Snapshots
+      - ./qdrant_database/config:/qdrant/config:ro  # Config files (read-only)
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+    
+    # Health check configuration
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6333/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6333/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Security
+    security_opt:
+      - no-new-privileges:true
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   postgres_database:
     build:
@@ -464,10 +491,30 @@ services:
       - "traefik.http.routers.jaeger.middlewares=auth-forward"
 
 # ===========================================
-# Volúmenes adicionales para monitoreo
+# Volúmenes persistentes
 # ===========================================
 volumes:
-
+  # Redis
   redis_data:
-  qdrant_data:
+    name: nooble_redis_data
+  
+  # Qdrant
+  qdrant_storage:
+    name: nooble_qdrant_storage
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/qdrant_database/storage
+  
+  qdrant_snapshots:
+    name: nooble_qdrant_snapshots
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/qdrant_database/snapshots
+  
+  # PostgreSQL
   postgres_data:
+    name: nooble_postgres_data
