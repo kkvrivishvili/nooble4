@@ -1,70 +1,65 @@
-# Nivel de logs. Opciones: TRACE, DEBUG, INFO, WARN, ERROR. Por defecto es INFO.
+# Qdrant Configuration
+# Environment variables take precedence over these values
+
+# Server configuration
+service:
+  host: 0.0.0.0
+  # Using direct values since Qdrant doesn't support env var interpolation in YAML for numbers
+  http_port: 6333
+  grpc_port: 6334
+  max_request_size_mb: 32
+  enable_cors: true
+
+# Logging configuration
 log_level: INFO
 
+# Storage configuration
 storage:
-  # Directorio donde se almacenarán todos los datos.
-  storage_path: ./storage
-  # Directorio donde se almacenarán los snapshots.
-  snapshots_path: ./snapshots
-  # Si es true, los payloads de los puntos no se almacenarán en memoria.
-  # Se leerán del disco cada vez que se soliciten. Ahorra RAM a costa de un poco de latencia.
+  # Storage path is set via environment variable
+  storage_path: ${QDRANT_STORAGE_PATH:-/qdrant/storage}
+  snapshots_path: ${QDRANT_STORAGE_PATH:-/qdrant/storage}/snapshots
+  
+  # Store payload on disk to save RAM (slower but uses less memory)
   on_disk_payload: true
-  # Configuración para el Write-Ahead-Log (WAL).
+  
+  # WAL configuration
   wal:
-    # Capacidad de un solo segmento del WAL en MB.
     wal_capacity_mb: 32
-    # Número de segmentos de WAL a crear por adelantado.
     wal_segments_ahead: 0
+    recover_virtual_consistency: ${QDRANT_ALLOW_RECOVERY:-true}
 
+# Performance tuning
 performance:
-  # Número de hilos paralelos para operaciones de búsqueda. 0 para selección automática.
+  # Auto-detect number of threads (0 = auto)
   max_search_threads: 0
-  # Número máximo de hilos para optimizaciones en todas las colecciones.
-  max_optimization_threads: 0
+  max_optimization_threads: 2
 
+# Optimizer configuration
 optimizers:
-  # Fracción mínima de vectores eliminados en un segmento para realizar una optimización.
   deleted_threshold: 0.2
-  # Número mínimo de vectores en un segmento para realizar una optimización de vacío.
   vacuum_min_vector_number: 1000
-  # Número objetivo de segmentos que el optimizador intentará mantener.
-  # 0 para selección automática basada en el número de CPUs.
-  default_segment_number: 0
-  # Intervalo entre flushes forzados en segundos.
+  default_segment_number: 2
   flush_interval_sec: 5
-
-  # Parámetros por defecto para el índice HNSW. Pueden ser sobreescritos por colección.
+  max_optimization_threads: 2
+  
+  # HNSW index configuration
   hnsw_index:
-    # Número de enlaces por nodo en el grafo del índice. Mayor valor = más precisión, más espacio.
     m: 16
-    # Número de vecinos a considerar durante la construcción del índice. Mayor valor = más precisión, más tiempo de construcción.
     ef_construct: 100
-    # Umbral (en KB) para la indexación basada en payload. Por debajo de este valor, se usará escaneo completo.
     full_scan_threshold_kb: 10000
-    # Número de hilos para la construcción de índices en segundo plano. 0 para selección automática.
     max_indexing_threads: 0
-    # Almacenar el índice HNSW en disco. Si es false, se almacena en RAM.
     on_disk: false
 
+# Default collection configuration
 collection:
-  # Parámetros por defecto para las colecciones.
   vectors:
-    # Si los vectores deben ser almacenados en memoria o en disco.
+    # Whether vectors should be stored on disk (saves RAM but slower)
     on_disk: null
-  # Configuración de cuantización por defecto.
+  
+  # Default quantization configuration
   quantization:
-    # Opciones: "scalar", "product". Si es null, la cuantización está deshabilitada.
+    # Options: "scalar", "product", or null to disable
     quantization: null
-
-service:
-  # Host para el servicio.
-  host: 0.0.0.0
-  # Puerto HTTP.
-  http_port: 6333
-  # Puerto gRPC. Si es null, gRPC está deshabilitado.
-  grpc_port: 6334
-  # Habilitar cabeceras CORS en la API REST.
-  enable_cors: true
   # Habilitar HTTPS. Requiere configuración de TLS.
   # enable_tls: false
   # Clave de API para acceso. Si se establece, todas las peticiones deben incluirla.
