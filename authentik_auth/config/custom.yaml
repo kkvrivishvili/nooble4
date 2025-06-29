@@ -1,0 +1,31 @@
+# authentik_auth/config/custom.yaml
+# Custom configuration for Authentik
+
+# Logging configuration
+log_level: info
+
+# Email configuration (disabled by default)
+email:
+  enabled: false
+  host: localhost
+  port: 25
+  from: ${AUTHENTIK_BOOTSTRAP_EMAIL}
+  use_tls: false
+  use_ssl: false
+  timeout: 10
+  verify_certs: true
+
+# Web configuration
+web:
+  host: 0.0.0.0
+  port: 9000
+  port_https: 9443
+  insecure: false
+  disable_https: false
+  disable_https_redirect: false
+  disable_secure_proxy_ssl_header: false
+  disable_security_headers: false
+  disable_csrf: false
+  disable_impersonation: false
+  disable_update_check: true
+  disable_startup_analytics: true

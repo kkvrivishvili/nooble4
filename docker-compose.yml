@@ -44,10 +44,11 @@ services:
       - ./qdrant_database/config/config.yaml:/qdrant/config/config.yaml
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6333/health"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
 
   postgres_database:
     build:
@@ -84,9 +85,10 @@ services:
   # ===========================================
 
   authentik_server:
-    image: ghcr.io/goauthentik/server:2025.6.0
+    build:
+      context: ./authentik_auth
+      dockerfile: Dockerfile
     container_name: authentik_server
-    command: server
     restart: unless-stopped
     networks:
       - nooble-network
@@ -95,52 +97,21 @@ services:
         condition: service_healthy
       redis_database:
         condition: service_healthy
+    env_file:
+      - ./authentik_auth/.env
     environment:
-      # PostgreSQL Configuration
-      AUTHENTIK_POSTGRESQL__HOST: postgres_database
-      AUTHENTIK_POSTGRESQL__NAME: authentik
-      AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_POSTGRESQL_USER}
-      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_POSTGRESQL_PASSWORD}
-      AUTHENTIK_POSTGRESQL__SSLMODE: disable
-      
-      # Redis Configuration
-      AUTHENTIK_REDIS__HOST: redis_database
-      AUTHENTIK_REDIS__PORT: 6379
-      AUTHENTIK_REDIS__PASSWORD: ${REDIS_PASSWORD}
-      AUTHENTIK_REDIS__DB: 0
-      
-      # Server Configuration
-      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
-      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
-      AUTHENTIK_EMAIL__HOST: localhost
-      AUTHENTIK_EMAIL__PORT: 25
-      AUTHENTIK_EMAIL__USERNAME:
-      AUTHENTIK_EMAIL__PASSWORD:
-      AUTHENTIK_EMAIL__USE_TLS: "false"
-      AUTHENTIK_EMAIL__USE_SSL: "false"
-      AUTHENTIK_EMAIL__FROM: ${AUTHENTIK_BOOTSTRAP_EMAIL}
-      AUTHENTIK_EMAIL__TIMEOUT: 10
-      AUTHENTIK_EMAIL__SSL_KEY:
-      AUTHENTIK_EMAIL__SSL_CERT:
-      AUTHENTIK_EMAIL__VERIFY_CERTS: true
-      
-      # Web Configuration
-      AUTHENTIK_SERVER__EXTERNAL_SCHEME: ${AUTHENTIK_SERVER_EXTERNAL_SCHEME}
-      AUTHENTIK_SERVER__EXTERNAL_HOSTNAME: ${AUTHENTIK_SERVER_EXTERNAL_HOSTNAME}
-      AUTHENTIK_LISTEN__HTTP: 0.0.0.0:9000
-      AUTHENTIK_PORT_HTTP: 9000
-      AUTHENTIK_PORT_HTTPS: 9443
-      
-      # Admin User
-      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL}
-      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD}
-      AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN:-}
-      
-      # Logging
-      AUTHENTIK_LOG_LEVEL: ${AUTHENTIK_LOG_LEVEL:-info}
-      AUTHENTIK_DISABLE_STARTUP_ANALYTICS: true
-      AUTHENTIK_ERROR_REPORTING_ENABLED: false
-      
+      - AUTHENTIK_BOOTSTRAP_EMAIL=${AUTHENTIK_BOOTSTRAP_EMAIL}
+      - AUTHENTIK_BOOTSTRAP_PASSWORD=${AUTHENTIK_BOOTSTRAP_PASSWORD}
+      - AUTHENTIK_BOOTSTRAP_TOKEN=${AUTHENTIK_BOOTSTRAP_TOKEN:-}
+      - AUTHENTIK_SECRET_KEY=${AUTHENTIK_SECRET_KEY}
+      - AUTHENTIK_POSTGRESQL__HOST=postgres_database
+      - AUTHENTIK_POSTGRESQL__NAME=authentik
+      - AUTHENTIK_POSTGRESQL__USER=${AUTHENTIK_POSTGRESQL_USER}
+      - AUTHENTIK_POSTGRESQL__PASSWORD=${AUTHENTIK_POSTGRESQL_PASSWORD}
+      - AUTHENTIK_REDIS__HOST=redis_database
+      - AUTHENTIK_REDIS__PASSWORD=${REDIS_PASSWORD}
+      - AUTHENTIK_SERVER__EXTERNAL_SCHEME=${AUTHENTIK_SERVER_EXTERNAL_SCHEME}
+      - AUTHENTIK_SERVER__EXTERNAL_HOSTNAME=${AUTHENTIK_SERVER_EXTERNAL_HOSTNAME}
     ports:
       - "9000:9000"
       - "9443:9443"
@@ -158,7 +129,9 @@ services:
       start_period: 60s
 
   authentik_worker:
-    image: ghcr.io/goauthentik/server:2025.6.0
+    build:
+      context: ./authentik_auth
+      dockerfile: Dockerfile
     container_name: authentik_worker
     command: worker
     restart: unless-stopped
@@ -169,52 +142,21 @@ services:
         condition: service_healthy
       redis_database:
         condition: service_healthy
+    env_file:
+      - ./authentik_auth/.env
     environment:
-      # PostgreSQL Configuration
-      AUTHENTIK_POSTGRESQL__HOST: postgres_database
-      AUTHENTIK_POSTGRESQL__NAME: authentik
-      AUTHENTIK_POSTGRESQL__USER: ${AUTHENTIK_POSTGRESQL_USER}
-      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_POSTGRESQL_PASSWORD}
-      AUTHENTIK_POSTGRESQL__SSLMODE: disable
-      
-      # Redis Configuration
-      AUTHENTIK_REDIS__HOST: redis_database
-      AUTHENTIK_REDIS__PORT: 6379
-      AUTHENTIK_REDIS__PASSWORD: ${REDIS_PASSWORD}
-      AUTHENTIK_REDIS__DB: 0
-      
-      # Server Configuration
-      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
-      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
-      AUTHENTIK_EMAIL__HOST: localhost
-      AUTHENTIK_EMAIL__PORT: 25
-      AUTHENTIK_EMAIL__USERNAME:
-      AUTHENTIK_EMAIL__PASSWORD:
-      AUTHENTIK_EMAIL__USE_TLS: "false"
-      AUTHENTIK_EMAIL__USE_SSL: "false"
-      AUTHENTIK_EMAIL__FROM: ${AUTHENTIK_BOOTSTRAP_EMAIL}
-      AUTHENTIK_EMAIL__TIMEOUT: 10
-      AUTHENTIK_EMAIL__SSL_KEY:
-      AUTHENTIK_EMAIL__SSL_CERT:
-      AUTHENTIK_EMAIL__VERIFY_CERTS: true
-      
-      # Web Configuration
-      AUTHENTIK_SERVER__EXTERNAL_SCHEME: ${AUTHENTIK_SERVER_EXTERNAL_SCHEME}
-      AUTHENTIK_SERVER__EXTERNAL_HOSTNAME: ${AUTHENTIK_SERVER_EXTERNAL_HOSTNAME}
-      AUTHENTIK_LISTEN__HTTP: 0.0.0.0:9000
-      AUTHENTIK_PORT_HTTP: 9000
-      AUTHENTIK_PORT_HTTPS: 9443
-      
-      # Admin User
-      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL}
-      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD}
-      AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN:-}
-      
-      # Logging
-      AUTHENTIK_LOG_LEVEL: ${AUTHENTIK_LOG_LEVEL:-info}
-      AUTHENTIK_DISABLE_STARTUP_ANALYTICS: true
-      AUTHENTIK_ERROR_REPORTING_ENABLED: false
-      
+      - AUTHENTIK_BOOTSTRAP_EMAIL=${AUTHENTIK_BOOTSTRAP_EMAIL}
+      - AUTHENTIK_BOOTSTRAP_PASSWORD=${AUTHENTIK_BOOTSTRAP_PASSWORD}
+      - AUTHENTIK_BOOTSTRAP_TOKEN=${AUTHENTIK_BOOTSTRAP_TOKEN:-}
+      - AUTHENTIK_SECRET_KEY=${AUTHENTIK_SECRET_KEY}
+      - AUTHENTIK_POSTGRESQL__HOST=postgres_database
+      - AUTHENTIK_POSTGRESQL__NAME=authentik
+      - AUTHENTIK_POSTGRESQL__USER=${AUTHENTIK_POSTGRESQL_USER}
+      - AUTHENTIK_POSTGRESQL__PASSWORD=${AUTHENTIK_POSTGRESQL_PASSWORD}
+      - AUTHENTIK_REDIS__HOST=redis_database
+      - AUTHENTIK_REDIS__PASSWORD=${REDIS_PASSWORD}
+      - AUTHENTIK_SERVER__EXTERNAL_SCHEME=${AUTHENTIK_SERVER_EXTERNAL_SCHEME}
+      - AUTHENTIK_SERVER__EXTERNAL_HOSTNAME=${AUTHENTIK_SERVER_EXTERNAL_HOSTNAME}
     volumes:
       - ./authentik_auth/media:/media
       - ./authentik_auth/certs:/certs
