@@ -1,6 +1,9 @@
 # Use the official Authentik image (latest stable as of June 2025)
 FROM ghcr.io/goauthentik/server:2025.6.0
 
+# Copy startup script
+COPY start.ps1 /start.ps1
+
 # Switch to root to create directories with proper permissions
 USER root
 
@@ -29,6 +32,5 @@ USER 1000
 # Expose ports
 EXPOSE 9000 9443 5558
 
-# Use the entrypoint from the base image
-ENTRYPOINT ["/authentik/entrypoint.sh"]
-CMD ["server"]
+# Set entrypoint to PowerShell
+ENTRYPOINT ["pwsh", "-Command", "/start.ps1"]
